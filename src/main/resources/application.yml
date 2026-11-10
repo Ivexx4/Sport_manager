@@ -1,0 +1,26 @@
+spring:
+  application:
+    name: clube-volei
+
+  # A aplicação liga-se com um papel SEM privilégios de dono nem BYPASSRLS.
+  datasource:
+    url: jdbc:postgresql://localhost:5432/clube
+    username: clube_app
+    password: clube_app
+
+  # As migrações correm com o papel dono (distinto do da aplicação).
+  flyway:
+    url: jdbc:postgresql://localhost:5432/clube
+    user: clube_owner
+    password: clube_owner
+
+  jpa:
+    open-in-view: false
+    hibernate:
+      ddl-auto: validate
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info
