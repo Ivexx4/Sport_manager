@@ -24,3 +24,12 @@ management:
     web:
       exposure:
         include: health,info
+
+# JWT HS256 para esta etapa. O valor por omissão é APENAS para desenvolvimento local.
+# Em qualquer ambiente partilhado/produção, definir JWT_SECRET_BASE64 com um segredo
+# aleatório de pelo menos 32 bytes, codificado em Base64.
+app:
+  security:
+    jwt:
+      issuer: ${JWT_ISSUER:clube-volei-local}
+      secret-base64: ${JWT_SECRET_BASE64:Y2x1YmUtdm9sZWktZGV2ZWxvcG1lbnQtc2VjcmV0LTIwMjY=}

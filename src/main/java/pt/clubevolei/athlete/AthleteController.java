@@ -14,7 +14,7 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.ResponseStatus;
 import org.springframework.web.bind.annotation.RestController;
 
-/** API mínima só para provar o isolamento ponta a ponta. A fase 1 substitui isto por um módulo completo. */
+/** API mínima só para provar o isolamento ponta a ponta. A fase 1.sh substitui isto por um módulo completo. */
 @RestController
 @RequestMapping("/api/athletes")
 public class AthleteController {

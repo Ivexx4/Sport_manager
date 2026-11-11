@@ -6,18 +6,15 @@ import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import java.io.IOException;
 import java.util.UUID;
-import org.springframework.stereotype.Component;
+import org.springframework.security.oauth2.server.resource.authentication.JwtAuthenticationToken;
+import org.springframework.security.core.Authentication;
+import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.web.filter.OncePerRequestFilter;
 
-/**
- * ATENÇÃO: versão provisória da fase 0. O tenant vem do cabeçalho X-Tenant-Id, o que NÃO é seguro
- * em produção (qualquer cliente escolhia o seu clube). Será substituído por: tenant do subdomínio
- * validado contra o claim tenant_id do JWT, assim que a autenticação existir.
- */
-@Component
+/** Resolve o tenant exclusivamente a partir do JWT já validado pelo Spring Security. */
 public class TenantFilter extends OncePerRequestFilter {
 
-    public static final String HEADER = "X-Tenant-Id";
+    public static final String TENANT_CLAIM = "tenant_id";
 
     @Override
     protected boolean shouldNotFilter(HttpServletRequest request) {
@@ -27,14 +24,24 @@ public class TenantFilter extends OncePerRequestFilter {
     @Override
     protected void doFilterInternal(HttpServletRequest request, HttpServletResponse response, FilterChain chain)
             throws ServletException, IOException {
-        String raw = request.getHeader(HEADER);
-        UUID tenantId;
-        try {
-            tenantId = UUID.fromString(raw);
-        } catch (IllegalArgumentException | NullPointerException e) {
-            response.sendError(HttpServletResponse.SC_BAD_REQUEST, "Tenant em falta ou inválido");
+        Authentication authentication = SecurityContextHolder.getContext().getAuthentication();
+        if (!(authentication instanceof JwtAuthenticationToken jwtAuthentication)) {
+            response.sendError(HttpServletResponse.SC_FORBIDDEN, "Token sem identidade de clube válida");
             return;
         }
+
+        String rawTenantId = jwtAuthentication.getToken().getClaimAsString(TENANT_CLAIM);
+        final UUID tenantId;
+        try {
+            if (rawTenantId == null || rawTenantId.isBlank()) {
+                throw new IllegalArgumentException("Claim tenant_id em falta");
+            }
+            tenantId = UUID.fromString(rawTenantId);
+        } catch (IllegalArgumentException ex) {
+            response.sendError(HttpServletResponse.SC_FORBIDDEN, "Claim tenant_id em falta ou inválido");
+            return;
+        }
+
         TenantContext.set(tenantId);
         try {
             chain.doFilter(request, response);
