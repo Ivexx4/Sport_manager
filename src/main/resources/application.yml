@@ -30,6 +30,11 @@ management:
 # aleatório de pelo menos 32 bytes, codificado em Base64.
 app:
   security:
+    # Em staging/producao, definir OIDC_ISSUER_URI (descoberta OIDC + JWKS publico).
+    # Sem OIDC configurado, usa-se HS256 local (apenas desenvolvimento/testes).
+    oidc:
+      issuer-uri: ${OIDC_ISSUER_URI:}
+      jwk-set-uri: ${OIDC_JWK_SET_URI:}
     jwt:
       issuer: ${JWT_ISSUER:clube-volei-local}
       secret-base64: ${JWT_SECRET_BASE64:Y2x1YmUtdm9sZWktZGV2ZWxvcG1lbnQtc2VjcmV0LTIwMjY=}

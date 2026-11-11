@@ -18,7 +18,11 @@ public class TenantFilter extends OncePerRequestFilter {
 
     @Override
     protected boolean shouldNotFilter(HttpServletRequest request) {
-        return !request.getRequestURI().startsWith("/api/");
+        String path = request.getRequestURI();
+
+        // Não aplica a verificação de tenant a pedidos fora de /api/
+        // ou a rotas públicas de autenticação (/api/v1/auth/**)
+        return !path.startsWith("/api/") || path.startsWith("/api/v1/auth/");
     }
 
     @Override

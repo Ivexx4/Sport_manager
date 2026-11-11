@@ -8,6 +8,7 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.mock.web.MockHttpServletRequest;
 import org.springframework.mock.web.MockHttpServletResponse;
+import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.security.oauth2.jwt.Jwt;
 import org.springframework.security.oauth2.server.resource.authentication.JwtAuthenticationToken;
@@ -56,6 +57,37 @@ class TenantFilterEdgeCasesTest {
     @DisplayName("Deve responder 403 e não continuar a cadeia se o tenant_id não for um UUID válido")
     void shouldRejectInvalidTenantIdClaim() throws Exception {
         authenticate(jwtWithTenantId("nao-e-um-uuid"));
+
+        MockHttpServletRequest request = new MockHttpServletRequest("GET", "/api/athletes");
+        MockHttpServletResponse response = new MockHttpServletResponse();
+
+        filter.doFilter(request, response, filterChain);
+
+        assertThat(response.getStatus()).isEqualTo(403);
+        verify(filterChain, never()).doFilter(any(), any());
+        assertThat(TenantContext.current()).isEmpty();
+    }
+
+    @Test
+    @DisplayName("Deve responder 403 se a autenticação não for um token JWT")
+    void shouldRejectNonJwtAuthentication() throws Exception {
+        SecurityContextHolder.getContext().setAuthentication(
+                new UsernamePasswordAuthenticationToken("user", "password", Collections.emptyList()));
+
+        MockHttpServletRequest request = new MockHttpServletRequest("GET", "/api/athletes");
+        MockHttpServletResponse response = new MockHttpServletResponse();
+
+        filter.doFilter(request, response, filterChain);
+
+        assertThat(response.getStatus()).isEqualTo(403);
+        verify(filterChain, never()).doFilter(any(), any());
+        assertThat(TenantContext.current()).isEmpty();
+    }
+
+    @Test
+    @DisplayName("Deve responder 403 se o tenant_id for uma string em branco")
+    void shouldRejectBlankTenantIdClaim() throws Exception {
+        authenticate(jwtWithTenantId("   "));
 
         MockHttpServletRequest request = new MockHttpServletRequest("GET", "/api/athletes");
         MockHttpServletResponse response = new MockHttpServletResponse();
