@@ -1,0 +1,25 @@
+# Perfil de desenvolvimento (SPRING_PROFILES_ACTIVE=dev). NUNCA usar este segredo fora da máquina local.
+logging:
+  level:
+    pt.voleibol.gestao.notifications: DEBUG
+
+spring:
+  mail:
+    # SMTP local via Mailpit (docker compose). Interface web: http://localhost:8025
+    host: ${MAIL_HOST:localhost}
+    port: ${MAIL_PORT:1025}
+    properties:
+      mail:
+        smtp:
+          auth: false
+          starttls:
+            enable: false
+
+app:
+  security:
+    jwt:
+      secret: ZGV2LW9ubHktc2VjcmV0LWRvLW5vdC11c2UtaW4tcHJvZHVjdGlvbi0wMTIzNDU2Nzg5
+  mail:
+    from: ${APP_MAIL_FROM:no-reply@gestao-clubes.local}
+  platform:
+    bootstrap-key: dev-bootstrap-key

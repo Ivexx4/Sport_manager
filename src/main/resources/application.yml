@@ -1,40 +1,65 @@
 spring:
   application:
-    name: clube-volei
+    name: gestao-clubes-voleibol
 
-  # A aplicação liga-se com um papel SEM privilégios de dono nem BYPASSRLS.
+  # A aplicação liga-se com o papel volei_app (sujeito a RLS).
   datasource:
-    url: jdbc:postgresql://localhost:5432/clube
-    username: clube_app
-    password: clube_app
+    url: jdbc:postgresql://localhost:5432/volei
+    username: volei_app
+    password: ${DB_APP_PASSWORD:dev}
 
-  # As migrações correm com o papel dono (distinto do da aplicação).
+  # As migrações correm com um papel distinto (dono das tabelas).
   flyway:
-    url: jdbc:postgresql://localhost:5432/clube
-    user: clube_owner
-    password: clube_owner
+    url: ${spring.datasource.url}
+    user: volei_migrator
+    password: ${DB_MIGRATOR_PASSWORD:dev}
 
   jpa:
     open-in-view: false
     hibernate:
-      ddl-auto: validate
+      ddl-auto: none   # o esquema é gerido só pelo Flyway
 
-management:
-  endpoints:
-    web:
-      exposure:
-        include: health,info
-
-# JWT HS256 para esta etapa. O valor por omissão é APENAS para desenvolvimento local.
-# Em qualquer ambiente partilhado/produção, definir JWT_SECRET_BASE64 com um segredo
-# aleatório de pelo menos 32 bytes, codificado em Base64.
 app:
   security:
-    # Em staging/producao, definir OIDC_ISSUER_URI (descoberta OIDC + JWKS publico).
-    # Sem OIDC configurado, usa-se HS256 local (apenas desenvolvimento/testes).
-    oidc:
-      issuer-uri: ${OIDC_ISSUER_URI:}
-      jwk-set-uri: ${OIDC_JWK_SET_URI:}
     jwt:
-      issuer: ${JWT_ISSUER:clube-volei-local}
-      secret-base64: ${JWT_SECRET_BASE64:Y2x1YmUtdm9sZWktZGV2ZWxvcG1lbnQtc2VjcmV0LTIwMjY=}
+      secret: ${JWT_SECRET}            # obrigatório: Base64, 32 bytes ou mais (openssl rand -base64 48)
+      issuer: gestao-clubes-voleibol
+      access-token-ttl: 15m
+      refresh-token-ttl: 30d
+    login-rate-limit:
+      # Proteção contra força bruta: bloqueia um IP nesse clube após N falhas dentro da janela.
+      enabled: ${APP_LOGIN_RATE_LIMIT_ENABLED:true}
+      max-attempts: ${APP_LOGIN_RATE_LIMIT_MAX_ATTEMPTS:5}
+      window: ${APP_LOGIN_RATE_LIMIT_WINDOW:PT5M}
+      block-duration: ${APP_LOGIN_RATE_LIMIT_BLOCK_DURATION:PT15M}
+      # Só ativar atrás de um proxy de confiança que escreva X-Forwarded-For.
+      trust-forwarded-headers: ${APP_LOGIN_RATE_LIMIT_TRUST_FORWARDED_HEADERS:false}
+  links:
+    # Endereço da aplicação web de cada clube, usado nos links dos e-mails ({slug} = subdomínio do clube).
+    # A aplicação web tem de ter as rotas /accept-invitation e /reset-password, que recebem ?token=...
+    web-url-template: ${APP_WEB_URL_TEMPLATE:http://{slug}.localhost:5173}
+  mail:
+    # Outbox + tentativas: os e-mails são enfileirados e enviados de forma assíncrona.
+    # Para envio real por SMTP, definir spring.mail.host (e credenciais/from). Sem SMTP, o transporte regista em log.
+    outbox:
+      # Intervalo entre passagens do processador da outbox (ISO-8601 ou milissegundos).
+      poll-interval: ${APP_MAIL_OUTBOX_POLL_INTERVAL:PT30S}
+    from: ${APP_MAIL_FROM:no-reply@localhost}
+  maintenance:
+    cleanup:
+      # Limpeza periódica de convites, tokens de reposição, refresh tokens e registos SENT/FAILED.
+      # A função SQL só apaga o que já expirou/foi usado, em todos os clubes.
+      enabled: ${APP_MAINTENANCE_CLEANUP_ENABLED:true}
+      interval: ${APP_MAINTENANCE_CLEANUP_INTERVAL:PT6H}
+      initial-delay: ${APP_MAINTENANCE_CLEANUP_INITIAL_DELAY:PT1M}
+      invitation-retention: ${APP_MAINTENANCE_CLEANUP_INVITATION_RETENTION:P30D}
+      password-reset-retention: ${APP_MAINTENANCE_CLEANUP_PASSWORD_RESET_RETENTION:P7D}
+      refresh-token-retention: ${APP_MAINTENANCE_CLEANUP_REFRESH_TOKEN_RETENTION:P30D}
+      outbox-retention: ${APP_MAINTENANCE_CLEANUP_OUTBOX_RETENTION:P30D}
+  platform:
+    # Chave para provisionamento de clubes (POST /api/v1/platform/tenants). Se vazia, o endpoint fica desativado.
+    bootstrap-key: ${APP_PLATFORM_BOOTSTRAP_KEY:}
+  tenancy:
+    # O tenant resolve-se pelo subdomínio: clube-x.<base-domain>
+    # Em desenvolvimento, clube-x.localhost resolve para 127.0.0.1.
+    base-domain: ${APP_BASE_DOMAIN:localhost}

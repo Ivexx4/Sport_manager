@@ -1,15 +1,22 @@
 services:
-  postgres:
-    image: postgres:17
+  db:
+    image: postgres:16-alpine
     environment:
-      POSTGRES_DB: clube
-      POSTGRES_USER: clube_owner      # dono do esquema (corre as migrações)
-      POSTGRES_PASSWORD: clube_owner
+      POSTGRES_DB: volei
+      POSTGRES_USER: postgres          # superuser: só para o arranque; a aplicação nunca o usa
+      POSTGRES_PASSWORD: postgres
     ports:
       - "5432:5432"
     volumes:
-      - ./docker/initdb:/docker-entrypoint-initdb.d:ro
       - pgdata:/var/lib/postgresql/data
+      # Cria os papéis volei_migrator e volei_app na primeira inicialização
+      - ./docker/postgres-init:/docker-entrypoint-initdb.d:ro
+
+  mailpit:
+    image: axllent/mailpit
+    ports:
+      - "1025:1025" # SMTP
+      - "8025:8025" # Interface web (http://localhost:8025)
 
 volumes:
   pgdata:

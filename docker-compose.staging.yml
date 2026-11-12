@@ -1,0 +1,71 @@
+# Staging: aplicação + PostgreSQL no mesmo servidor.
+#
+# A imagem da aplicação é publicada no GHCR pelo workflow .github/workflows/ci.yml.
+# A aplicação só escuta em 127.0.0.1: o acesso público passa por um reverse proxy no servidor,
+# que tem de encaminhar *.<APP_BASE_DOMAIN> para este porto e preservar o cabeçalho Host.
+#
+# Variáveis obrigatórias no .env (gerado pelo workflow, nunca commitado):
+#   APP_IMAGE, DB_SUPERUSER_PASSWORD, DB_APP_PASSWORD, DB_MIGRATOR_PASSWORD,
+#   JWT_SECRET, APP_PLATFORM_BOOTSTRAP_KEY, APP_BASE_DOMAIN, APP_WEB_URL_TEMPLATE
+
+name: gestao-clubes-staging
+
+services:
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${DB_NAME:-volei}
+      POSTGRES_USER: postgres          # superuser: só para o arranque; a aplicação nunca o usa
+      POSTGRES_PASSWORD: ${DB_SUPERUSER_PASSWORD:?definir DB_SUPERUSER_PASSWORD no .env}
+      # Lidas por docker/postgres-init-staging/01-roles.sh na primeira inicialização.
+      VOLEI_APP_PASSWORD: ${DB_APP_PASSWORD:?definir DB_APP_PASSWORD no .env}
+      VOLEI_MIGRATOR_PASSWORD: ${DB_MIGRATOR_PASSWORD:?definir DB_MIGRATOR_PASSWORD no .env}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./docker/postgres-init-staging:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d ${DB_NAME:-volei}"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 10s
+
+  app:
+    image: ${APP_IMAGE:?definir APP_IMAGE no .env}
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    ports:
+      # Só no loopback: o reverse proxy do servidor é o único ponto de entrada público.
+      - "127.0.0.1:${APP_PORT:-8080}:8080"
+    environment:
+      SPRING_PROFILES_ACTIVE: staging
+
+      # BD: a aplicação usa volei_app (RLS); o Flyway usa volei_migrator (BYPASSRLS, só migrações).
+      SPRING_DATASOURCE_URL: jdbc:postgresql://db:5432/${DB_NAME:-volei}
+      DB_APP_PASSWORD: ${DB_APP_PASSWORD:?definir DB_APP_PASSWORD no .env}
+      DB_MIGRATOR_PASSWORD: ${DB_MIGRATOR_PASSWORD:?definir DB_MIGRATOR_PASSWORD no .env}
+
+      JWT_SECRET: ${JWT_SECRET:?definir JWT_SECRET no .env}
+      APP_PLATFORM_BOOTSTRAP_KEY: ${APP_PLATFORM_BOOTSTRAP_KEY:?definir APP_PLATFORM_BOOTSTRAP_KEY no .env}
+
+      # Tenancy por subdomínio e links dos e-mails.
+      APP_BASE_DOMAIN: ${APP_BASE_DOMAIN:?definir APP_BASE_DOMAIN no .env}
+      APP_WEB_URL_TEMPLATE: ${APP_WEB_URL_TEMPLATE:?definir APP_WEB_URL_TEMPLATE no .env}
+
+      # E-mail: sem MAIL_HOST a outbox continua a funcionar e o transporte regista em log.
+      APP_MAIL_FROM: ${APP_MAIL_FROM:-no-reply@localhost}
+      SPRING_MAIL_HOST: ${MAIL_HOST:-}
+      SPRING_MAIL_PORT: ${MAIL_PORT:-587}
+      SPRING_MAIL_USERNAME: ${MAIL_USERNAME:-}
+      SPRING_MAIL_PASSWORD: ${MAIL_PASSWORD:-}
+      SPRING_MAIL_PROPERTIES_MAIL_SMTP_AUTH: ${MAIL_SMTP_AUTH:-true}
+      SPRING_MAIL_PROPERTIES_MAIL_SMTP_STARTTLS_ENABLE: ${MAIL_SMTP_STARTTLS:-true}
+
+      # Atrás do reverse proxy de staging. Nunca ativar se a app estiver exposta diretamente.
+      APP_LOGIN_RATE_LIMIT_TRUST_FORWARDED_HEADERS: ${TRUST_FORWARDED_HEADERS:-true}
+
+volumes:
+  pgdata:

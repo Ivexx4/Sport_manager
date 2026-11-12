@@ -1,0 +1,205 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# Em main não cancelar uma execução a meio (pode estar a fazer deploy); nas restantes, sim.
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+
+jobs:
+  test:
+    name: Testes
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up JDK 25
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '25'
+          cache: maven
+
+      - name: Run tests
+        run: mvn -B -ntp test
+
+  image:
+    name: Imagem Docker
+    needs: test
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    outputs:
+      # Tag imutável por commit: é esta que o deploy usa.
+      image: ${{ steps.image.outputs.name }}:${{ github.sha }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Nome da imagem
+        id: image
+        # O GHCR só aceita nomes em minúsculas.
+        run: echo "name=ghcr.io/${GITHUB_REPOSITORY,,}" >> "$GITHUB_OUTPUT"
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Login no GHCR
+        if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build e publicação
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          # Em pull requests constrói-se só para validar o Dockerfile; em main publica-se.
+          push: ${{ github.event_name != 'pull_request' && github.ref == 'refs/heads/main' }}
+          tags: |
+            ${{ steps.image.outputs.name }}:${{ github.sha }}
+            ${{ steps.image.outputs.name }}:staging
+          labels: |
+            org.opencontainers.image.source=https://github.com/${{ github.repository }}
+            org.opencontainers.image.revision=${{ github.sha }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  deploy-staging:
+    name: Deploy para staging
+    needs: image
+    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    environment:
+      name: staging
+      url: ${{ vars.STAGING_URL }}
+    permissions:
+      contents: read
+      packages: read
+    env:
+      APP_IMAGE: ${{ needs.image.outputs.image }}
+      STAGING_HOST: ${{ secrets.STAGING_HOST }}
+      STAGING_USER: ${{ secrets.STAGING_USER }}
+      STAGING_SSH_KEY: ${{ secrets.STAGING_SSH_KEY }}
+      STAGING_KNOWN_HOSTS: ${{ secrets.STAGING_KNOWN_HOSTS }}
+      STAGING_DB_SUPERUSER_PASSWORD: ${{ secrets.STAGING_DB_SUPERUSER_PASSWORD }}
+      STAGING_DB_APP_PASSWORD: ${{ secrets.STAGING_DB_APP_PASSWORD }}
+      STAGING_DB_MIGRATOR_PASSWORD: ${{ secrets.STAGING_DB_MIGRATOR_PASSWORD }}
+      STAGING_JWT_SECRET: ${{ secrets.STAGING_JWT_SECRET }}
+      STAGING_PLATFORM_BOOTSTRAP_KEY: ${{ secrets.STAGING_PLATFORM_BOOTSTRAP_KEY }}
+      STAGING_MAIL_USERNAME: ${{ secrets.STAGING_MAIL_USERNAME }}
+      STAGING_MAIL_PASSWORD: ${{ secrets.STAGING_MAIL_PASSWORD }}
+      STAGING_PORT: ${{ vars.STAGING_PORT }}
+      STAGING_DIR: ${{ vars.STAGING_DIR }}
+      STAGING_APP_PORT: ${{ vars.STAGING_APP_PORT }}
+      STAGING_DB_NAME: ${{ vars.STAGING_DB_NAME }}
+      STAGING_BASE_DOMAIN: ${{ vars.STAGING_BASE_DOMAIN }}
+      STAGING_WEB_URL_TEMPLATE: ${{ vars.STAGING_WEB_URL_TEMPLATE }}
+      STAGING_MAIL_HOST: ${{ vars.STAGING_MAIL_HOST }}
+      STAGING_MAIL_PORT: ${{ vars.STAGING_MAIL_PORT }}
+      STAGING_MAIL_FROM: ${{ vars.STAGING_MAIL_FROM }}
+      STAGING_MAIL_SMTP_AUTH: ${{ vars.STAGING_MAIL_SMTP_AUTH }}
+      STAGING_MAIL_SMTP_STARTTLS: ${{ vars.STAGING_MAIL_SMTP_STARTTLS }}
+      STAGING_TRUST_FORWARDED_HEADERS: ${{ vars.STAGING_TRUST_FORWARDED_HEADERS }}
+      GHCR_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Validar configuração de staging
+        run: |
+          set -euo pipefail
+          em_falta=0
+          for nome in STAGING_HOST STAGING_USER STAGING_SSH_KEY STAGING_KNOWN_HOSTS \
+                      STAGING_DB_SUPERUSER_PASSWORD STAGING_DB_APP_PASSWORD STAGING_DB_MIGRATOR_PASSWORD \
+                      STAGING_JWT_SECRET STAGING_PLATFORM_BOOTSTRAP_KEY \
+                      STAGING_BASE_DOMAIN STAGING_WEB_URL_TEMPLATE; do
+            if [ -z "${!nome:-}" ]; then
+              echo "::error::Falta $nome no environment 'staging' (Settings > Environments > staging)."
+              em_falta=1
+            fi
+          done
+          exit "$em_falta"
+
+      - name: Deploy por SSH
+        run: |
+          # shellcheck disable=SC2029  # as variáveis expandem de propósito no runner, não no servidor
+          set -euo pipefail
+
+          # Chave e host conhecido: nunca desativar a verificação da chave do servidor.
+          install -m 700 -d "$HOME/.ssh"
+          printf '%s\n' "$STAGING_SSH_KEY" > "$HOME/.ssh/id_ed25519"
+          chmod 600 "$HOME/.ssh/id_ed25519"
+          printf '%s\n' "$STAGING_KNOWN_HOSTS" > "$HOME/.ssh/known_hosts"
+          chmod 600 "$HOME/.ssh/known_hosts"
+
+          ssh_opts=(
+            -i "$HOME/.ssh/id_ed25519"
+            -o IdentitiesOnly=yes
+            -o StrictHostKeyChecking=yes
+            -o UserKnownHostsFile="$HOME/.ssh/known_hosts"
+            -o ConnectTimeout=10
+            -o ServerAliveInterval=15
+            -o ServerAliveCountMax=4
+            -p "${STAGING_PORT:-22}"
+          )
+          remote="${STAGING_USER}@${STAGING_HOST}"
+          remote_dir="${STAGING_DIR:-gestao-staging}"
+          compose="docker compose --env-file .env -f docker-compose.staging.yml"
+
+          # Ficheiros que o servidor precisa para (re)arrancar a stack.
+          ssh "${ssh_opts[@]}" "$remote" "mkdir -p '$remote_dir'"
+          tar czf - docker-compose.staging.yml docker/postgres-init-staging \
+            | ssh "${ssh_opts[@]}" "$remote" "tar xzf - -C '$remote_dir'"
+
+          # .env gerado a partir dos secrets do GitHub Environment. Não é impresso nem commitado.
+          {
+            printf 'APP_IMAGE=%s\n' "$APP_IMAGE"
+            printf 'DB_NAME=%s\n' "${STAGING_DB_NAME:-volei}"
+            printf 'DB_SUPERUSER_PASSWORD=%s\n' "$STAGING_DB_SUPERUSER_PASSWORD"
+            printf 'DB_APP_PASSWORD=%s\n' "$STAGING_DB_APP_PASSWORD"
+            printf 'DB_MIGRATOR_PASSWORD=%s\n' "$STAGING_DB_MIGRATOR_PASSWORD"
+            printf 'JWT_SECRET=%s\n' "$STAGING_JWT_SECRET"
+            printf 'APP_PLATFORM_BOOTSTRAP_KEY=%s\n' "$STAGING_PLATFORM_BOOTSTRAP_KEY"
+            printf 'APP_BASE_DOMAIN=%s\n' "$STAGING_BASE_DOMAIN"
+            printf 'APP_WEB_URL_TEMPLATE=%s\n' "$STAGING_WEB_URL_TEMPLATE"
+            printf 'APP_MAIL_FROM=%s\n' "${STAGING_MAIL_FROM:-no-reply@$STAGING_BASE_DOMAIN}"
+            printf 'APP_PORT=%s\n' "${STAGING_APP_PORT:-8080}"
+            printf 'TRUST_FORWARDED_HEADERS=%s\n' "${STAGING_TRUST_FORWARDED_HEADERS:-true}"
+            if [ -n "${STAGING_MAIL_HOST:-}" ]; then
+              printf 'MAIL_HOST=%s\n' "$STAGING_MAIL_HOST"
+              printf 'MAIL_PORT=%s\n' "${STAGING_MAIL_PORT:-587}"
+              printf 'MAIL_USERNAME=%s\n' "${STAGING_MAIL_USERNAME:-}"
+              printf 'MAIL_PASSWORD=%s\n' "${STAGING_MAIL_PASSWORD:-}"
+              printf 'MAIL_SMTP_AUTH=%s\n' "${STAGING_MAIL_SMTP_AUTH:-true}"
+              printf 'MAIL_SMTP_STARTTLS=%s\n' "${STAGING_MAIL_SMTP_STARTTLS:-true}"
+            fi
+          } | ssh "${ssh_opts[@]}" "$remote" "umask 077; cat > '$remote_dir/.env'"
+
+          # O package é privado: autenticar no GHCR só para o pull desta execução.
+          printf '%s' "$GHCR_TOKEN" \
+            | ssh "${ssh_opts[@]}" "$remote" "docker login ghcr.io -u '$GITHUB_ACTOR' --password-stdin"
+
+          ssh "${ssh_opts[@]}" "$remote" \
+            "cd '$remote_dir' && $compose pull app"
+
+          if ! ssh "${ssh_opts[@]}" "$remote" \
+              "cd '$remote_dir' && $compose up -d --wait --wait-timeout 180 --remove-orphans"; then
+            echo "::error::A stack de staging não ficou saudável; a mostrar o estado e os logs."
+            ssh "${ssh_opts[@]}" "$remote" "cd '$remote_dir' && $compose ps" || true
+            ssh "${ssh_opts[@]}" "$remote" "cd '$remote_dir' && $compose logs --tail=200 app" || true
+            exit 1
+          fi
+
+          ssh "${ssh_opts[@]}" "$remote" "cd '$remote_dir' && $compose ps"
+          ssh "${ssh_opts[@]}" "$remote" "docker logout ghcr.io" || true
+
+          echo "Deploy concluído: $APP_IMAGE"

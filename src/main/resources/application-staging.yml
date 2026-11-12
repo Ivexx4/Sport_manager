@@ -1,0 +1,19 @@
+# Perfil de staging (SPRING_PROFILES_ACTIVE=staging).
+# Não há segredos neste ficheiro: tudo o que é sensível vem do ambiente (ver docker-compose.staging.yml).
+
+server:
+  # Atrás de um reverse proxy: usa X-Forwarded-* para o esquema, host e IP do cliente.
+  # O proxy tem de escrever/limpar estes cabeçalhos (nunca confiar no que vem do cliente).
+  forward-headers-strategy: framework
+
+logging:
+  level:
+    root: INFO
+    pt.voleibol.gestao: INFO
+
+app:
+  security:
+    login-rate-limit:
+      # Em staging a aplicação fica atrás do reverse proxy, que escreve X-Forwarded-For.
+      # Nunca ativar isto se a aplicação estiver exposta diretamente.
+      trust-forwarded-headers: ${APP_LOGIN_RATE_LIMIT_TRUST_FORWARDED_HEADERS:true}
