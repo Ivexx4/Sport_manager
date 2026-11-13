@@ -66,15 +66,15 @@ class AthleteRepository {
     }
 
     Optional<AthleteRow> findVisible(UUID tenantId, UUID athleteId, UUID actorId, Set<String> roles) {
-        return scoped(jdbc.sql(SELECT + " WHERE a.tenant_id = :tenant AND a.id = :id AND " + SCOPE), tenantId,
-                athleteId, actorId, roles, false)
+        return scoped(jdbc.sql(SELECT + " WHERE a.tenant_id = :tenant AND a.id = :id"
+                + " AND a.anonymized_at IS NULL AND " + SCOPE), tenantId, athleteId, actorId, roles, false)
                 .query(AthleteRepository::map)
                 .optional();
     }
 
     Optional<AthleteRow> findWritable(UUID tenantId, UUID athleteId, UUID actorId, Set<String> roles) {
-        return scoped(jdbc.sql(SELECT + " WHERE a.tenant_id = :tenant AND a.id = :id AND " + SCOPE), tenantId,
-                athleteId, actorId, roles, true)
+        return scoped(jdbc.sql(SELECT + " WHERE a.tenant_id = :tenant AND a.id = :id"
+                + " AND a.anonymized_at IS NULL AND " + SCOPE), tenantId, athleteId, actorId, roles, true)
                 .query(AthleteRepository::map)
                 .optional();
     }
@@ -82,7 +82,7 @@ class AthleteRepository {
     List<AthleteRow> list(UUID tenantId, UUID actorId, Set<String> roles, String query, String status,
                           UUID teamId, int limit, long offset) {
         StringBuilder sql = new StringBuilder(SELECT)
-                .append(" WHERE a.tenant_id = :tenant AND ").append(SCOPE);
+                .append(" WHERE a.tenant_id = :tenant AND a.anonymized_at IS NULL AND ").append(SCOPE);
         if (query != null && !query.isBlank()) {
             sql.append(" AND a.full_name ILIKE '%' || :q || '%'");
         }
@@ -113,7 +113,8 @@ class AthleteRepository {
     }
 
     long count(UUID tenantId, UUID actorId, Set<String> roles, String query, String status, UUID teamId) {
-        StringBuilder sql = new StringBuilder("SELECT count(*) FROM athlete a WHERE a.tenant_id = :tenant AND ")
+        StringBuilder sql = new StringBuilder("SELECT count(*) FROM athlete a WHERE a.tenant_id = :tenant"
+                + " AND a.anonymized_at IS NULL AND ")
                 .append(SCOPE);
         if (query != null && !query.isBlank()) {
             sql.append(" AND a.full_name ILIKE '%' || :q || '%'");
@@ -185,7 +186,7 @@ class AthleteRepository {
                         UPDATE athlete
                         SET full_name = :name, birth_date = :birth, gender = :gender, nif = :nif,
                             email = :email, phone = :phone, license_number = :license, updated_at = now()
-                        WHERE tenant_id = :tenant AND id = :id
+                        WHERE tenant_id = :tenant AND id = :id AND anonymized_at IS NULL
                         """)
                 .param("tenant", tenantId)
                 .param("id", athleteId)
@@ -202,7 +203,7 @@ class AthleteRepository {
     boolean linkUser(UUID tenantId, UUID athleteId, UUID userId) {
         return jdbc.sql("""
                         UPDATE athlete SET user_id = :user, updated_at = now()
-                        WHERE tenant_id = :tenant AND id = :id
+                        WHERE tenant_id = :tenant AND id = :id AND anonymized_at IS NULL
                         """)
                 .param("tenant", tenantId)
                 .param("id", athleteId)
@@ -213,7 +214,7 @@ class AthleteRepository {
     boolean unlinkUser(UUID tenantId, UUID athleteId) {
         return jdbc.sql("""
                         UPDATE athlete SET user_id = NULL, updated_at = now()
-                        WHERE tenant_id = :tenant AND id = :id
+                        WHERE tenant_id = :tenant AND id = :id AND anonymized_at IS NULL
                         """)
                 .param("tenant", tenantId)
                 .param("id", athleteId)
@@ -223,7 +224,7 @@ class AthleteRepository {
     boolean updateStatus(UUID tenantId, UUID athleteId, String status) {
         return jdbc.sql("""
                         UPDATE athlete SET status = :status, updated_at = now()
-                        WHERE tenant_id = :tenant AND id = :id
+                        WHERE tenant_id = :tenant AND id = :id AND anonymized_at IS NULL
                         """)
                 .param("tenant", tenantId)
                 .param("id", athleteId)
@@ -231,8 +232,18 @@ class AthleteRepository {
                 .update() == 1;
     }
 
-    boolean delete(UUID tenantId, UUID athleteId) {
-        return jdbc.sql("DELETE FROM athlete WHERE tenant_id = :tenant AND id = :id")
+    /**
+     * Remoção não destrutiva: desativa e anonimiza o atleta, limpando os identificadores diretos.
+     * A linha e as relações (plantel, histórico) mantêm-se para não quebrar chaves externas.
+     */
+    boolean anonymize(UUID tenantId, UUID athleteId) {
+        return jdbc.sql("""
+                        UPDATE athlete
+                        SET status = 'INACTIVE', anonymized_at = now(), full_name = 'Atleta anonimizado',
+                            birth_date = NULL, gender = NULL, nif = NULL, email = NULL, phone = NULL,
+                            license_number = NULL, user_id = NULL, updated_at = now()
+                        WHERE tenant_id = :tenant AND id = :id AND anonymized_at IS NULL
+                        """)
                 .param("tenant", tenantId)
                 .param("id", athleteId)
                 .update() == 1;
@@ -242,7 +253,7 @@ class AthleteRepository {
 
     boolean licenseExists(UUID tenantId, String licenseNumber, UUID excludeId) {
         String sql = "SELECT EXISTS (SELECT 1 FROM athlete WHERE tenant_id = :tenant "
-                + "AND lower(license_number) = lower(:license)";
+                + "AND anonymized_at IS NULL AND lower(license_number) = lower(:license)";
         JdbcClient.StatementSpec spec = jdbc.sql(excludeId == null ? sql + ")"
                         : sql + " AND id <> :exclude)")
                 .param("tenant", tenantId)
@@ -254,7 +265,8 @@ class AthleteRepository {
     }
 
     boolean userLinked(UUID tenantId, UUID userId, UUID excludeId) {
-        String sql = "SELECT EXISTS (SELECT 1 FROM athlete WHERE tenant_id = :tenant AND user_id = :user";
+        String sql = "SELECT EXISTS (SELECT 1 FROM athlete WHERE tenant_id = :tenant "
+                + "AND anonymized_at IS NULL AND user_id = :user";
         JdbcClient.StatementSpec spec = jdbc.sql(excludeId == null ? sql + ")"
                         : sql + " AND id <> :exclude)")
                 .param("tenant", tenantId)
@@ -332,6 +344,17 @@ class AthleteRepository {
                 .param("athlete", athleteId)
                 .param("user", userId)
                 .update() == 1;
+    }
+
+    /** Remove as associações de encarregados aquando da anonimização (são dados pessoais). */
+    void deleteGuardians(UUID tenantId, UUID athleteId) {
+        jdbc.sql("""
+                        DELETE FROM athlete_guardian
+                        WHERE tenant_id = :tenant AND athlete_id = :athlete
+                        """)
+                .param("tenant", tenantId)
+                .param("athlete", athleteId)
+                .update();
     }
 
     void audit(UUID tenantId, UUID actorId, String action, UUID athleteId) {

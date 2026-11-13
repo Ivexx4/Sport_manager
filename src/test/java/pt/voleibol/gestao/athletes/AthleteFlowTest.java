@@ -148,7 +148,80 @@ class AthleteFlowTest {
 
         assertThat(contarAuditoria("ATHLETE_CREATED")).isPositive();
         assertThat(contarAuditoria("ATHLETE_UPDATED")).isPositive();
-        assertThat(contarAuditoria("ATHLETE_DELETED")).isPositive();
+        assertThat(contarAuditoria("ATHLETE_ANONYMIZED")).isPositive();
+    }
+
+    @Test
+    void remocaoAnonimizaEMantemRelacoes() throws Exception {
+        String admin = acesso(HOST_A, ADMIN);
+
+        String criado = criar(HOST_A, admin, corpo("Atleta a Remover", "2011-02-03", "M",
+                "123456789", "remover@exemplo.pt", "910000000", "REM-1", null, null))
+                .andExpect(status().isCreated())
+                .andReturn().getResponse().getContentAsString();
+        UUID id = UUID.fromString(JsonPath.read(criado, "$.id"));
+
+        // Liga uma conta, associa um encarregado e coloca o atleta no plantel.
+        mvc.perform(post("/api/v1/athletes/" + id + "/account")
+                        .header("Authorization", "Bearer " + admin).with(host(HOST_A))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"userId\":\"" + id(FINANCEIRO) + "\"}"))
+                .andExpect(status().isOk());
+        adicionarEncarregado(HOST_A, admin, id, id(ENCARREGADO), "MAE").andExpect(status().isOk());
+        mvc.perform(post("/api/v1/teams/" + EQUIPA_A + "/athletes")
+                        .header("Authorization", "Bearer " + admin).with(host(HOST_A))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"athleteId\":\"" + id + "\"}"))
+                .andExpect(status().isOk());
+
+        apagar(HOST_A, admin, id).andExpect(status().isNoContent());
+
+        // A linha mantém-se, desativada e sem identificadores diretos.
+        try (Connection c = superuser(); PreparedStatement ps = c.prepareStatement("""
+                SELECT status, anonymized_at, full_name, birth_date, gender, nif, email, phone,
+                       license_number, user_id
+                FROM athlete WHERE id = ?
+                """)) {
+            ps.setObject(1, id);
+            try (ResultSet rs = ps.executeQuery()) {
+                assertThat(rs.next()).isTrue();
+                assertThat(rs.getString("status")).isEqualTo("INACTIVE");
+                assertThat(rs.getObject("anonymized_at")).isNotNull();
+                assertThat(rs.getString("full_name")).isEqualTo("Atleta anonimizado");
+                assertThat(rs.getObject("birth_date")).isNull();
+                assertThat(rs.getString("gender")).isNull();
+                assertThat(rs.getString("nif")).isNull();
+                assertThat(rs.getString("email")).isNull();
+                assertThat(rs.getString("phone")).isNull();
+                assertThat(rs.getString("license_number")).isNull();
+                assertThat(rs.getObject("user_id")).isNull();
+            }
+        }
+
+        // Relações preservadas; os encarregados (dados pessoais) são removidos.
+        assertThat(contar("SELECT count(*) FROM team_athlete WHERE athlete_id = ?", id)).isEqualTo(1);
+        assertThat(contar("SELECT count(*) FROM athlete_guardian WHERE athlete_id = ?", id)).isZero();
+
+        // Deixa de aparecer em leituras e listagens, mesmo filtrando por INACTIVE.
+        getAtleta(HOST_A, admin, id).andExpect(status().isNotFound());
+        String lista = listar(HOST_A, admin).andReturn().getResponse().getContentAsString();
+        assertThat(ids(lista)).doesNotContain(id);
+        String inativos = mvc.perform(get("/api/v1/athletes").param("status", "INACTIVE")
+                        .header("Authorization", "Bearer " + admin).with(host(HOST_A)))
+                .andExpect(status().isOk()).andReturn().getResponse().getContentAsString();
+        assertThat(ids(inativos)).doesNotContain(id);
+
+        // A licença e a conta ficam livres para reutilização.
+        String novo = criar(HOST_A, admin, corpo("Atleta Novo", "2011-02-03", "M", "123456789",
+                "remover@exemplo.pt", "910000000", "REM-1", null, null))
+                .andExpect(status().isCreated())
+                .andReturn().getResponse().getContentAsString();
+        UUID novoId = UUID.fromString(JsonPath.read(novo, "$.id"));
+        mvc.perform(post("/api/v1/athletes/" + novoId + "/account")
+                        .header("Authorization", "Bearer " + admin).with(host(HOST_A))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"userId\":\"" + id(FINANCEIRO) + "\"}"))
+                .andExpect(status().isOk());
     }
 
     @Test
@@ -590,18 +663,21 @@ class AthleteFlowTest {
     private static void atleta(Connection c, UUID athleteId, UUID tenantId, String nome, String nascimento,
                                String genero, String licenca, UUID userId) throws SQLException {
         executar(c, """
-                INSERT INTO athlete (id, tenant_id, full_name, birth_date, gender, license_number, status, user_id)
-                VALUES (?, ?, ?, ?, ?, ?, 'ACTIVE', ?)
+                INSERT INTO athlete (id, tenant_id, full_name, birth_date, gender, nif, email, phone,
+                                     license_number, status, user_id)
+                VALUES (?, ?, ?, ?, ?, NULL, NULL, NULL, ?, 'ACTIVE', ?)
                 ON CONFLICT (id) DO UPDATE SET full_name = EXCLUDED.full_name,
                     birth_date = EXCLUDED.birth_date, gender = EXCLUDED.gender,
-                    license_number = EXCLUDED.license_number, status = 'ACTIVE', user_id = EXCLUDED.user_id
+                    nif = NULL, email = NULL, phone = NULL,
+                    license_number = EXCLUDED.license_number, status = 'ACTIVE',
+                    user_id = EXCLUDED.user_id, anonymized_at = NULL
                 """, athleteId, tenantId, nome, Date.valueOf(nascimento), genero, licenca, userId);
     }
 
     private static void equipa(Connection c, UUID teamId, UUID tenantId, String nome) throws SQLException {
         executar(c, """
                 INSERT INTO team (id, tenant_id, name, status) VALUES (?, ?, ?, 'ACTIVE')
-                ON CONFLICT (id) DO UPDATE SET name = EXCLUDED.name, status = 'ACTIVE'
+                ON CONFLICT (id) DO UPDATE SET name = EXCLUDED.name, status = 'ACTIVE', anonymized_at = NULL
                 """, teamId, tenantId, nome);
     }
 

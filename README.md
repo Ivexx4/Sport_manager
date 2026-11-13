@@ -133,7 +133,7 @@ conta de utilizador. Para suportar o âmbito do `TREINADOR`, entrou também uma 
 | `GET /api/v1/athletes/{id}`                     | idem                                                                      | Detalhe; fora do âmbito devolve `404`                                     |
 | `POST /api/v1/athletes`                         | `ADMIN`, `DIRECAO`                                                        | Cria; `409` para licença repetida ou conta já ligada                      |
 | `PUT /api/v1/athletes/{id}`                     | `ADMIN`, `DIRECAO`, e o âmbito de `TREINADOR`/`ATLETA`/`ENCARREGADO`      | Atualiza os dados; fora do âmbito de leitura `404`, dentro mas sem escrita `403` |
-| `DELETE /api/v1/athletes/{id}`                  | `ADMIN`, `DIRECAO`                                                        | Apaga                                                                     |
+| `DELETE /api/v1/athletes/{id}`                  | `ADMIN`, `DIRECAO`                                                        | Desativa e anonimiza (remoção não destrutiva), mantendo histórico e relações |
 | `POST /api/v1/athletes/{id}/account`            | `ADMIN`, `DIRECAO`                                                        | `{userId}` liga a conta; a conta tem de ter membership ativo no clube     |
 | `DELETE /api/v1/athletes/{id}/account`          | `ADMIN`, `DIRECAO`                                                        | Desliga a conta                                                           |
 | `PATCH /api/v1/athletes/{id}/status`            | `ADMIN`, `DIRECAO`                                                        | `{status}`: `ACTIVE` ou `INACTIVE`                                        |
@@ -153,7 +153,7 @@ Cada conta (`athlete.user_id`) só pode estar ligada a um atleta no mesmo clube.
 | `GET /api/v1/teams/{id}`                      | idem                               | Detalhe; fora do âmbito devolve `404`                            |
 | `POST /api/v1/teams`                          | `ADMIN`, `DIRECAO`                 | `{name, status?}`; nome único por clube (sem distinguir maiúsculas) |
 | `PUT /api/v1/teams/{id}`                      | `ADMIN`, `DIRECAO`                 | Atualiza nome/estado                                             |
-| `DELETE /api/v1/teams/{id}`                   | `ADMIN`, `DIRECAO`                 | Apaga a equipa e as associações de staff/plantel (em cascata)    |
+| `DELETE /api/v1/teams/{id}`                   | `ADMIN`, `DIRECAO`                 | Desativa e anonimiza; staff e plantel ficam preservados para histórico |
 | `GET /api/v1/teams/{id}/staff`                | mesma visibilidade da equipa       | Lista treinadores/adjuntos                                       |
 | `POST /api/v1/teams/{id}/staff`               | `ADMIN`, `DIRECAO`                 | `{userId, role?}`: `TREINADOR` ou `TREINADOR_ADJUNTO`            |
 | `DELETE /api/v1/teams/{id}/staff/{userId}`    | `ADMIN`, `DIRECAO`                 | Remove o staff                                                   |
@@ -184,6 +184,23 @@ Regras transversais:
 - O RLS por `tenant_id` continua a ser a barreira final: nenhuma query vê dados de outro clube.
 - Encarregados e contas ligadas têm de ter membership ativo no clube; a conta de atleta é única por clube.
 - Todas as operações de escrita ficam em `audit_log` (`ATHLETE_*` e `TEAM_*`).
+
+### Remoção não destrutiva (convenção de desenvolvimento)
+
+O `DELETE` de atletas e equipas **não apaga a linha**. Aplica a convenção RGPD da plataforma:
+
+- `status = 'INACTIVE'` e `anonymized_at = now()`;
+- limpeza dos identificadores diretos (nome, contactos, NIF, licença, conta ligada, data de nascimento e género);
+- as relações (`team_athlete`, `team_staff`, presenças, cobranças) e a auditoria mantêm-se, para preservar o
+  histórico e não quebrar chaves externas;
+- os registos anonimizados deixam de aparecer nas leituras/listagens e não bloqueiam a reutilização de licenças,
+  contas ou nomes;
+- os encarregados de educação (dados pessoais) são removidos quando o atleta é anonimizado.
+
+Esta é a convenção para **todos os módulos**: uma entidade com histórico não é eliminada fisicamente. Novas tabelas
+devem ter `anonymized_at` (e `status` quando aplicável) e os índices de unicidade devem ser parciais
+(`WHERE anonymized_at IS NULL`). Só dados sem valor histórico — tokens, convites e mensagens da outbox — são
+apagados pela limpeza periódica.
 
 ## Manutenção
 
@@ -235,8 +252,11 @@ Os testes de integração precisam de Docker. Corre-se um PostgreSQL real com Te
   repetida, paginação e filtros (`q`, `status`, `teamId`), isolamento entre clubes, encarregados de educação e
   auditoria. Prova a autorização por recurso: `TREINADOR` só nas suas equipas (perde o acesso ao sair do plantel),
   `ATLETA` só no próprio registo, `ENCARREGADO` só nos educandos, `FINANCEIRO` só lê e `ADMIN`/`DIRECAO` gerem tudo.
+  Cobre também a remoção não destrutiva: anonimização, preservação do plantel, remoção dos encarregados e
+  reutilização da licença e da conta.
 - `TeamFlowTest`: CRUD de equipas, nome único, autorização da listagem, staff e plantel, isolamento entre clubes,
-  remoção em cascata ao apagar a equipa e o âmbito do `TREINADOR` (só vê as equipas em que é staff e não as gere).
+  remoção não destrutiva (a equipa é anonimizada e staff/plantel ficam preservados) e o âmbito do `TREINADOR`
+  (só vê as equipas em que é staff e não as gere).
 - `ExpiredDataPurgerTest`: a limpeza remove convites/tokens expirados, aceites, usados ou revogados de
   **vários clubes** numa só chamada, e mantém os dados recentes/válidos e as mensagens `PENDING` da outbox.
 
@@ -350,8 +370,9 @@ O deploy corre automaticamente em cada push para `main`; também pode ser dispar
 Migrações Flyway em `src/main/resources/db/migration`:
 `V1` esquema base, `V2` RLS/permissões, `V3` refresh tokens, `V4` convites/reset de password,
 `V5` visibilidade de `app_user` por membership, `V6` outbox de e-mail/permissões de provisionamento,
-`V7` função `provision_tenant`, `V8` função/índices de limpeza periódica e `V9` atletas (conta, estado e
-encarregados) e base mínima de equipas (staff e plantel). Papéis em `docker/postgres-init/01-roles.sql`,
+`V7` função `provision_tenant`, `V8` função/índices de limpeza periódica, `V9` atletas (conta, estado e
+encarregados) e base mínima de equipas (staff e plantel) e `V10` remoção não destrutiva (anonimização e
+índices de unicidade parciais). Papéis em `docker/postgres-init/01-roles.sql`,
 também usado pelos testes (passwords `dev`, só para desenvolvimento; o `volei_migrator` tem `BYPASSRLS`).
 
 ## Por fazer

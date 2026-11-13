@@ -236,16 +236,34 @@ class TeamFlowTest {
     }
 
     @Test
-    void apagarEquipaRemoveStaffEPlantel() throws Exception {
+    void remocaoAnonimizaEquipaEMantemStaffEPlantel() throws Exception {
         String admin = acesso(HOST_A, ADMIN);
         String treinador = acesso(HOST_A, TREINADOR);
 
-        apagar(HOST_A, admin, EQUIPA_A).andExpect(status().isNoContent());
+        String criada = criar(HOST_A, admin, "Equipa Descartavel")
+                .andExpect(status().isCreated())
+                .andReturn().getResponse().getContentAsString();
+        UUID id = UUID.fromString(JsonPath.read(criada, "$.id"));
 
-        assertThat(contar("SELECT count(*) FROM team_staff WHERE team_id = ?", EQUIPA_A)).isZero();
-        assertThat(contar("SELECT count(*) FROM team_athlete WHERE team_id = ?", EQUIPA_A)).isZero();
-        getEquipa(HOST_A, treinador, EQUIPA_A).andExpect(status().isNotFound());
-        assertThat(contarAuditoria("TEAM_DELETED")).isPositive();
+        adicionarStaff(HOST_A, admin, id, id(TREINADOR), "TREINADOR").andExpect(status().isOk());
+        adicionarAtleta(HOST_A, admin, id, ATLETA_A).andExpect(status().isOk());
+
+        apagar(HOST_A, admin, id).andExpect(status().isNoContent());
+
+        // A linha mantém-se, desativada e anonimizada; as relações de staff/plantel preservam-se.
+        assertThat(contar("""
+                SELECT count(*) FROM team
+                WHERE id = ? AND status = 'INACTIVE' AND anonymized_at IS NOT NULL
+                  AND name = 'Equipa anonimizada'
+                """, id)).isEqualTo(1);
+        assertThat(contar("SELECT count(*) FROM team_staff WHERE team_id = ?", id)).isEqualTo(1);
+        assertThat(contar("SELECT count(*) FROM team_athlete WHERE team_id = ?", id)).isEqualTo(1);
+        getEquipa(HOST_A, treinador, id).andExpect(status().isNotFound());
+        getEquipa(HOST_A, admin, id).andExpect(status().isNotFound());
+
+        // O nome fica livre para uma nova equipa.
+        criar(HOST_A, admin, "Equipa Descartavel").andExpect(status().isCreated());
+        assertThat(contarAuditoria("TEAM_ANONYMIZED")).isPositive();
     }
 
     // --- auxiliares ---
@@ -374,14 +392,16 @@ class TeamFlowTest {
         executar(c, """
                 INSERT INTO athlete (id, tenant_id, full_name, birth_date, gender, status)
                 VALUES (?, ?, ?, ?, 'F', 'ACTIVE')
-                ON CONFLICT (id) DO UPDATE SET full_name = EXCLUDED.full_name, status = 'ACTIVE'
+                ON CONFLICT (id) DO UPDATE SET full_name = EXCLUDED.full_name,
+                    birth_date = EXCLUDED.birth_date, gender = EXCLUDED.gender,
+                    status = 'ACTIVE', anonymized_at = NULL
                 """, athleteId, tenantId, nome, Date.valueOf("2010-01-01"));
     }
 
     private static void equipa(Connection c, UUID teamId, UUID tenantId, String nome) throws SQLException {
         executar(c, """
                 INSERT INTO team (id, tenant_id, name, status) VALUES (?, ?, ?, 'ACTIVE')
-                ON CONFLICT (id) DO UPDATE SET name = EXCLUDED.name, status = 'ACTIVE'
+                ON CONFLICT (id) DO UPDATE SET name = EXCLUDED.name, status = 'ACTIVE', anonymized_at = NULL
                 """, teamId, tenantId, nome);
     }
 

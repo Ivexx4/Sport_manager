@@ -25,7 +25,8 @@ import pt.voleibol.gestao.tenancy.TenantContext;
  *   <li>ENCARREGADO lê e altera apenas os seus educandos;</li>
  *   <li>FINANCEIRO só lê.</li>
  * </ul>
- * Criar, apagar, ligar contas, mudar estado e gerir encarregados é exclusivo de ADMIN/DIRECAO.
+ * Criar, remover (desativar e anonimizar), ligar contas, mudar estado e gerir encarregados é exclusivo de
+ * ADMIN/DIRECAO.
  */
 @Service
 class AthleteService {
@@ -129,10 +130,12 @@ class AthleteService {
             throw new ResponseStatusException(HttpStatus.FORBIDDEN);
         }
         requireVisible(tenantId, athleteId, actorId, roles);
-        if (!athletes.delete(tenantId, athleteId)) {
+        // Remoção não destrutiva: desativa e anonimiza, preservando a linha e as relações.
+        if (!athletes.anonymize(tenantId, athleteId)) {
             throw notFound();
         }
-        athletes.audit(tenantId, actorId, "ATHLETE_DELETED", athleteId);
+        athletes.deleteGuardians(tenantId, athleteId);
+        athletes.audit(tenantId, actorId, "ATHLETE_ANONYMIZED", athleteId);
     }
 
     // --- conta e estado ---

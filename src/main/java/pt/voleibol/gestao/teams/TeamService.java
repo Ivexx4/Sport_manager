@@ -100,10 +100,11 @@ class TeamService {
     void delete(UUID actorId, Set<String> roles, UUID teamId) {
         UUID tenantId = requireTenant();
         requireManager(roles);
-        if (!teams.delete(tenantId, teamId)) {
+        // Remoção não destrutiva: desativa e anonimiza, preservando staff e plantel para histórico.
+        if (!teams.anonymize(tenantId, teamId)) {
             throw notFound();
         }
-        teams.audit(tenantId, actorId, "TEAM_DELETED", teamId);
+        teams.audit(tenantId, actorId, "TEAM_ANONYMIZED", teamId);
     }
 
     // --- staff ---

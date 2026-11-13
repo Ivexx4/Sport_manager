@@ -37,7 +37,7 @@ class TeamRepository {
     }
 
     List<TeamRow> list(UUID tenantId, UUID actorId, boolean manager) {
-        String sql = SELECT + " WHERE t.tenant_id = :tenant"
+        String sql = SELECT + " WHERE t.tenant_id = :tenant AND t.anonymized_at IS NULL"
                 + (manager ? "" : """
                          AND EXISTS (
                             SELECT 1 FROM team_staff s
@@ -52,7 +52,7 @@ class TeamRepository {
     }
 
     Optional<TeamRow> findVisible(UUID tenantId, UUID teamId, UUID actorId, boolean manager) {
-        String sql = SELECT + " WHERE t.tenant_id = :tenant AND t.id = :id"
+        String sql = SELECT + " WHERE t.tenant_id = :tenant AND t.id = :id AND t.anonymized_at IS NULL"
                 + (manager ? "" : """
                          AND EXISTS (
                             SELECT 1 FROM team_staff s
@@ -66,7 +66,7 @@ class TeamRepository {
     }
 
     Optional<TeamRow> findById(UUID tenantId, UUID teamId) {
-        return jdbc.sql(SELECT + " WHERE t.tenant_id = :tenant AND t.id = :id")
+        return jdbc.sql(SELECT + " WHERE t.tenant_id = :tenant AND t.id = :id AND t.anonymized_at IS NULL")
                 .param("tenant", tenantId)
                 .param("id", teamId)
                 .query(TeamRepository::map)
@@ -74,7 +74,8 @@ class TeamRepository {
     }
 
     boolean nameExists(UUID tenantId, String name, UUID excludeId) {
-        String sql = "SELECT EXISTS (SELECT 1 FROM team WHERE tenant_id = :tenant AND lower(name) = lower(:name)";
+        String sql = "SELECT EXISTS (SELECT 1 FROM team WHERE tenant_id = :tenant "
+                + "AND anonymized_at IS NULL AND lower(name) = lower(:name)";
         JdbcClient.StatementSpec spec = jdbc.sql(excludeId == null ? sql + ")"
                         : sql + " AND id <> :exclude)")
                 .param("tenant", tenantId)
@@ -101,7 +102,7 @@ class TeamRepository {
     boolean update(UUID tenantId, UUID teamId, String name, String status) {
         return jdbc.sql("""
                         UPDATE team SET name = :name, status = :status, updated_at = now()
-                        WHERE tenant_id = :tenant AND id = :id
+                        WHERE tenant_id = :tenant AND id = :id AND anonymized_at IS NULL
                         """)
                 .param("tenant", tenantId)
                 .param("id", teamId)
@@ -110,8 +111,17 @@ class TeamRepository {
                 .update() == 1;
     }
 
-    boolean delete(UUID tenantId, UUID teamId) {
-        return jdbc.sql("DELETE FROM team WHERE tenant_id = :tenant AND id = :id")
+    /**
+     * Remoção não destrutiva: desativa e anonimiza a equipa, preservando staff e plantel para
+     * histórico. O nome passa a um marcador anonimizado e pode ser reutilizado.
+     */
+    boolean anonymize(UUID tenantId, UUID teamId) {
+        return jdbc.sql("""
+                        UPDATE team
+                        SET status = 'INACTIVE', anonymized_at = now(), name = 'Equipa anonimizada',
+                            updated_at = now()
+                        WHERE tenant_id = :tenant AND id = :id AND anonymized_at IS NULL
+                        """)
                 .param("tenant", tenantId)
                 .param("id", teamId)
                 .update() == 1;
@@ -182,6 +192,7 @@ class TeamRepository {
                         FROM team_athlete ta
                         JOIN athlete a ON a.tenant_id = ta.tenant_id AND a.id = ta.athlete_id
                         WHERE ta.tenant_id = :tenant AND ta.team_id = :team
+                          AND a.anonymized_at IS NULL
                         ORDER BY a.full_name, a.id
                         """)
                 .param("tenant", tenantId)
@@ -244,7 +255,11 @@ class TeamRepository {
     }
 
     boolean athleteExists(UUID tenantId, UUID athleteId) {
-        return jdbc.sql("SELECT EXISTS (SELECT 1 FROM athlete WHERE tenant_id = :tenant AND id = :id)")
+        return jdbc.sql("""
+                        SELECT EXISTS (
+                            SELECT 1 FROM athlete
+                            WHERE tenant_id = :tenant AND id = :id AND anonymized_at IS NULL)
+                        """)
                 .param("tenant", tenantId)
                 .param("id", athleteId)
                 .query(Boolean.class)
