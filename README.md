@@ -1,10 +1,11 @@
 # Gestão de Clubes de Voleibol
 
 Monólito modular (Java 25, Spring Boot 4.1.2, Maven) com PostgreSQL e multitenancy por `tenant_id` + Row Level Security.
-Estado atual: **fase 0 (fundações)**: tenancy com RLS, papéis da base de dados, filtro de tenant,
-testes de isolamento, autenticação por JWT próprio, limitação de tentativas de login,
-convites/utilizadores, recuperação de password, provisionamento de clubes, e-mail por outbox
-(com tentativas), limpeza periódica de dados expirados, CI e CD para staging.
+Estado atual: **fase 0 (fundações) concluída, fase 1 em curso** com o módulo de **atletas** (CRUD completo):
+tenancy com RLS, papéis da base de dados, filtro de tenant, testes de isolamento, autenticação por JWT próprio,
+limitação de tentativas de login, convites/utilizadores, recuperação de password, provisionamento de clubes,
+e-mail por outbox (com tentativas), limpeza periódica de dados expirados, CI e CD para staging; atletas,
+encarregados de educação e uma base mínima de equipas com autorização por recurso.
 
 ## Requisitos
 
@@ -118,6 +119,72 @@ Um subdomínio desconhecido devolve 404; um pedido de autenticação sem subdom�
   `/accept-invitation` e `/reset-password`, que recebem `?token=...`.
 - **E-mail (outbox + tentativas):** os e-mails são enfileirados na tabela `email_outbox` (transacional com a operação) e enviados de forma assíncrona, com até 5 tentativas e backoff exponencial; o processador corre a cada 30 s por omissão (`app.mail.outbox.poll-interval`, `APP_MAIL_OUTBOX_POLL_INTERVAL`) e os estados são `PENDING`/`SENT`/`FAILED`. Se `spring.mail.host` estiver definido, o transporte é SMTP (configurar credenciais e `app.mail.from`/`APP_MAIL_FROM`); caso contrário, o transporte regista em log. No perfil `dev` o `docker compose` inclui **Mailpit** (SMTP `localhost:1025`, UI [http://localhost:8025](http://localhost:8025)) já configurado. Em produção, configurar SMTP (ou substituir o transporte) e monitorizar mensagens em `FAILED`.
 
+## Atletas e equipas (fase 1)
+
+Primeiro módulo da fase 1: **atletas** com CRUD completo, encarregados de educação e ligação opcional a uma
+conta de utilizador. Para suportar o âmbito do `TREINADOR`, entrou também uma **base mínima de equipas**
+(equipa, staff e plantel); épocas, escalões e plantéis por época ficam para o módulo `teams` completo.
+
+### Endpoints de atletas
+
+| Endpoint                                        | Quem pode                                                                 | Descrição                                                                 |
+|-------------------------------------------------|---------------------------------------------------------------------------|---------------------------------------------------------------------------|
+| `GET /api/v1/athletes`                          | `ADMIN`, `DIRECAO`, `FINANCEIRO` (todos) e `TREINADOR`/`ATLETA`/`ENCARREGADO` (âmbito) | Lista paginada: `q` (nome), `status`, `teamId`, `page` (≥0), `size` (1–100, omissão 20) |
+| `GET /api/v1/athletes/{id}`                     | idem                                                                      | Detalhe; fora do âmbito devolve `404`                                     |
+| `POST /api/v1/athletes`                         | `ADMIN`, `DIRECAO`                                                        | Cria; `409` para licença repetida ou conta já ligada                      |
+| `PUT /api/v1/athletes/{id}`                     | `ADMIN`, `DIRECAO`, e o âmbito de `TREINADOR`/`ATLETA`/`ENCARREGADO`      | Atualiza os dados; fora do âmbito de leitura `404`, dentro mas sem escrita `403` |
+| `DELETE /api/v1/athletes/{id}`                  | `ADMIN`, `DIRECAO`                                                        | Apaga                                                                     |
+| `POST /api/v1/athletes/{id}/account`            | `ADMIN`, `DIRECAO`                                                        | `{userId}` liga a conta; a conta tem de ter membership ativo no clube     |
+| `DELETE /api/v1/athletes/{id}/account`          | `ADMIN`, `DIRECAO`                                                        | Desliga a conta                                                           |
+| `PATCH /api/v1/athletes/{id}/status`            | `ADMIN`, `DIRECAO`                                                        | `{status}`: `ACTIVE` ou `INACTIVE`                                        |
+| `GET /api/v1/athletes/{id}/guardians`           | mesma visibilidade do atleta                                              | Lista os encarregados de educação                                         |
+| `POST /api/v1/athletes/{id}/guardians`          | `ADMIN`, `DIRECAO`                                                        | `{userId, relationship?}`; `409` se já estiver associado                  |
+| `DELETE /api/v1/athletes/{id}/guardians/{userId}` | `ADMIN`, `DIRECAO`                                                      | Remove a associação                                                       |
+
+`status` é `ACTIVE`/`INACTIVE`; `gender` é `F`/`M`; a data de nascimento tem de ser passada; `nif` são 9 dígitos
+(opcional); o `email` é normalizado para minúsculas; a licença é única por clube, sem distinguir maiúsculas.
+Cada conta (`athlete.user_id`) só pode estar ligada a um atleta no mesmo clube.
+
+### Endpoints de equipas
+
+| Endpoint                                      | Quem pode                          | Descrição                                                        |
+|-----------------------------------------------|------------------------------------|------------------------------------------------------------------|
+| `GET /api/v1/teams`                           | `ADMIN`, `DIRECAO`, `TREINADOR`    | Todas para a gestão; o treinador só vê as equipas em que é staff |
+| `GET /api/v1/teams/{id}`                      | idem                               | Detalhe; fora do âmbito devolve `404`                            |
+| `POST /api/v1/teams`                          | `ADMIN`, `DIRECAO`                 | `{name, status?}`; nome único por clube (sem distinguir maiúsculas) |
+| `PUT /api/v1/teams/{id}`                      | `ADMIN`, `DIRECAO`                 | Atualiza nome/estado                                             |
+| `DELETE /api/v1/teams/{id}`                   | `ADMIN`, `DIRECAO`                 | Apaga a equipa e as associações de staff/plantel (em cascata)    |
+| `GET /api/v1/teams/{id}/staff`                | mesma visibilidade da equipa       | Lista treinadores/adjuntos                                       |
+| `POST /api/v1/teams/{id}/staff`               | `ADMIN`, `DIRECAO`                 | `{userId, role?}`: `TREINADOR` ou `TREINADOR_ADJUNTO`            |
+| `DELETE /api/v1/teams/{id}/staff/{userId}`    | `ADMIN`, `DIRECAO`                 | Remove o staff                                                   |
+| `GET /api/v1/teams/{id}/athletes`             | mesma visibilidade da equipa       | Lista o plantel                                                  |
+| `POST /api/v1/teams/{id}/athletes`            | `ADMIN`, `DIRECAO`                 | `{athleteId}`; o atleta tem de ser do mesmo clube                |
+| `DELETE /api/v1/teams/{id}/athletes/{athleteId}` | `ADMIN`, `DIRECAO`               | Remove do plantel                                                |
+
+A gestão de staff e plantel é **exclusiva de `ADMIN`/`DIRECAO`**: um treinador não pode adicionar atletas à
+própria equipa para alargar o seu âmbito de autorização.
+
+### Matriz de autorização por recurso
+
+| Papel         | Lê                                                        | Escreve                                                                                     |
+|---------------|-----------------------------------------------------------|---------------------------------------------------------------------------------------------|
+| `ADMIN`       | tudo no clube                                             | tudo no clube                                                                               |
+| `DIRECAO`     | tudo no clube                                             | tudo no clube                                                                               |
+| `TREINADOR`   | atletas e equipas em que é staff                          | atualiza atletas dessas equipas; não cria/apaga atletas, não muda estado, não gere contas/encarregados/plantel/staff |
+| `ATLETA`      | o próprio registo                                         | atualiza o próprio registo; não cria/apaga, não muda estado, não gere contas/encarregados   |
+| `ENCARREGADO` | os seus educandos                                         | atualiza os seus educandos; não cria/apaga, não muda estado, não gere contas/encarregados   |
+| `FINANCEIRO`  | atletas                                                   | —                                                                                           |
+
+Regras transversais:
+
+- A visibilidade é a **união** dos papéis ativos: um utilizador `ATLETA` + `ENCARREGADO` vê o próprio registo
+  e os educandos. O papel do token tem de corresponder a uma membership ativa no clube.
+- Um recurso fora do âmbito devolve `404` (não revela a existência); um recurso visível mas sem permissão de
+  escrita devolve `403`.
+- O RLS por `tenant_id` continua a ser a barreira final: nenhuma query vê dados de outro clube.
+- Encarregados e contas ligadas têm de ter membership ativo no clube; a conta de atleta é única por clube.
+- Todas as operações de escrita ficam em `audit_log` (`ATHLETE_*` e `TEAM_*`).
+
 ## Manutenção
 
 A limpeza periódica remove, em todos os clubes, dados que já não podem ser usados:
@@ -164,6 +231,12 @@ Os testes de integração precisam de Docker. Corre-se um PostgreSQL real com Te
 - `MemberManagementFlowTest`: `GET /api/v1/users` lista só os membros do clube; desativação revoga sessões;
   regras de `ADMIN`/`DIRECAO` (gestão de gestores, própria conta); remoção de papéis; alvos de outro clube
   dão `404`; e o último `ADMIN` ativo não pode ser desativado nem perder o papel (`409`).
+- `AthleteFlowTest`: fluxo de atletas contra PostgreSQL real. Cobre CRUD e validação, `409` de licença/conta
+  repetida, paginação e filtros (`q`, `status`, `teamId`), isolamento entre clubes, encarregados de educação e
+  auditoria. Prova a autorização por recurso: `TREINADOR` só nas suas equipas (perde o acesso ao sair do plantel),
+  `ATLETA` só no próprio registo, `ENCARREGADO` só nos educandos, `FINANCEIRO` só lê e `ADMIN`/`DIRECAO` gerem tudo.
+- `TeamFlowTest`: CRUD de equipas, nome único, autorização da listagem, staff e plantel, isolamento entre clubes,
+  remoção em cascata ao apagar a equipa e o âmbito do `TREINADOR` (só vê as equipas em que é staff e não as gere).
 - `ExpiredDataPurgerTest`: a limpeza remove convites/tokens expirados, aceites, usados ou revogados de
   **vários clubes** numa só chamada, e mantém os dados recentes/válidos e as mensagens `PENDING` da outbox.
 
@@ -270,16 +343,20 @@ O deploy corre automaticamente em cada push para `main`; também pode ser dispar
 | `notifications`                                       | `EmailSender` (outbox), `MailTransport` (SMTP/log) e processador com tentativas (`email_outbox`)                                             |
 | `maintenance`                                         | Limpeza periódica de dados expirados (convites, tokens e outbox)                                                                             |
 | `shared`                                              | Código comum (por agora, `/api/v1/ping`)                                                                                                     |
-| `athletes`, `teams`, `training`, `matches`, `billing` | Módulos da v1, ainda vazios                                                                                                                  |
+| `athletes`                                            | Atletas, encarregados de educação e ligação a contas, com autorização por recurso                                                            |
+| `teams`                                               | Base mínima de equipas: CRUD, staff e plantel (épocas/escalões ficam para o módulo completo)                                                  |
+| `training`, `matches`, `billing`                      | Módulos da v1, ainda vazios                                                                                                                  |
 
 Migrações Flyway em `src/main/resources/db/migration`:
 `V1` esquema base, `V2` RLS/permissões, `V3` refresh tokens, `V4` convites/reset de password,
 `V5` visibilidade de `app_user` por membership, `V6` outbox de e-mail/permissões de provisionamento,
-`V7` função `provision_tenant` e `V8` função/índices de limpeza periódica. Papéis em
-`docker/postgres-init/01-roles.sql`, também usado pelos testes (passwords `dev`, só para desenvolvimento;
-o `volei_migrator` tem `BYPASSRLS`).
+`V7` função `provision_tenant`, `V8` função/índices de limpeza periódica e `V9` atletas (conta, estado e
+encarregados) e base mínima de equipas (staff e plantel). Papéis em `docker/postgres-init/01-roles.sql`,
+também usado pelos testes (passwords `dev`, só para desenvolvimento; o `volei_migrator` tem `BYPASSRLS`).
 
-## Por fazer na fase 0
+## Por fazer
 
-- MFA para administradores
-- Autorização por recurso (por exemplo, o encarregado só vê os seus atletas), a fazer com cada módulo
+- MFA para administradores (fase 0).
+- Restantes módulos da fase 1: equipas completo (épocas, escalões, plantéis por época), treinos, jogos e
+  financeiro. Cada módulo deve reutilizar o padrão de autorização por recurso iniciado nos atletas.
+- Alargar a autorização por recurso aos restantes módulos (por exemplo, o `FINANCEIRO` só vê as quotas que gere).
