@@ -70,8 +70,13 @@ class TeamFlowTest {
     static final UUID EQUIPA_B = UUID.fromString("00000000-0000-0000-0000-00000000e102");
     static final UUID EQUIPA_CLUBE_B = UUID.fromString("00000000-0000-0000-0000-00000000e103");
 
+    static final UUID EPOCA_A = UUID.fromString("00000000-0000-0000-0000-00000000e201");
+    static final UUID ESCALAO_A = UUID.fromString("00000000-0000-0000-0000-00000000e211");
+
     static final UUID ATLETA_A = UUID.fromString("00000000-0000-0000-0000-00000000f201");
     static final UUID ATLETA_B = UUID.fromString("00000000-0000-0000-0000-00000000f202");
+    static final UUID ATLETA_C = UUID.fromString("00000000-0000-0000-0000-00000000f203");
+    static final UUID ATLETA_D = UUID.fromString("00000000-0000-0000-0000-00000000f204");
 
     private static String passwordHash;
 
@@ -215,6 +220,43 @@ class TeamFlowTest {
     }
 
     @Test
+    void validacaoFpVDoPlantel() throws Exception {
+        String admin = acesso(HOST_A, ADMIN);
+
+        // Atlea dentro da faixa do escalão (nascimento entre min e max): permite a inserção.
+        adicionarAtleta(HOST_A, admin, EQUIPA_B, ATLETA_A).andExpect(status().isOk());
+
+        // Atlea mais velho do que o escalão: proibido atuar em escalão inferior conforme regulamento FPV.
+        adicionarAtleta(HOST_A, admin, EQUIPA_B, ATLETA_C).andExpect(status().isBadRequest());
+
+        // Atlea mais novo do que o escalão: exige autorização excepcional de subida de escalão.
+        adicionarAtleta(HOST_A, admin, EQUIPA_B, ATLETA_D).andExpect(status().isBadRequest());
+
+        // Com autorização excepcional ativa para a época, a subida de escalão é permitida.
+        try (Connection c = superuser()) {
+            executar(c, """
+                    INSERT INTO season_promotion (tenant_id, season_id, athlete_id, age_group_id, authorized_by, status)
+                    VALUES (?, ?, ?, ?, ?, 'ACTIVE')
+                    """, CLUBE_A, EPOCA_A, ATLETA_D, ESCALAO_A, id(ADMIN));
+        }
+        adicionarAtleta(HOST_A, admin, EQUIPA_B, ATLETA_D).andExpect(status().isOk());
+
+        mvc.perform(delete("/api/v1/teams/" + EQUIPA_B + "/athletes/" + ATLETA_D)
+                        .header("Authorization", "Bearer " + admin).with(host(HOST_A)))
+                .andExpect(status().isNoContent());
+
+        // Após revogar a autorização, a subida de escalão volta a ser recusada.
+        try (Connection c = superuser()) {
+            executar(c, """
+                    UPDATE season_promotion
+                    SET status = 'REVOKED'
+                    WHERE tenant_id = ? AND season_id = ? AND athlete_id = ? AND age_group_id = ?
+                    """, CLUBE_A, EPOCA_A, ATLETA_D, ESCALAO_A);
+        }
+        adicionarAtleta(HOST_A, admin, EQUIPA_B, ATLETA_D).andExpect(status().isBadRequest());
+    }
+
+    @Test
     void isolamentoEntreClubes() throws Exception {
         String adminA = acesso(HOST_A, ADMIN);
         String adminB = acesso(HOST_B, ADMIN_B);
@@ -240,11 +282,10 @@ class TeamFlowTest {
         String admin = acesso(HOST_A, ADMIN);
         String treinador = acesso(HOST_A, TREINADOR);
 
-        String criada = criar(HOST_A, admin, "Equipa Descartavel")
+        String criada = criar(HOST_A, admin, "Equipa Descartavel", EPOCA_A, ESCALAO_A)
                 .andExpect(status().isCreated())
                 .andReturn().getResponse().getContentAsString();
         UUID id = UUID.fromString(JsonPath.read(criada, "$.id"));
-
         adicionarStaff(HOST_A, admin, id, id(TREINADOR), "TREINADOR").andExpect(status().isOk());
         adicionarAtleta(HOST_A, admin, id, ATLETA_A).andExpect(status().isOk());
 
@@ -282,6 +323,13 @@ class TeamFlowTest {
         return mvc.perform(post("/api/v1/teams").header("Authorization", "Bearer " + token)
                 .with(host(host)).contentType(MediaType.APPLICATION_JSON)
                 .content("{\"name\":\"" + nome + "\"}"));
+    }
+
+    private ResultActions criar(String host, String token, String nome, UUID seasonId, UUID ageGroupId)
+            throws Exception {
+        return mvc.perform(post("/api/v1/teams").header("Authorization", "Bearer " + token)
+                .with(host(host)).contentType(MediaType.APPLICATION_JSON)
+                .content("{\"name\":\"" + nome + "\",\"seasonId\":\"" + seasonId + "\",\"ageGroupId\":\"" + ageGroupId + "\"}"));
     }
 
     private ResultActions atualizar(String host, String token, UUID teamId, String nome) throws Exception {
@@ -339,6 +387,12 @@ class TeamFlowTest {
             passwordHash = passwordEncoder.encode(PASS);
         }
         try (Connection c = superuser()) {
+            executar(c, "DELETE FROM team_athlete");
+            executar(c, "DELETE FROM team_staff");
+            executar(c, "DELETE FROM team");
+            executar(c, "DELETE FROM season_promotion");
+            executar(c, "DELETE FROM age_group");
+            executar(c, "DELETE FROM season");
             clube(c, CLUBE_A, "Clube Equipas", "clube-equipas");
             clube(c, CLUBE_B, "Clube Equipas B", "clube-equipas-b");
 
@@ -351,10 +405,15 @@ class TeamFlowTest {
 
             atleta(c, ATLETA_A, CLUBE_A, "Atleta A");
             atleta(c, ATLETA_B, CLUBE_B, "Atleta B");
+            atleta(c, ATLETA_C, CLUBE_A, "Atleta Velho", 2005);
+            atleta(c, ATLETA_D, CLUBE_A, "Atleta Novo", 2018);
 
-            equipa(c, EQUIPA_A, CLUBE_A, "Equipa A");
-            equipa(c, EQUIPA_B, CLUBE_A, "Equipa B");
-            equipa(c, EQUIPA_CLUBE_B, CLUBE_B, "Equipa do Clube B");
+            epoca(c, EPOCA_A, CLUBE_A, "Época A");
+            escalao(c, ESCALAO_A, CLUBE_A, "Sub-14", 2008, 2012);
+
+            equipa(c, EQUIPA_A, CLUBE_A, "Equipa A", EPOCA_A, ESCALAO_A);
+            equipa(c, EQUIPA_B, CLUBE_A, "Equipa B", EPOCA_A, ESCALAO_A);
+            equipa(c, EQUIPA_CLUBE_B, CLUBE_B, "Equipa do Clube B", null, null);
 
             executar(c, """
                     INSERT INTO team_staff (tenant_id, team_id, user_id, role)
@@ -389,20 +448,49 @@ class TeamFlowTest {
     }
 
     private static void atleta(Connection c, UUID athleteId, UUID tenantId, String nome) throws SQLException {
+        atleta(c, athleteId, tenantId, nome, 2010);
+    }
+
+    private static void atleta(Connection c, UUID athleteId, UUID tenantId, String nome, int birthYear)
+            throws SQLException {
         executar(c, """
                 INSERT INTO athlete (id, tenant_id, full_name, birth_date, gender, status)
                 VALUES (?, ?, ?, ?, 'F', 'ACTIVE')
                 ON CONFLICT (id) DO UPDATE SET full_name = EXCLUDED.full_name,
                     birth_date = EXCLUDED.birth_date, gender = EXCLUDED.gender,
                     status = 'ACTIVE', anonymized_at = NULL
-                """, athleteId, tenantId, nome, Date.valueOf("2010-01-01"));
+                """, athleteId, tenantId, nome, Date.valueOf(birthYear + "-06-15"));
     }
 
-    private static void equipa(Connection c, UUID teamId, UUID tenantId, String nome) throws SQLException {
+    private static void epoca(Connection c, UUID seasonId, UUID tenantId, String nome) throws SQLException {
         executar(c, """
-                INSERT INTO team (id, tenant_id, name, status) VALUES (?, ?, ?, 'ACTIVE')
-                ON CONFLICT (id) DO UPDATE SET name = EXCLUDED.name, status = 'ACTIVE', anonymized_at = NULL
-                """, teamId, tenantId, nome);
+                INSERT INTO season (id, tenant_id, name, start_date, end_date, is_active)
+                VALUES (?, ?, ?, ?, ?, true)
+                ON CONFLICT (id) DO UPDATE SET name = EXCLUDED.name, start_date = EXCLUDED.start_date,
+                    end_date = EXCLUDED.end_date, is_active = true, anonymized_at = NULL
+                """, seasonId, tenantId, nome, Date.valueOf("2025-08-01"), Date.valueOf("2026-07-31"));
+    }
+
+    private static void escalao(Connection c, UUID ageGroupId, UUID tenantId, String nome, int minBirthYear,
+                                int maxBirthYear) throws SQLException {
+        executar(c, """
+                INSERT INTO age_group (id, tenant_id, season_id, name, min_birth_year, max_birth_year)
+                VALUES (?, ?, ?, ?, ?, ?)
+                ON CONFLICT (id) DO UPDATE SET name = EXCLUDED.name, season_id = EXCLUDED.season_id,
+                    min_birth_year = EXCLUDED.min_birth_year, max_birth_year = EXCLUDED.max_birth_year,
+                    anonymized_at = NULL
+                """, ageGroupId, tenantId, EPOCA_A, nome, minBirthYear, maxBirthYear);
+    }
+
+    private static void equipa(Connection c, UUID teamId, UUID tenantId, String nome, UUID seasonId,
+                               UUID ageGroupId) throws SQLException {
+        executar(c, """
+                INSERT INTO team (id, tenant_id, name, status, season_id, age_group_id)
+                VALUES (?, ?, ?, 'ACTIVE', ?, ?)
+                ON CONFLICT (id) DO UPDATE SET name = EXCLUDED.name, status = 'ACTIVE',
+                    season_id = EXCLUDED.season_id, age_group_id = EXCLUDED.age_group_id,
+                    anonymized_at = NULL
+                """, teamId, tenantId, nome, seasonId, ageGroupId);
     }
 
     private static int contarAuditoria(String action) throws SQLException {

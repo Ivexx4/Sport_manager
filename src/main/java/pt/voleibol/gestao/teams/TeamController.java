@@ -36,7 +36,9 @@ class TeamController {
     private static final String STAFF_ROLE_PATTERN = "(?i)TREINADOR|TREINADOR_ADJUNTO";
 
     record TeamRequest(@NotBlank @Size(max = 120) String name,
-                       @Pattern(regexp = STATUS_PATTERN) String status) {
+                       @Pattern(regexp = STATUS_PATTERN) String status,
+                       UUID seasonId,
+                       UUID ageGroupId) {
     }
 
     record StaffRequest(@NotNull UUID userId,
@@ -46,9 +48,11 @@ class TeamController {
     record RosterRequest(@NotNull UUID athleteId) {
     }
 
-    record TeamResponse(UUID id, String name, String status, Instant createdAt, Instant updatedAt) {
+    record TeamResponse(UUID id, String name, String status, UUID seasonId, UUID ageGroupId,
+                        Instant createdAt, Instant updatedAt) {
         static TeamResponse from(TeamService.TeamView t) {
-            return new TeamResponse(t.id(), t.name(), t.status(), t.createdAt(), t.updatedAt());
+            return new TeamResponse(t.id(), t.name(), t.status(), t.seasonId(), t.ageGroupId(),
+                    t.createdAt(), t.updatedAt());
         }
     }
 
@@ -84,7 +88,8 @@ class TeamController {
     ResponseEntity<TeamResponse> create(@AuthenticationPrincipal Jwt jwt,
                                         @Valid @RequestBody TeamRequest request) {
         TeamResponse created = TeamResponse.from(
-                teamService.create(actor(jwt), roles(jwt), request.name(), request.status()));
+                teamService.create(actor(jwt), roles(jwt), request.name(), request.status(),
+                        request.seasonId(), request.ageGroupId()));
         return ResponseEntity.status(HttpStatus.CREATED).body(created);
     }
 
@@ -92,7 +97,8 @@ class TeamController {
     TeamResponse update(@AuthenticationPrincipal Jwt jwt, @PathVariable UUID teamId,
                         @Valid @RequestBody TeamRequest request) {
         return TeamResponse.from(
-                teamService.update(actor(jwt), roles(jwt), teamId, request.name(), request.status()));
+                teamService.update(actor(jwt), roles(jwt), teamId, request.name(), request.status(),
+                        request.seasonId(), request.ageGroupId()));
     }
 
     @DeleteMapping("/{teamId}")
@@ -128,9 +134,9 @@ class TeamController {
     }
 
     @PostMapping("/{teamId}/athletes")
-    List<RosterResponse> addAthlete(@AuthenticationPrincipal Jwt jwt, @PathVariable UUID teamId,
-                                    @Valid @RequestBody RosterRequest request) {
-        return teamService.addAthlete(actor(jwt), roles(jwt), teamId, request.athleteId()).stream()
+    List<RosterResponse> addAthleteToTeam(@AuthenticationPrincipal Jwt jwt, @PathVariable UUID teamId,
+                                         @Valid @RequestBody RosterRequest request) {
+        return teamService.addAthleteToTeam(actor(jwt), roles(jwt), teamId, request.athleteId()).stream()
                 .map(RosterResponse::from).toList();
     }
 

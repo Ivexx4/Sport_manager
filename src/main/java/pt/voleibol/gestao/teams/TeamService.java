@@ -27,7 +27,8 @@ class TeamService {
     private static final Set<String> STAFF_ROLES = Set.of("TREINADOR", "TREINADOR_ADJUNTO");
     private static final Set<String> STATUSES = Set.of("ACTIVE", "INACTIVE");
 
-    record TeamView(UUID id, String name, String status, Instant createdAt, Instant updatedAt) {
+    record TeamView(UUID id, String name, String status, UUID seasonId, UUID ageGroupId,
+                    Instant createdAt, Instant updatedAt) {
     }
 
     record StaffView(UUID userId, String name, String email, String role) {
@@ -37,9 +38,13 @@ class TeamService {
     }
 
     private final TeamRepository teams;
+    private final SeasonRepository seasons;
+    private final AgeGroupRepository ageGroups;
 
-    TeamService(TeamRepository teams) {
+    TeamService(TeamRepository teams, SeasonRepository seasons, AgeGroupRepository ageGroups) {
         this.teams = teams;
+        this.seasons = seasons;
+        this.ageGroups = ageGroups;
     }
 
     @Transactional(readOnly = true)
@@ -58,16 +63,19 @@ class TeamService {
     }
 
     @Transactional
-    TeamView create(UUID actorId, Set<String> roles, String name, String status) {
+    TeamView create(UUID actorId, Set<String> roles, String name, String status, UUID seasonId,
+                    UUID ageGroupId) {
         UUID tenantId = requireTenant();
         requireManager(roles);
         String normalizedName = requiredText(name);
+        requireReferences(tenantId, seasonId, ageGroupId);
         if (teams.nameExists(tenantId, normalizedName, null)) {
             throw new ResponseStatusException(HttpStatus.CONFLICT, "Já existe uma equipa com este nome");
         }
         UUID id = UUID.randomUUID();
         try {
-            teams.insert(id, tenantId, normalizedName, validStatus(status == null ? "ACTIVE" : status), actorId);
+            teams.insert(id, tenantId, normalizedName, validStatus(status == null ? "ACTIVE" : status),
+                    seasonId, ageGroupId, actorId);
         } catch (DuplicateKeyException e) {
             throw new ResponseStatusException(HttpStatus.CONFLICT, "Já existe uma equipa com este nome");
         }
@@ -76,17 +84,20 @@ class TeamService {
     }
 
     @Transactional
-    TeamView update(UUID actorId, Set<String> roles, UUID teamId, String name, String status) {
+    TeamView update(UUID actorId, Set<String> roles, UUID teamId, String name, String status,
+                    UUID seasonId, UUID ageGroupId) {
         UUID tenantId = requireTenant();
         requireManager(roles);
         TeamRepository.TeamRow current = teams.findById(tenantId, teamId).orElseThrow(TeamService::notFound);
         String normalizedName = requiredText(name);
+        requireReferences(tenantId, seasonId, ageGroupId);
         if (teams.nameExists(tenantId, normalizedName, teamId)) {
             throw new ResponseStatusException(HttpStatus.CONFLICT, "Já existe uma equipa com este nome");
         }
         try {
             if (!teams.update(tenantId, teamId, normalizedName,
-                    status == null || status.isBlank() ? current.status() : validStatus(status))) {
+                    status == null || status.isBlank() ? current.status() : validStatus(status),
+                    seasonId, ageGroupId)) {
                 throw notFound();
             }
         } catch (DuplicateKeyException e) {
@@ -162,7 +173,7 @@ class TeamService {
     }
 
     @Transactional
-    List<RosterView> addAthlete(UUID actorId, Set<String> roles, UUID teamId, UUID athleteId) {
+    List<RosterView> addAthleteToTeam(UUID actorId, Set<String> roles, UUID teamId, UUID athleteId) {
         UUID tenantId = requireTenant();
         requireManager(roles);
         requireVisible(tenantId, teamId, actorId, roles);
@@ -172,6 +183,24 @@ class TeamService {
         if (teams.rosterExists(tenantId, teamId, athleteId)) {
             throw new ResponseStatusException(HttpStatus.CONFLICT, "Este atleta já pertence à equipa");
         }
+        TeamRepository.TeamRow team = teams.findById(tenantId, teamId).orElseThrow(TeamService::notFound);
+        if (team.seasonId() == null) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
+                    "A equipa não está associada a uma época");
+        }
+        if (team.ageGroupId() == null) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
+                    "A equipa não está associada a um escalão");
+        }
+        SeasonRepository.SeasonRow season = seasons.findById(tenantId, team.seasonId())
+                .orElseThrow(SeasonService::notFound);
+        AgeGroupRepository.AgeGroupRow ageGroup = ageGroups.findById(tenantId, team.ageGroupId())
+                .orElseThrow(AgeGroupService::notFound);
+        Integer birthYear = teams.birthYear(tenantId, athleteId);
+        if (birthYear == null) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Atleta sem data de nascimento");
+        }
+        validarRegrasFpV(tenantId, season, ageGroup, athleteId, birthYear);
         try {
             teams.insertAthlete(tenantId, teamId, athleteId, actorId);
         } catch (DuplicateKeyException e) {
@@ -194,6 +223,26 @@ class TeamService {
 
     // --- auxiliares ---
 
+    /**
+     * Regra federativa FPV no plantel: o atleta só pode integrar o escalão da época quando o seu ano
+     * de nascimento está dentro da faixa do escalão ({@code min_birth_year} a {@code max_birth_year}).
+     * Atleas mais novos do que o escalão (subida) dependem de autorização excepcional; atletas mais
+     * velhos do que o escalão não podem jogar em escalão inferior.
+     */
+    private void validarRegrasFpV(UUID tenantId, SeasonRepository.SeasonRow season,
+                                 AgeGroupRepository.AgeGroupRow ageGroup, UUID athleteId, int birthYear) {
+        if (birthYear < ageGroup.minBirthYear()) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
+                    "Proibido atuar em escalão inferior conforme regulamento FPV");
+        }
+        if (birthYear > ageGroup.maxBirthYear()) {
+            if (!teams.promotionExists(tenantId, season.id(), ageGroup.id(), athleteId)) {
+                throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
+                        "Subida de escalão excepcional não autorizada pela época");
+            }
+        }
+    }
+
     private TeamRepository.TeamRow requireVisible(UUID tenantId, UUID teamId, UUID actorId, Set<String> roles) {
         if (isManager(roles)) {
             return teams.findById(tenantId, teamId).orElseThrow(TeamService::notFound);
@@ -207,6 +256,24 @@ class TeamService {
     private static void requireManager(Set<String> roles) {
         if (!isManager(roles)) {
             throw new ResponseStatusException(HttpStatus.FORBIDDEN);
+        }
+    }
+
+    /** A época e o escalão têm de existir no clube e não podem estar anonimizados. */
+    private void requireReferences(UUID tenantId, UUID seasonId, UUID ageGroupId) {
+        if (seasonId != null && !teams.seasonExists(tenantId, seasonId)) {
+            throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Época não encontrada");
+        }
+        if (ageGroupId != null && !teams.ageGroupExists(tenantId, ageGroupId)) {
+            throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Escalão não encontrado");
+        }
+        if (seasonId != null && ageGroupId != null) {
+            AgeGroupRepository.AgeGroupRow ageGroup = ageGroups.findById(tenantId, ageGroupId)
+                    .orElseThrow(AgeGroupService::notFound);
+            if (!ageGroup.seasonId().equals(seasonId)) {
+                throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
+                        "O escalão não pertence à época indicada");
+            }
         }
     }
 
@@ -250,6 +317,7 @@ class TeamService {
     }
 
     private static TeamView view(TeamRepository.TeamRow row) {
-        return new TeamView(row.id(), row.name(), row.status(), row.createdAt(), row.updatedAt());
+        return new TeamView(row.id(), row.name(), row.status(), row.seasonId(), row.ageGroupId(),
+                row.createdAt(), row.updatedAt());
     }
 }

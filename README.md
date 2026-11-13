@@ -5,7 +5,7 @@ Estado atual: **fase 0 (fundações) concluída, fase 1 em curso** com o módulo
 tenancy com RLS, papéis da base de dados, filtro de tenant, testes de isolamento, autenticação por JWT próprio,
 limitação de tentativas de login, convites/utilizadores, recuperação de password, provisionamento de clubes,
 e-mail por outbox (com tentativas), limpeza periódica de dados expirados, CI e CD para staging; atletas,
-encarregados de educação e uma base mínima de equipas com autorização por recurso.
+encarregados de educação, equipas, épocas e escalões com autorização por recurso.
 
 ## Requisitos
 
@@ -151,8 +151,8 @@ Cada conta (`athlete.user_id`) só pode estar ligada a um atleta no mesmo clube.
 |-----------------------------------------------|------------------------------------|------------------------------------------------------------------|
 | `GET /api/v1/teams`                           | `ADMIN`, `DIRECAO`, `TREINADOR`    | Todas para a gestão; o treinador só vê as equipas em que é staff |
 | `GET /api/v1/teams/{id}`                      | idem                               | Detalhe; fora do âmbito devolve `404`                            |
-| `POST /api/v1/teams`                          | `ADMIN`, `DIRECAO`                 | `{name, status?}`; nome único por clube (sem distinguir maiúsculas) |
-| `PUT /api/v1/teams/{id}`                      | `ADMIN`, `DIRECAO`                 | Atualiza nome/estado                                             |
+| `POST /api/v1/teams`                          | `ADMIN`, `DIRECAO`                 | `{name, status?, seasonId?, ageGroupId?}`; nome único por clube (sem distinguir maiúsculas); época/escalão têm de existir no clube (`404`) |
+| `PUT /api/v1/teams/{id}`                      | `ADMIN`, `DIRECAO`                 | Atualiza nome/estado e associações; `null` em `seasonId`/`ageGroupId` remove a associação |
 | `DELETE /api/v1/teams/{id}`                   | `ADMIN`, `DIRECAO`                 | Desativa e anonimiza; staff e plantel ficam preservados para histórico |
 | `GET /api/v1/teams/{id}/staff`                | mesma visibilidade da equipa       | Lista treinadores/adjuntos                                       |
 | `POST /api/v1/teams/{id}/staff`               | `ADMIN`, `DIRECAO`                 | `{userId, role?}`: `TREINADOR` ou `TREINADOR_ADJUNTO`            |
@@ -163,6 +163,37 @@ Cada conta (`athlete.user_id`) só pode estar ligada a um atleta no mesmo clube.
 
 A gestão de staff e plantel é **exclusiva de `ADMIN`/`DIRECAO`**: um treinador não pode adicionar atletas à
 própria equipa para alargar o seu âmbito de autorização.
+
+### Regra federativa FPV no plantel
+
+No `POST /api/v1/teams/{teamId}/athletes` (`addAthleteToTeam`) o plantel passa a validar a idade do
+atleta contra o escalão da época da equipa (`season` → `age_group`):
+
+1. O atleta tem de estar no mesmo clube e não estar já no plantel (`404`/`409`).
+2. A equipa tem de estar associada a uma época e a um escalão (`400` se não o estiver).
+3. Com o `birth_year` do atleta (extraído de `birth_date`), a regra federativa é:
+   - `min_birth_year <= birth_year <= max_birth_year` → **permite** a inserção;
+   - `birth_year > max_birth_year` (subida) → exige **autorização excepcional** de subida de escalão
+     para a época (`season_promotion`, `ACTIVE`); sem autorização → `400`;
+   - `birth_year < min_birth_year` (tentativa de jogar em escalão inferior) → **`400`**:
+     "Proibido atuar em escalão inferior conforme regulamento FPV".
+
+### Endpoints de épocas e escalões
+
+| Endpoint                            | Quem pode          | Descrição                                                                 |
+|-------------------------------------|--------------------|---------------------------------------------------------------------------|
+| `GET /api/v1/seasons`               | qualquer membro    | Lista as épocas do clube                                                  |
+| `GET /api/v1/seasons/{id}`          | qualquer membro    | Detalhe; `404` se não existir no clube                                    |
+| `POST /api/v1/seasons`              | `ADMIN`, `DIRECAO` | `{name, startDate?, endDate?, isActive?}` → 201                           |
+| `PUT /api/v1/seasons/{id}`          | `ADMIN`, `DIRECAO` | Atualiza a época; nome único por clube                                    |
+| `DELETE /api/v1/seasons/{id}`       | `ADMIN`, `DIRECAO` | Anonimiza a época (`isActive = false` + `anonymized_at`); as equipas associadas mantêm-se |
+| `GET /api/v1/age-groups`            | qualquer membro    | Lista os escalões (por época) do clube                                   |
+| `GET /api/v1/age-groups/{id}`       | qualquer membro    | Detalhe; `404` se não existir no clube                                    |
+| `POST /api/v1/age-groups`           | `ADMIN`, `DIRECAO` | `{seasonId, name, minBirthYear, maxBirthYear}` → 201                     |
+| `PUT /api/v1/age-groups/{id}`       | `ADMIN`, `DIRECAO` | Atualiza o escalão; nome único na época                                   |
+| `DELETE /api/v1/age-groups/{id}`    | `ADMIN`, `DIRECAO` | Anonimiza o escalão; o registo e as equipas associadas mantêm-se          |
+
+`isActive` marca a época corrente; `startDate`/`endDate` são opcionais, mas a data de fim não pode ser anterior à de início. Os escalões são faixas de anos de nascimento (`minBirthYear`/`maxBirthYear`) de uma época (`seasonId` obrigatório). As épocas e os escalões anonimizados deixam de aparecer nas leituras e não podem ser associados a novas equipas.
 
 ### Matriz de autorização por recurso
 
@@ -201,6 +232,10 @@ Esta é a convenção para **todos os módulos**: uma entidade com histórico n�
 devem ter `anonymized_at` (e `status` quando aplicável) e os índices de unicidade devem ser parciais
 (`WHERE anonymized_at IS NULL`). Só dados sem valor histórico — tokens, convites e mensagens da outbox — são
 apagados pela limpeza periódica.
+
+Exceção: os escalões (`age_group`) passaram a pertencer a uma época (`season`) e a conter anos de nascimento;
+o `DELETE` mantém a convenção de remoção não destrutiva (anonimização), preservando o registo e as
+equipas associadas.
 
 ## Manutenção
 
@@ -257,6 +292,9 @@ Os testes de integração precisam de Docker. Corre-se um PostgreSQL real com Te
 - `TeamFlowTest`: CRUD de equipas, nome único, autorização da listagem, staff e plantel, isolamento entre clubes,
   remoção não destrutiva (a equipa é anonimizada e staff/plantel ficam preservados) e o âmbito do `TREINADOR`
   (só vê as equipas em que é staff e não as gere).
+- `SeasonAgeGroupFlowTest`: CRUD de épocas e escalões, validações de datas/anos de nascimento, leitura aberta a qualquer
+  membro, escrita só para `ADMIN`/`DIRECAO`, isolamento entre clubes, remoção não destrutiva e associação de
+  `seasonId`/`ageGroupId` às equipas (incluindo referências de outro clube ou anonimizadas).
 - `ExpiredDataPurgerTest`: a limpeza remove convites/tokens expirados, aceites, usados ou revogados de
   **vários clubes** numa só chamada, e mantém os dados recentes/válidos e as mensagens `PENDING` da outbox.
 
@@ -364,20 +402,21 @@ O deploy corre automaticamente em cada push para `main`; também pode ser dispar
 | `maintenance`                                         | Limpeza periódica de dados expirados (convites, tokens e outbox)                                                                             |
 | `shared`                                              | Código comum (por agora, `/api/v1/ping`)                                                                                                     |
 | `athletes`                                            | Atletas, encarregados de educação e ligação a contas, com autorização por recurso                                                            |
-| `teams`                                               | Base mínima de equipas: CRUD, staff e plantel (épocas/escalões ficam para o módulo completo)                                                  |
+| `teams`                                               | Equipas, épocas e escalões (CRUD, staff e plantel)                                                                                           |
 | `training`, `matches`, `billing`                      | Módulos da v1, ainda vazios                                                                                                                  |
 
 Migrações Flyway em `src/main/resources/db/migration`:
 `V1` esquema base, `V2` RLS/permissões, `V3` refresh tokens, `V4` convites/reset de password,
 `V5` visibilidade de `app_user` por membership, `V6` outbox de e-mail/permissões de provisionamento,
 `V7` função `provision_tenant`, `V8` função/índices de limpeza periódica, `V9` atletas (conta, estado e
-encarregados) e base mínima de equipas (staff e plantel) e `V10` remoção não destrutiva (anonimização e
-índices de unicidade parciais). Papéis em `docker/postgres-init/01-roles.sql`,
-também usado pelos testes (passwords `dev`, só para desenvolvimento; o `volei_migrator` tem `BYPASSRLS`).
+encarregados) e base mínima de equipas (staff e plantel), `V10` remoção não destrutiva (anonimização e
+índices de unicidade parciais) e `V11` épocas e escalões (`season`, `age_group` e autorizações de subida
+`season_promotion`), com a associação à equipa. Papéis em `docker/postgres-init/01-roles.sql`, também
+usado pelos testes (passwords `dev`, só para desenvolvimento; o `volei_migrator` tem `BYPASSRLS`).
 
 ## Por fazer
 
 - MFA para administradores (fase 0).
-- Restantes módulos da fase 1: equipas completo (épocas, escalões, plantéis por época), treinos, jogos e
-  financeiro. Cada módulo deve reutilizar o padrão de autorização por recurso iniciado nos atletas.
+- Restantes módulos da fase 1: plantéis por época, treinos, jogos e financeiro. Cada módulo deve reutilizar
+  o padrão de autorização por recurso iniciado nos atletas.
 - Alargar a autorização por recurso aos restantes módulos (por exemplo, o `FINANCEIRO` só vê as quotas que gere).

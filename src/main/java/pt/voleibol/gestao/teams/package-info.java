@@ -1,5 +1,4 @@
 /**
- * Módulo teams: base mínima de equipas (CRUD, staff e plantel). Épocas, escalões e plantéis por
- * época serão adicionados ao completar o módulo.
+ * Módulo teams: equipas, épocas e escalões (CRUD, staff e plantel).
  */
 package pt.voleibol.gestao.teams;

@@ -10,13 +10,14 @@ import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.stereotype.Repository;
 
 /**
- * Acesso a dados da base mínima de equipas. O módulo teams alargará esta base com épocas,
- * escalões, plantéis e staff próprio; as relações criadas aqui mantêm-se.
+ * Acesso a dados das equipas, do staff e do plantel. As equipas podem ser associadas a uma época
+ * e a um escalão do clube.
  */
 @Repository
 class TeamRepository {
 
-    record TeamRow(UUID id, String name, String status, Instant createdAt, Instant updatedAt) {
+    record TeamRow(UUID id, String name, String status, UUID seasonId, UUID ageGroupId,
+                   Instant createdAt, Instant updatedAt) {
     }
 
     record StaffRow(UUID userId, String name, String email, String role) {
@@ -26,7 +27,7 @@ class TeamRepository {
     }
 
     private static final String SELECT = """
-            SELECT t.id, t.name, t.status, t.created_at, t.updated_at
+            SELECT t.id, t.name, t.status, t.season_id, t.age_group_id, t.created_at, t.updated_at
             FROM team t
             """;
 
@@ -86,28 +87,35 @@ class TeamRepository {
         return spec.query(Boolean.class).single();
     }
 
-    void insert(UUID id, UUID tenantId, String name, String status, UUID actorId) {
+    void insert(UUID id, UUID tenantId, String name, String status, UUID seasonId, UUID ageGroupId,
+                UUID actorId) {
         jdbc.sql("""
-                        INSERT INTO team (id, tenant_id, name, status, created_by)
-                        VALUES (:id, :tenant, :name, :status, :actor)
+                        INSERT INTO team (id, tenant_id, name, status, season_id, age_group_id, created_by)
+                        VALUES (:id, :tenant, :name, :status, :season, :age_group, :actor)
                         """)
                 .param("id", id)
                 .param("tenant", tenantId)
                 .param("name", name)
                 .param("status", status)
+                .param("season", seasonId)
+                .param("age_group", ageGroupId)
                 .param("actor", actorId)
                 .update();
     }
 
-    boolean update(UUID tenantId, UUID teamId, String name, String status) {
+    boolean update(UUID tenantId, UUID teamId, String name, String status, UUID seasonId, UUID ageGroupId) {
         return jdbc.sql("""
-                        UPDATE team SET name = :name, status = :status, updated_at = now()
+                        UPDATE team
+                        SET name = :name, status = :status, season_id = :season, age_group_id = :age_group,
+                            updated_at = now()
                         WHERE tenant_id = :tenant AND id = :id AND anonymized_at IS NULL
                         """)
                 .param("tenant", tenantId)
                 .param("id", teamId)
                 .param("name", name)
                 .param("status", status)
+                .param("season", seasonId)
+                .param("age_group", ageGroupId)
                 .update() == 1;
     }
 
@@ -266,6 +274,60 @@ class TeamRepository {
                 .single();
     }
 
+    boolean seasonExists(UUID tenantId, UUID seasonId) {
+        return jdbc.sql("""
+                        SELECT EXISTS (
+                            SELECT 1 FROM season
+                            WHERE tenant_id = :tenant AND id = :id AND anonymized_at IS NULL)
+                        """)
+                .param("tenant", tenantId)
+                .param("id", seasonId)
+                .query(Boolean.class)
+                .single();
+    }
+
+    boolean ageGroupExists(UUID tenantId, UUID ageGroupId) {
+        return jdbc.sql("""
+                        SELECT EXISTS (
+                            SELECT 1 FROM age_group
+                            WHERE tenant_id = :tenant AND id = :id AND anonymized_at IS NULL)
+                        """)
+                .param("tenant", tenantId)
+                .param("id", ageGroupId)
+                .query(Boolean.class)
+                .single();
+    }
+
+    /** Ano de nascimento do atleta (o regresso já é o ano civil de `birth_date`). */
+    Integer birthYear(UUID tenantId, UUID athleteId) {
+        return jdbc.sql("""
+                        SELECT EXTRACT(YEAR FROM birth_date)::int AS birth_year
+                        FROM athlete
+                        WHERE tenant_id = :tenant AND id = :id AND anonymized_at IS NULL
+                        """)
+                .param("tenant", tenantId)
+                .param("id", athleteId)
+                .query((rs, i) -> rs.getInt("birth_year"))
+                .single();
+    }
+
+    /** Autorização excepcional de subida de escalão para a época (só `ACTIVE` conta). */
+    boolean promotionExists(UUID tenantId, UUID seasonId, UUID ageGroupId, UUID athleteId) {
+        return jdbc.sql("""
+                        SELECT EXISTS (
+                            SELECT 1 FROM season_promotion sp
+                            WHERE sp.tenant_id = :tenant AND sp.season_id = :season
+                              AND sp.athlete_id = :athlete AND sp.age_group_id = :age_group
+                              AND sp.status = 'ACTIVE')
+                        """)
+                .param("tenant", tenantId)
+                .param("season", seasonId)
+                .param("athlete", athleteId)
+                .param("age_group", ageGroupId)
+                .query(Boolean.class)
+                .single();
+    }
+
     void audit(UUID tenantId, UUID actorId, String action, UUID teamId) {
         jdbc.sql("""
                         INSERT INTO audit_log (tenant_id, user_id, action, entity, entity_id)
@@ -283,6 +345,8 @@ class TeamRepository {
                 rs.getObject("id", UUID.class),
                 rs.getString("name"),
                 rs.getString("status"),
+                rs.getObject("season_id", UUID.class),
+                rs.getObject("age_group_id", UUID.class),
                 rs.getObject("created_at", OffsetDateTime.class).toInstant(),
                 rs.getObject("updated_at", OffsetDateTime.class).toInstant());
     }

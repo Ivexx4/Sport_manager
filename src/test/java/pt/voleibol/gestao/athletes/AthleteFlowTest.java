@@ -82,6 +82,9 @@ class AthleteFlowTest {
     static final UUID EQUIPA_A = UUID.fromString("00000000-0000-0000-0000-00000000c101");
     static final UUID EQUIPA_OUTRA = UUID.fromString("00000000-0000-0000-0000-00000000c102");
 
+    static final UUID EPOCA = UUID.fromString("00000000-0000-0000-0000-00000000c201");
+    static final UUID ESCALAO = UUID.fromString("00000000-0000-0000-0000-00000000c211");
+
     /** O mesmo hash para todos os utilizadores de teste: evita calcular bcrypt dezenas de vezes. */
     private static String passwordHash;
 
@@ -622,7 +625,10 @@ class AthleteFlowTest {
             atleta(c, ATLETA_4, CLUBE_A, "Atleta Quatro", "2010-05-04", "F", "A4-LIC", null);
             atleta(c, ATLETA_B, CLUBE_B, "Atleta de Outro Clube", "2010-05-05", "F", "B1-LIC", null);
 
-            equipa(c, EQUIPA_A, CLUBE_A, "Equipa A");
+            epoca(c, EPOCA, CLUBE_A, "Época A");
+            escalao(c, ESCALAO, CLUBE_A, "Sub-14", 2010, 2014);
+
+            equipa(c, EQUIPA_A, CLUBE_A, "Equipa A", EPOCA, ESCALAO);
             equipa(c, EQUIPA_OUTRA, CLUBE_A, "Equipa B");
             executar(c, """
                     INSERT INTO team_staff (tenant_id, team_id, user_id, role)
@@ -679,6 +685,33 @@ class AthleteFlowTest {
                 INSERT INTO team (id, tenant_id, name, status) VALUES (?, ?, ?, 'ACTIVE')
                 ON CONFLICT (id) DO UPDATE SET name = EXCLUDED.name, status = 'ACTIVE', anonymized_at = NULL
                 """, teamId, tenantId, nome);
+    }
+
+    private static void equipa(Connection c, UUID teamId, UUID tenantId, String nome, UUID seasonId, UUID ageGroupId) throws SQLException {
+        executar(c, """
+                INSERT INTO team (id, tenant_id, name, status, season_id, age_group_id) VALUES (?, ?, ?, 'ACTIVE', ?, ?)
+                ON CONFLICT (id) DO UPDATE SET name = EXCLUDED.name, status = 'ACTIVE', season_id = EXCLUDED.season_id,
+                    age_group_id = EXCLUDED.age_group_id, anonymized_at = NULL
+                """, teamId, tenantId, nome, seasonId, ageGroupId);
+    }
+
+    private static void epoca(Connection c, UUID seasonId, UUID tenantId, String nome) throws SQLException {
+        executar(c, """
+                INSERT INTO season (id, tenant_id, name, start_date, end_date, is_active)
+                VALUES (?, ?, ?, ?, ?, true)
+                ON CONFLICT (id) DO UPDATE SET name = EXCLUDED.name, start_date = EXCLUDED.start_date,
+                    end_date = EXCLUDED.end_date, is_active = true, anonymized_at = NULL
+                """, seasonId, tenantId, nome, Date.valueOf("2025-08-01"), Date.valueOf("2026-07-31"));
+    }
+
+    private static void escalao(Connection c, UUID ageGroupId, UUID tenantId, String nome, int minBirthYear, int maxBirthYear) throws SQLException {
+        executar(c, """
+                INSERT INTO age_group (id, tenant_id, season_id, name, min_birth_year, max_birth_year)
+                VALUES (?, ?, ?, ?, ?, ?)
+                ON CONFLICT (id) DO UPDATE SET name = EXCLUDED.name, season_id = EXCLUDED.season_id,
+                    min_birth_year = EXCLUDED.min_birth_year, max_birth_year = EXCLUDED.max_birth_year,
+                    anonymized_at = NULL
+                """, ageGroupId, tenantId, EPOCA, nome, minBirthYear, maxBirthYear);
     }
 
     private static int contarAuditoria(String action) throws SQLException {
