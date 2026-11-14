@@ -1,7 +1,11 @@
 package pt.voleibol.gestao.athletes;
 
+import java.io.BufferedReader;
+import java.io.IOException;
+import java.io.Reader;
 import java.time.Instant;
 import java.time.LocalDate;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
 import java.util.Optional;
@@ -99,6 +103,67 @@ class AthleteService {
         }
         athletes.audit(tenantId, actorId, "ATHLETE_CREATED", id);
         return get(actorId, roles, id);
+    }
+
+    @Transactional
+    int importCsv(UUID actorId, Set<String> roles, Reader reader) throws IOException {
+        requireManager(roles);
+        UUID tenantId = requireTenant();
+        BufferedReader br = reader instanceof BufferedReader ? (BufferedReader) reader
+                : new BufferedReader(reader);
+        String line;
+        int count = 0;
+        boolean header = true;
+        while ((line = br.readLine()) != null) {
+            if (line.isBlank()) continue;
+            String[] cols = line.split(",", -1);
+            if (header) {
+                header = false;
+                // skip header row if first column looks like a header
+                if (cols.length > 0 && cols[0].trim().equalsIgnoreCase("fullName")) {
+                    continue;
+                }
+            }
+            // expected: fullName,birthDate,gender,nif,email,phone,licenseNumber,status
+            if (cols.length < 3) continue;
+            String fullName = cols[0].trim();
+            if (fullName.isBlank()) continue;
+            LocalDate birthDate;
+            try {
+                birthDate = LocalDate.parse(cols[1].trim());
+            } catch (Exception e) {
+                continue;
+            }
+            String gender = cols[2].trim().toUpperCase(Locale.ROOT);
+            if (!gender.equals("F") && !gender.equals("M")) gender = "M";
+            String nif = cols.length > 3 ? emptyToNull(cols[3]) : null;
+            String email = cols.length > 4 ? emptyToNull(cols[4]) : null;
+            String phone = cols.length > 5 ? emptyToNull(cols[5]) : null;
+            String license = cols.length > 6 ? emptyToNull(cols[6]) : null;
+            String status = cols.length > 7 ? cols[7].trim().toUpperCase(Locale.ROOT) : "ACTIVE";
+            if (!STATUSES.contains(status)) status = "ACTIVE";
+
+            AthleteRepository.Data data = new AthleteRepository.Data(fullName, birthDate, gender, nif, email,
+                    phone, license, status, null);
+            if (license != null && athletes.licenseExists(tenantId, license, null)) {
+                continue;
+            }
+            UUID id = UUID.randomUUID();
+            try {
+                athletes.insert(id, tenantId, data, actorId);
+            } catch (DuplicateKeyException e) {
+                continue;
+            }
+            athletes.audit(tenantId, actorId, "ATHLETE_CREATED", id);
+            count++;
+        }
+        return count;
+    }
+
+    private static String emptyToNull(String v) {
+        if (v == null) return null;
+        String t = v.trim();
+        return t.isEmpty() ? null : t;
     }
 
     @Transactional

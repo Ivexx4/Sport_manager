@@ -28,6 +28,7 @@ import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.multipart.MultipartFile;
 
 /**
  * Atletas e encarregados de educação. A autorização fina é feita no serviço, porque depende da
@@ -95,9 +96,11 @@ class AthleteController {
     }
 
     private final AthleteService athleteService;
+    private final AthleteStatsService statsService;
 
-    AthleteController(AthleteService athleteService) {
+    AthleteController(AthleteService athleteService, AthleteStatsService statsService) {
         this.athleteService = athleteService;
+        this.statsService = statsService;
     }
 
     @GetMapping
@@ -113,6 +116,19 @@ class AthleteController {
     @GetMapping("/{athleteId}")
     AthleteResponse get(@AuthenticationPrincipal Jwt jwt, @PathVariable UUID athleteId) {
         return AthleteResponse.from(athleteService.get(actor(jwt), roles(jwt), athleteId));
+    }
+
+    record AthleteStatsResponse(long matchesCalledUp, long matchesPlayed, long callUpsConfirmed,
+                                long callUpsDeclined, long trainingsRegistered, long trainingsPresent) {
+        static AthleteStatsResponse from(AthleteStatsService.Stats s) {
+            return new AthleteStatsResponse(s.matchesCalledUp(), s.matchesPlayed(), s.callUpsConfirmed(),
+                    s.callUpsDeclined(), s.trainingsRegistered(), s.trainingsPresent());
+        }
+    }
+
+    @GetMapping("/{athleteId}/stats")
+    AthleteStatsResponse stats(@AuthenticationPrincipal Jwt jwt, @PathVariable UUID athleteId) {
+        return AthleteStatsResponse.from(statsService.get(actor(jwt), roles(jwt), athleteId));
     }
 
     @PostMapping
@@ -181,6 +197,15 @@ class AthleteController {
                                         @PathVariable UUID userId) {
         athleteService.removeGuardian(actor(jwt), roles(jwt), athleteId, userId);
         return ResponseEntity.noContent().build();
+    }
+
+    // --- importação CSV ---
+    @PostMapping(value = "/import", consumes = "multipart/form-data")
+    ResponseEntity<java.util.Map<String, Object>> importCsv(@AuthenticationPrincipal Jwt jwt,
+                                                            @RequestParam("file") MultipartFile file) throws java.io.IOException {
+        int count = athleteService.importCsv(actor(jwt), roles(jwt), new java.io.InputStreamReader(file.getInputStream(),
+                java.nio.charset.StandardCharsets.UTF_8));
+        return ResponseEntity.ok(java.util.Map.of("imported", count));
     }
 
     private static UUID actor(Jwt jwt) {

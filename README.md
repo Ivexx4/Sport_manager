@@ -1,7 +1,11 @@
 # Gestão de Clubes de Voleibol
 
 Monólito modular (Java 25, Spring Boot 4.1.2, Maven) com PostgreSQL e multitenancy por `tenant_id` + Row Level Security.
-Estado atual: **fase 0 (fundações) concluída, fase 1 em curso** com o módulo de **atletas** (CRUD completo):
+Estado atual: **fases 0 e 1 concluídas, fase 2 em curso** com os módulos de **atletas** (CRUD, documentos com
+validade e importação CSV), **equipas** (com épocas, escalões e regra federativa FPV), **treinos e jogos**
+(sessões, presenças, jogos, resultados por set e convocatórias) e **financeiro** (planos de quotas, cobranças,
+pagamentos e lançamentos). Inclui ainda estatísticas de assiduidade/convocatórias por atleta e alertas de
+caducidade de documentos por e-mail:
 tenancy com RLS, papéis da base de dados, filtro de tenant, testes de isolamento, autenticação por JWT próprio,
 limitação de tentativas de login, convites/utilizadores, recuperação de password, provisionamento de clubes,
 e-mail por outbox (com tentativas), limpeza periódica de dados expirados, CI e CD para staging; atletas,
@@ -63,6 +67,35 @@ Com o provisionamento (B), usa o slug, o e-mail e a password indicados no pedido
 
 Um subdomínio desconhecido devolve 404; um pedido de autenticação sem subdomínio devolve 400.
 
+## Arquitetura e stack
+
+Monólito modular com PostgreSQL e multitenancy por `tenant_id` + Row Level Security.
+
+| Camada | Escolha | Porquê |
+| :--- | :--- | :--- |
+| **Linguagem** | Java 25 (LTS) | Última LTS, suportada pelo Spring Boot 4.1; virtual threads, records, pattern matching |
+| **Framework** | Spring Boot 4.1.2 (Web, Security, Data JPA) sobre Spring Framework 7 | Ecossistema maduro, segurança e multitenancy bem documentados |
+| **Base de dados** | PostgreSQL 16+ | Row Level Security nativa, JSONB, particionamento |
+| **Migrações** | Flyway | Versionar esquema e políticas RLS como código |
+| **Pool de ligações** | HikariCP (+ PgBouncer em produção) | Atenção ao modo de pooling com RLS (ver Multitenancy) |
+| **Autenticação** | Keycloak ou Spring Authorization Server (OIDC/JWT) | Utilizadores com papéis por clube; SSO futuro |
+| **API** | REST + OpenAPI (springdoc) | Contrato claro para web e mobile |
+| **Frontend** | React + TypeScript (PWA) | Pais e atletas usam o telemóvel; PWA evita duas apps nativas na v1 |
+| **Tarefas assíncronas** | Spring Scheduler + fila (RabbitMQ ou tabela outbox) | Notificações, geração de quotas, lembretes |
+| **Pagamentos** | MB WAY / Multibanco via agregador (ex.: Stripe, SIBS ou EasyPay) | Referências Multibanco e MB WAY são o padrão em Portugal |
+| **Observabilidade** | Micrometer + Prometheus/Grafana, logs JSON com `tenant_id` | Diagnóstico por clube |
+| **Testes** | JUnit 5, Testcontainers (PostgreSQL real), ArchUnit | Testar RLS contra a base real, não mocks |
+
+**Estrutura de pacotes (módulos):** `tenancy`, `identity`, `athletes`, `teams`, `training`, `matches`, `billing`, `notifications`, `shared`. Cada módulo expõe apenas uma interface pública; ArchUnit impede dependências cíclicas.
+
+### Notas sobre Java 25 e Spring Boot 4.1.2:
+- **Requisitos da documentação oficial:** Java 17 a 27 (Java 25 suportado), Spring Framework 7.0.10 ou superior, Maven 3.6.3+ ou Gradle 8.14+/9.x, Tomcat 11 embebido (Servlet 6.1).
+- **Estrutura do Spring Boot 4.0:** O Spring Boot 4.0 foi uma rutura face ao 3.x: base Jakarta EE 11, Jackson 3, starters modulares (JARs de auto-configuração divididos) e null safety com JSpecify. Vê o resumo do 4.1 na InfoQ e o guia de migração oficial antes de copiar exemplos escritos para o 3.x.
+- **Geração de código:** Muito material online (e muito código gerado por IA) ainda assume Spring Boot 3: ao pedir código, indicar sempre a versão exata e validar as dependências e os nomes dos starters contra a documentação do 4.1.
+- **Segurança nas migrações:** Os testes de integração com Testcontainers e RLS continuam a ser a rede de segurança para migrações de versão.
+
+---
+
 ## Autenticação
 
 | Endpoint                    | Descrição                                                                                                               |
@@ -123,7 +156,8 @@ Um subdomínio desconhecido devolve 404; um pedido de autenticação sem subdom�
 
 Primeiro módulo da fase 1: **atletas** com CRUD completo, encarregados de educação e ligação opcional a uma
 conta de utilizador. Para suportar o âmbito do `TREINADOR`, entrou também uma **base mínima de equipas**
-(equipa, staff e plantel); épocas, escalões e plantéis por época ficam para o módulo `teams` completo.
+(equipa, staff e plantel); o módulo `teams` completo (equipas, staff, plantel, épocas, escalões e regra federativa
+FPV) foi entregue.
 
 ### Endpoints de atletas
 
@@ -158,7 +192,7 @@ Cada conta (`athlete.user_id`) só pode estar ligada a um atleta no mesmo clube.
 | `POST /api/v1/teams/{id}/staff`               | `ADMIN`, `DIRECAO`                 | `{userId, role?}`: `TREINADOR` ou `TREINADOR_ADJUNTO`            |
 | `DELETE /api/v1/teams/{id}/staff/{userId}`    | `ADMIN`, `DIRECAO`                 | Remove o staff                                                   |
 | `GET /api/v1/teams/{id}/athletes`             | mesma visibilidade da equipa       | Lista o plantel                                                  |
-| `POST /api/v1/teams/{id}/athletes`            | `ADMIN`, `DIRECAO`                 | `{athleteId}`; o atleta tem de ser do mesmo clube                |
+| `POST /api/v1/teams/{id}/athletes`            | `ADMIN`, `DIRECAO`                 | `{athleteId}`; atleta do mesmo clube, com a idade válida para o escalão (regra federativa FPV) |
 | `DELETE /api/v1/teams/{id}/athletes/{athleteId}` | `ADMIN`, `DIRECAO`               | Remove do plantel                                                |
 
 A gestão de staff e plantel é **exclusiva de `ADMIN`/`DIRECAO`**: um treinador não pode adicionar atletas à
@@ -237,6 +271,42 @@ Exceção: os escalões (`age_group`) passaram a pertencer a uma época (`season
 o `DELETE` mantém a convenção de remoção não destrutiva (anonimização), preservando o registo e as
 equipas associadas.
 
+## Modelo de dados
+
+Todas as tabelas abaixo levam `tenant_id`, `id` (UUID), `created_at`, `updated_at` e `created_by`; as que não referem tenant (`tenant`, `app_user`) são geridas pela plataforma.
+
+| Entidade | Campos principais | Relações |
+| :--- | :--- | :--- |
+| `tenant` | nome, slug, NIF, estado, plano | raiz de todos os dados |
+| `app_user` | email, nome, estado | N:N com tenant via membership |
+| `membership` | user_id, papel, estado | liga utilizador a clube com papel |
+| `season` | nome, início, fim, ativa | 1:N com team |
+| `age_group` | nome, idade mín./máx., regra de data de corte | 1:N com team |
+| `team` | nome, season_id, age_group_id, género | 1:N com roster_entry, training_session, match |
+| `athlete` | nome, data de nascimento, género, NIF, contactos, nº licença, estado, conta | N:N com `athlete_guardian`; 1:N com document, attendance e call_up |
+| `athlete_guardian` | athlete_id, user_id, parentesco | liga atleta a encarregado de educação |
+| `team` | nome, season_id, age_group_id, género | 1:N com `team_athlete`, `team_staff`, training_session e match |
+| `team_athlete` | team_id, athlete_id | plantel da equipa |
+| `team_staff` | team_id, user_id, função | treinador, delegado |
+| `document` | athlete_id, tipo, ficheiro, validade, `expiry_notified_at` | alerta de caducidade (com deduplicação semanal) |
+| `venue` | nome, morada | pavilhão/campo usado por treinos e jogos |
+| `training_session` | team_id, court_id, início, fim, recorrência, estado | 1:N com attendance |
+| `attendance` | session_id, athlete_id, estado, justificação | |
+| `match` | team_id, competição, adversário, local, court_id, data/hora, casa/fora, estado | 1:N com set_score e call_up |
+| `set_score` | match_id, nº do set, pontos nossos, pontos adversário | |
+| `call_up` | match_id, athlete_id, estado, resposta, data da resposta | convocatória |
+| `fee_plan` | nome, season_id, age_group_id, valor, periodicidade | gera charges |
+| `charge` | athlete_id, guardian_id, fee_plan_id, valor, vencimento, estado | 1:N com payment |
+| `payment` | charge_id, método, valor, referência externa, data | reconciliação do agregador |
+| `ledger_entry` | tipo, categoria, valor, data, descrição | receitas e despesas do clube |
+| `audit_log` | utilizador, ação, entidade, antes/depois (JSONB), data | só de escrita |
+
+### Regras de modelação:
+- Valores monetários em inteiros (cêntimos) ou `numeric(12,2)`, nunca `float`.
+- Datas e horas em `timestamptz`, guardadas em UTC e mostradas no fuso do clube (`Europe/Lisbon`).
+- Um atleta pode ter várias épocas; o escalão é sempre derivado da época e da data de nascimento, não guardado no atleta.
+- Apagar atletas faz-se por anonimização (RGPD), mantendo os registos financeiros exigidos por lei.
+
 ## Manutenção
 
 A limpeza periódica remove, em todos os clubes, dados que já não podem ser usados:
@@ -290,11 +360,30 @@ Os testes de integração precisam de Docker. Corre-se um PostgreSQL real com Te
   Cobre também a remoção não destrutiva: anonimização, preservação do plantel, remoção dos encarregados e
   reutilização da licença e da conta.
 - `TeamFlowTest`: CRUD de equipas, nome único, autorização da listagem, staff e plantel, isolamento entre clubes,
-  remoção não destrutiva (a equipa é anonimizada e staff/plantel ficam preservados) e o âmbito do `TREINADOR`
-  (só vê as equipas em que é staff e não as gere).
+  remoção não destrutiva (a equipa é anonimizada e staff/plantel ficam preservados), o âmbito do `TREINADOR`
+  (só vê as equipas em que é staff e não as gere) e a regra federativa FPV no plantel (faixa de escalão, subida com
+  autorização excepcional e proibição em escalão inferior).
 - `SeasonAgeGroupFlowTest`: CRUD de épocas e escalões, validações de datas/anos de nascimento, leitura aberta a qualquer
   membro, escrita só para `ADMIN`/`DIRECAO`, isolamento entre clubes, remoção não destrutiva e associação de
   `seasonId`/`ageGroupId` às equipas (incluindo referências de outro clube ou anonimizadas).
+- `TrainingFlowTest`: locais e sessões de treino contra PostgreSQL real. Cobre CRUD, nome de local único (`409`),
+  validações (`400`/`404`), presenças (upsert, listagem e remoção), autorização por papel (`TREINADOR` só nas suas
+  equipas, `ATLETA`/`ENCARREGADO` só leitura das sessões da equipa do atleta, `FINANCEIRO` só leitura, gestão total
+  para `ADMIN`/`DIRECAO`), isolamento entre clubes, remoção não destrutiva (a sessão é anonimizada e as presenças
+  ficam preservadas) e auditoria.
+- `MatchFlowTest`: jogos contra PostgreSQL real. Cobre CRUD, resultados por set (upsert, alteração e remoção),
+  convocatórias e respostas (atleta responde só à própria; encarregado só lê), validações, autorização por papel
+  (`TREINADOR` só nos jogos das suas equipas), isolamento entre clubes, remoção não destrutiva (sets e convocatórias
+  preservados) e auditoria.
+- `DocumentFlowTest`: documentos com validade. Cobre CRUD por atleta, validações, autorização por recurso
+  (`TREINADOR` só nos atletas das suas equipas, `ATLETA`/`ENCARREGADO` só no próprio/educandos, `FINANCEIRO` só lê),
+  isolamento entre clubes, remoção não destrutiva, auditoria e os alertas de caducidade do `DocumentExpiryNotifier`
+  (janela de 30 dias, documentos expirados/anonimizados/sem e-mail ignorados, e deduplicação semanal com reenvio após
+  alteração da validade).
+- `BillingFlowTest`: financeiro contra PostgreSQL real. Cobre planos de quotas, cobranças, pagamentos e lançamentos
+  contabilísticos; validações (`400`/`404`/`409` de nome repetido), autorização (`ADMIN`/`DIRECAO`/`FINANCEIRO`
+  escrevem, `TREINADOR` não entra, `ATLETA`/`ENCARREGADO` só vêem as suas cobranças), isolamento entre clubes,
+  remoção não destrutiva (pagamentos preservados) e auditoria.
 - `ExpiredDataPurgerTest`: a limpeza remove convites/tokens expirados, aceites, usados ou revogados de
   **vários clubes** numa só chamada, e mantém os dados recentes/válidos e as mensagens `PENDING` da outbox.
 
@@ -401,22 +490,49 @@ O deploy corre automaticamente em cada push para `main`; também pode ser dispar
 | `notifications`                                       | `EmailSender` (outbox), `MailTransport` (SMTP/log) e processador com tentativas (`email_outbox`)                                             |
 | `maintenance`                                         | Limpeza periódica de dados expirados (convites, tokens e outbox)                                                                             |
 | `shared`                                              | Código comum (por agora, `/api/v1/ping`)                                                                                                     |
-| `athletes`                                            | Atletas, encarregados de educação e ligação a contas, com autorização por recurso                                                            |
+| `athletes`                                            | Atletas, encarregados de educação, ligação a contas, documentos com validade, importação CSV e estatísticas, com autorização por recurso |
 | `teams`                                               | Equipas, épocas e escalões (CRUD, staff e plantel)                                                                                           |
-| `training`, `matches`, `billing`                      | Módulos da v1, ainda vazios                                                                                                                  |
+| `training`                                            | Treinos: locais (pavilhões/campos), sessões, presenças                                                                                       |
+| `matches`                                             | Jogos: calendário, resultados por set, convocatórias                                                                                         |
+| `billing`                                             | Financeiro: planos de quotas, cobranças, pagamentos e lançamentos contabilísticos                                                             |
 
 Migrações Flyway em `src/main/resources/db/migration`:
 `V1` esquema base, `V2` RLS/permissões, `V3` refresh tokens, `V4` convites/reset de password,
 `V5` visibilidade de `app_user` por membership, `V6` outbox de e-mail/permissões de provisionamento,
 `V7` função `provision_tenant`, `V8` função/índices de limpeza periódica, `V9` atletas (conta, estado e
 encarregados) e base mínima de equipas (staff e plantel), `V10` remoção não destrutiva (anonimização e
-índices de unicidade parciais) e `V11` épocas e escalões (`season`, `age_group` e autorizações de subida
-`season_promotion`), com a associação à equipa. Papéis em `docker/postgres-init/01-roles.sql`, também
+índices de unicidade parciais), `V11` épocas e escalões (`season`, `age_group` e autorizações de subida
+`season_promotion`), com a associação à equipa, `V12` treinos e jogos (`venue`, `training_session`,
+`attendance`, `match`, `set_score`, `call_up`), `V13` documentos com validade por atleta e importação CSV,
+`V14` financeiro (`fee_plan`, `charge`, `payment`, `ledger_entry`) e `V15` deduplicação dos alertas de
+documentos (`document.expiry_notified_at`). Papéis em
+`docker/postgres-init/01-roles.sql`, também
 usado pelos testes (passwords `dev`, só para desenvolvimento; o `volei_migrator` tem `BYPASSRLS`).
+
+## Roadmap
+
+| Fase | Duração | Entregáveis | Critério de conclusão |
+| :--- | :--- | :--- | :--- |
+| **0. Fundações** | 3 semanas | Repositório, CI/CD, Flyway, Testcontainers, tenancy com RLS, autenticação OIDC, papéis, auditoria, ambiente de staging | Teste automático prova que o tenant A não lê dados do tenant B |
+| **1. Atletas e equipas** | 4 semanas | Épocas, escalões, atletas, encarregados, documentos com validade, equipas e plantéis, importação CSV | Clube-piloto carrega o seu plantel real |
+| **2. Treinos e jogos** | 5 semanas | Calendário, recorrência, presenças, jogos e resultados, convocatórias com confirmação, notificações e PWA | Um treinador convoca e recebe respostas pelo telemóvel |
+| **3. Quotas e financeiro** | 6 semanas | Planos, geração de cobranças, pagamentos Multabanco/MB WAY, webhooks, reconciliação, mapa de dívidas, despesas | Primeiro mês de quotas cobrado e reconciliado sem intervenção manual |
+| **4. Piloto e endurecimento** | 3 semanas | RGPD (consentimentos, exportação, anonimização), testes de carga, backups testados, monitorização, manuais | 1 a 2 clubes em produção durante um mês completo |
+| **5. Onboarding multi-clube** | 3 semanas | Auto-registo de clubes, configuração de marca, planos SaaS e faturação da plataforma, backoffice | Novo clube criado e operacional em menos de 1 hora |
+
+**Depois da v1:** integração com a federação, app móvel nativo, estatísticas táticas, loja do clube, comunicação por WhatsApp/SMS, gestão de equipamentos e transportes.
 
 ## Por fazer
 
 - MFA para administradores (fase 0).
-- Restantes módulos da fase 1: plantéis por época, treinos, jogos e financeiro. Cada módulo deve reutilizar
-  o padrão de autorização por recurso iniciado nos atletas.
-- Alargar a autorização por recurso aos restantes módulos (por exemplo, o `FINANCEIRO` só vê as quotas que gere).
+- Módulo financeiro (V14): planos de quotas, cobranças, pagamentos e lançamentos entregues, com autorização por
+  recurso (o `FINANCEIRO` gere tudo e o `ATLETA`/`ENCARREGADO` só vêem as cobranças que lhes pertencem). Falta a
+  integração real com Multibanco/MB WAY (webhooks e reconciliação automática) e o mapa de dívidas.
+- Fase 2 (treinos e jogos): backend entregue (sessões, presenças, jogos, sets e convocatórias); falta a PWA e as
+  notificações push/SMS das convocatórias.
+- Alertas de caducidade de documentos: envio diário às 08:00 com janela de 30 dias e deduplicação semanal (V15);
+  falta permitir configurar a antecedência por clube.
+- Roadmap — fases seguintes: **4. Piloto e endurecimento** (RGPD: consentimentos, exportação e anonimização; testes
+  de carga; backups testados; monitorização; manuais) e **5. Onboarding multi-clube** (auto-registo, configuração de
+  marca, planos SaaS e faturação da plataforma, backoffice). Depois da v1: integração com a federação, app móvel
+  nativa, estatísticas táticas, loja do clube, comunicação por WhatsApp/SMS, gestão de equipamentos e transportes.
