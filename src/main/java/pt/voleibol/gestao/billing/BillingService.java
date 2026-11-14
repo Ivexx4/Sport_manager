@@ -1,6 +1,9 @@
 package pt.voleibol.gestao.billing;
 
 import java.time.LocalDate;
+import java.time.YearMonth;
+import java.time.ZoneId;
+import java.time.format.DateTimeParseException;
 import java.util.List;
 import java.util.Set;
 import java.util.UUID;
@@ -23,7 +26,9 @@ class BillingService {
 
     record FeePlanView(UUID id, String name, UUID seasonId, UUID ageGroupId, long amountCents, String periodicity) {
     }
-    record ChargeView(UUID id, UUID athleteId, UUID guardianId, UUID feePlanId, long amountCents, LocalDate dueDate, String status) {
+    record ChargeView(UUID id, UUID athleteId, UUID guardianId, UUID feePlanId, long amountCents, LocalDate dueDate, String status, String billingPeriod) {
+    }
+    record GenerateView(String period, int created, int skipped) {
     }
     record PaymentView(UUID id, UUID chargeId, String method, long amountCents, String reference, java.time.Instant paidAt) {
     }
@@ -98,7 +103,7 @@ class BillingService {
             throw new ResponseStatusException(HttpStatus.FORBIDDEN);
         }
         return charges.list(tenant(), actorId, roles, athleteId, status).stream()
-                .map(c -> new ChargeView(c.id(), c.athleteId(), c.guardianId(), c.feePlanId(), c.amountCents(), c.dueDate(), c.status()))
+                .map(c -> new ChargeView(c.id(), c.athleteId(), c.guardianId(), c.feePlanId(), c.amountCents(), c.dueDate(), c.status(), c.billingPeriod()))
                 .toList();
     }
 
@@ -120,7 +125,99 @@ class BillingService {
         UUID id = UUID.randomUUID();
         charges.insert(id, t, athleteId, guardianId, feePlanId, amountCents, dueDate, chargeStatus, actorId);
         charges.audit(t, actorId, "CHARGE_CREATED", id);
-        return new ChargeView(id, athleteId, guardianId, feePlanId, amountCents, dueDate, chargeStatus);
+        return new ChargeView(id, athleteId, guardianId, feePlanId, amountCents, dueDate, chargeStatus, null);
+    }
+
+    // --- geração automática a partir dos planos ---
+
+    @Transactional
+    GenerateView generateCharges(UUID actorId, Set<String> roles, String period, UUID feePlanId, boolean dryRun) {
+        requireWriter(roles);
+        return generate(tenant(), actorId, parsePeriod(period), feePlanId, dryRun);
+    }
+
+    /**
+     * Entrada usada pelo agendador, depois de o tenant estar no {@link TenantContext}.
+     * Não valida papéis: a tarefa corre em nome do clube, sem utilizador.
+     */
+    @Transactional
+    GenerateView generateChargesForTenant(UUID tenantId, YearMonth period, UUID feePlanId) {
+        return generate(tenantId, null, period, feePlanId, false);
+    }
+
+    private GenerateView generate(UUID tenantId, UUID actorId, YearMonth period, UUID feePlanId, boolean dryRun) {
+        List<FeePlanRepository.Row> plans;
+        if (feePlanId == null) {
+            plans = feePlans.list(tenantId);
+        } else {
+            plans = List.of(feePlans.findById(tenantId, feePlanId)
+                    .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Plano não encontrado")));
+        }
+        LocalDate today = LocalDate.now(ZoneId.of("Europe/Lisbon"));
+        int created = 0;
+        int skipped = 0;
+        for (FeePlanRepository.Row plan : plans) {
+            String billingPeriod = billingPeriod(plan.periodicity(), period);
+            if (billingPeriod == null) {
+                continue; // plano único ou período fora da cadência (trimestre/ano)
+            }
+            LocalDate dueDate = dueDate(plan.periodicity(), period);
+            for (ChargeRepository.Target target : charges.findTargets(tenantId, plan.seasonId(), plan.ageGroupId())) {
+                UUID guardianId = isMinor(target.birthDate(), today) ? target.guardianId() : null;
+                if (dryRun) {
+                    if (charges.generatedExists(tenantId, plan.id(), target.athleteId(), billingPeriod)) {
+                        skipped++;
+                    } else {
+                        created++;
+                    }
+                    continue;
+                }
+                UUID id = UUID.randomUUID();
+                if (charges.insertGenerated(id, tenantId, target.athleteId(), guardianId, plan.id(),
+                        plan.amountCents(), dueDate, billingPeriod, actorId)) {
+                    charges.audit(tenantId, actorId, "CHARGE_GENERATED", id);
+                    created++;
+                } else {
+                    skipped++;
+                }
+            }
+        }
+        return new GenerateView(period.toString(), created, skipped);
+    }
+
+    private static YearMonth parsePeriod(String period) {
+        if (period == null || period.isBlank()) {
+            return YearMonth.now(ZoneId.of("Europe/Lisbon"));
+        }
+        try {
+            return YearMonth.parse(period.trim());
+        } catch (DateTimeParseException e) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Período inválido (use AAAA-MM)");
+        }
+    }
+
+    /** Período canónico para o plano, ou {@code null} se este plano não é cobrado nesse mês. */
+    private static String billingPeriod(String periodicity, YearMonth period) {
+        return switch (periodicity) {
+            case "MONTHLY" -> period.toString();
+            case "QUARTERLY" -> period.getMonthValue() % 3 == 1
+                    ? period.getYear() + "-Q" + ((period.getMonthValue() - 1) / 3 + 1) : null;
+            case "YEARLY" -> period.getMonthValue() == 1 ? String.valueOf(period.getYear()) : null;
+            default -> null; // ONE_TIME não gera cobranças automáticas
+        };
+    }
+
+    private static LocalDate dueDate(String periodicity, YearMonth period) {
+        return switch (periodicity) {
+            case "QUARTERLY" -> YearMonth.of(period.getYear(),
+                    ((period.getMonthValue() - 1) / 3) * 3 + 1).atDay(10);
+            case "YEARLY" -> YearMonth.of(period.getYear(), 1).atDay(10);
+            default -> period.atDay(10);
+        };
+    }
+
+    private static boolean isMinor(LocalDate birthDate, LocalDate today) {
+        return birthDate != null && birthDate.plusYears(18).isAfter(today);
     }
 
     @Transactional

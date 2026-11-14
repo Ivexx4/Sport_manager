@@ -3,8 +3,10 @@
 Monólito modular (Java 25, Spring Boot 4.1.2, Maven) com PostgreSQL e multitenancy por `tenant_id` + Row Level Security.
 Estado atual: **fases 0 a 3 entregues no backend** — **atletas** (CRUD, documentos com validade e importação CSV),
 **equipas** (com épocas, escalões e regra federativa FPV), **treinos e jogos** (sessões, presenças, jogos,
-resultados por set e convocatórias) e **financeiro** (planos de quotas, cobranças, pagamentos e lançamentos).
-Inclui ainda estatísticas de assiduidade/convocatórias por atleta e alertas de caducidade de documentos por e-mail.
+resultados por set e convocatórias) e **financeiro** (planos de quotas, cobranças, pagamentos e lançamentos,
+com geração automática de quotas a partir dos planos).
+Inclui ainda estatísticas de assiduidade/convocatórias por atleta, alertas de caducidade de documentos por e-mail
+e notificação das convocatórias por e-mail.
 Faltam a PWA/notificações push, a integração real de pagamentos e a fase 4 (RGPD e endurecimento):
 tenancy com RLS, papéis da base de dados, filtro de tenant, testes de isolamento, autenticação por JWT próprio,
 limitação de tentativas de login, convites/utilizadores, recuperação de password, provisionamento de clubes,
@@ -329,7 +331,9 @@ aceitam `start`/`end` (ou `startDateTime`/`endDateTime`).
 
 `isHome` também aceita `home`, e `courtId` aceita `venueId`. Estados do jogo:
 `SCHEDULED`/`PLAYED`/`CANCELLED`/`POSTPONED`. O `ENCARREGADO` vê o jogo do educando mas não responde pela
-convocatória (só o atleta ou a gestão/treinador o podem fazer).
+convocatória (só o atleta ou a gestão/treinador o podem fazer). Ao criar uma convocatória, o sistema enfileira na
+outbox um e-mail para o atleta e para os encarregados com e-mail (destinatários deduplicados; sem contactos não há
+envio e a convocatória é criada na mesma).
 
 ## Financeiro (fase 3)
 
@@ -340,6 +344,7 @@ convocatória (só o atleta ou a gestão/treinador o podem fazer).
 | `DELETE /api/v1/fee-plans/{id}`               | idem                                           | Anonimiza o plano                                                        |
 | `GET /api/v1/charges`                         | gestão/`FINANCEIRO` (tudo) e `ATLETA`/`ENCARREGADO` (âmbito) | Lista; filtros `athleteId` e `status`                                    |
 | `POST /api/v1/charges`                        | `ADMIN`, `DIRECAO`, `FINANCEIRO`               | `{athleteId, amountCents, dueDate, guardianId?, feePlanId?, status?}` → 201 |
+| `POST /api/v1/charges/generate`               | idem                                           | `{period?, feePlanId?, dryRun?}` → `{period, created, skipped}` (200)    |
 | `PATCH /api/v1/charges/{id}/status`           | idem                                           | `{status}` → 204                                                          |
 | `DELETE /api/v1/charges/{id}`                 | idem                                           | Anonimiza a cobrança (pagamentos preservados)                             |
 | `GET /api/v1/charges/{id}/payments`           | idem                                           | Lista os pagamentos da cobrança                                           |
@@ -353,6 +358,23 @@ estados de cobrança: `PENDING`/`PAID`/`OVERDUE`/`CANCELLED`; métodos de pagame
 `CASH`/`MULTIBANCO`/`MBWAY`/`TRANSFER`/`OTHER`; tipo de lançamento: `INCOME`/`EXPENSE`. O `TREINADOR` não
 entra no financeiro (`403`), o `ATLETA`/`ENCARREGADO` só vêem as cobranças que lhes pertencem e a gestão/`FINANCEIRO`
 gere tudo.
+
+### Geração automática de quotas
+
+`POST /api/v1/charges/generate` cria as cobranças do período (`period`, formato `AAAA-MM`, por omissão o mês
+atual em `Europe/Lisbon`) para todos os planos ativos, ou apenas para `feePlanId`. Regras:
+
+- `MONTHLY` gera todos os meses; `QUARTERLY` só em janeiro/abril/julho/outubro (período canónico `AAAA-Qn`);
+  `YEARLY` só em janeiro (período `AAAA`); `ONE_TIME` nunca gera automaticamente.
+- Alvo: atletas `ACTIVE` e não anonimizados que pertençam a uma equipa `ACTIVE` e não anonimizada. Se o plano
+  tiver `seasonId`/`ageGroupId`, a equipa tem de coincidir.
+- Valor igual ao do plano no momento (snapshot); vencimento no dia 10 do mês que abre o período; menores de 18
+  anos ficam com o primeiro encarregado associado como `guardianId`.
+- **Idempotente**: o índice único parcial `charge (tenant_id, fee_plan_id, athlete_id, billing_period)` impede
+  duplicar o mesmo período; repetir devolve `created: 0` e `skipped` com as cobranças já existentes.
+- `dryRun: true` calcula `created`/`skipped` sem escrever. Planos sobrepostos geram cobranças distintas.
+- O agendador `ChargeGenerator` corre no dia 1 de cada mês às 02:00 e faz o mesmo por clube, na sua própria
+  transação.
 
 ## Modelo de dados
 
@@ -377,9 +399,9 @@ Todas as tabelas abaixo levam `tenant_id`, `id` (UUID), `created_at`, `updated_a
 | `attendance` | session_id, athlete_id, estado, justificação | |
 | `match` | team_id, competição, adversário, local, court_id, data/hora, casa/fora, estado | 1:N com set_score e call_up |
 | `set_score` | match_id, nº do set, pontos nossos, pontos adversário | |
-| `call_up` | match_id, athlete_id, estado, resposta, data da resposta | convocatória |
+| `call_up` | match_id, athlete_id, estado, resposta, data da resposta | convocatória (notificada por e-mail/outbox) |
 | `fee_plan` | nome, season_id, age_group_id, valor, periodicidade | gera charges |
-| `charge` | athlete_id, guardian_id, fee_plan_id, valor, vencimento, estado | 1:N com payment |
+| `charge` | athlete_id, guardian_id, fee_plan_id, valor, vencimento, estado, billing_period | 1:N com payment; período faturado garante idempotência |
 | `payment` | charge_id, método, valor, referência externa, data | reconciliação do agregador |
 | `ledger_entry` | tipo, categoria, valor, data, descrição | receitas e despesas do clube |
 | `audit_log` | utilizador, ação, entidade, antes/depois (JSONB), data | só de escrita |
@@ -462,7 +484,8 @@ Os testes de integração precisam de Docker. Corre-se um PostgreSQL real com Te
 - `MatchFlowTest`: jogos contra PostgreSQL real. Cobre CRUD, resultados por set (upsert, alteração e remoção),
   convocatórias e respostas (atleta responde só à própria; encarregado só lê), validações, autorização por papel
   (`TREINADOR` só nos jogos das suas equipas), isolamento entre clubes, remoção não destrutiva (sets e convocatórias
-  preservados) e auditoria.
+  preservados), auditoria e a notificação da convocatória por e-mail/outbox (atleta e encarregado, deduplicação e
+  atletas sem contacto).
 - `DocumentFlowTest`: documentos com validade. Cobre CRUD por atleta, validações, autorização por recurso
   (`TREINADOR` só nos atletas das suas equipas, `ATLETA`/`ENCARREGADO` só no próprio/educandos, `FINANCEIRO` só lê),
   isolamento entre clubes, remoção não destrutiva, auditoria e os alertas de caducidade do `DocumentExpiryNotifier`
@@ -471,7 +494,8 @@ Os testes de integração precisam de Docker. Corre-se um PostgreSQL real com Te
 - `BillingFlowTest`: financeiro contra PostgreSQL real. Cobre planos de quotas, cobranças, pagamentos e lançamentos
   contabilísticos; validações (`400`/`404`/`409` de nome repetido), autorização (`ADMIN`/`DIRECAO`/`FINANCEIRO`
   escrevem, `TREINADOR` não entra, `ATLETA`/`ENCARREGADO` só vêem as suas cobranças), isolamento entre clubes,
-  remoção não destrutiva (pagamentos preservados) e auditoria.
+  remoção não destrutiva (pagamentos preservados), auditoria e a geração automática de quotas (cadência mensal,
+  trimestral e anual, filtros por escalão, `dryRun`, idempotência e agendador).
 - `ExpiredDataPurgerTest`: a limpeza remove convites/tokens expirados, aceites, usados ou revogados de
   **vários clubes** numa só chamada, e mantém os dados recentes/válidos e as mensagens `PENDING` da outbox.
 
@@ -592,8 +616,9 @@ encarregados) e base mínima de equipas (staff e plantel), `V10` remoção não 
 índices de unicidade parciais), `V11` épocas e escalões (`season`, `age_group` e autorizações de subida
 `season_promotion`), com a associação à equipa, `V12` treinos e jogos (`venue`, `training_session`,
 `attendance`, `match`, `set_score`, `call_up`), `V13` documentos com validade por atleta e importação CSV,
-`V14` financeiro (`fee_plan`, `charge`, `payment`, `ledger_entry`) e `V15` deduplicação dos alertas de
-documentos (`document.expiry_notified_at`). Papéis em
+`V14` financeiro (`fee_plan`, `charge`, `payment`, `ledger_entry`), `V15` deduplicação dos alertas de
+documentos (`document.expiry_notified_at`) e `V16` geração de cobranças (`charge.billing_period` e índice
+único parcial de idempotência). Papéis em
 `docker/postgres-init/01-roles.sql`, também
 usado pelos testes (passwords `dev`, só para desenvolvimento; o `volei_migrator` tem `BYPASSRLS`).
 
@@ -614,10 +639,11 @@ usado pelos testes (passwords `dev`, só para desenvolvimento; o `volei_migrator
 
 - MFA para administradores (fase 0).
 - Módulo financeiro (V14): planos de quotas, cobranças, pagamentos e lançamentos entregues, com autorização por
-  recurso (o `FINANCEIRO` gere tudo e o `ATLETA`/`ENCARREGADO` só vêem as cobranças que lhes pertencem). Falta a
-  integração real com Multibanco/MB WAY (webhooks e reconciliação automática) e o mapa de dívidas.
-- Fase 2 (treinos e jogos): backend entregue (sessões, presenças, jogos, sets e convocatórias); falta a PWA e as
-  notificações push/SMS das convocatórias.
+  recurso (o `FINANCEIRO` gere tudo e o `ATLETA`/`ENCARREGADO` só vêem as cobranças que lhes pertencem) e geração
+  automática de quotas a partir dos planos (endpoint e agendador mensal, V16). Falta a integração real com
+  Multibanco/MB WAY (webhooks e reconciliação automática) e o mapa de dívidas.
+- Fase 2 (treinos e jogos): backend entregue (sessões, presenças, jogos, sets e convocatórias), com notificação
+  das convocatórias por e-mail/outbox; falta a PWA e as notificações push/SMS.
 - Alertas de caducidade de documentos: envio diário às 08:00 com janela de 30 dias e deduplicação semanal (V15);
   falta permitir configurar a antecedência por clube.
 - Roadmap — fases seguintes: **4. Piloto e endurecimento** (RGPD: consentimentos, exportação e anonimização; testes

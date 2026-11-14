@@ -275,6 +275,61 @@ class MatchFlowTest {
         assertThat(ids(lista)).doesNotContain(JOGO_A);
     }
 
+    // --- notificações ---
+
+    @Test
+    void convocatoriaNotificaAtletaEEncarregado() throws Exception {
+        try (Connection c = superuser()) {
+            executar(c, "UPDATE athlete SET email = ? WHERE id = ?", "atleta1@jogos.test", ATLETA_1);
+            executar(c, "DELETE FROM call_up WHERE tenant_id = ? AND match_id = ? AND athlete_id = ?",
+                    CLUBE_A, JOGO_A, ATLETA_1);
+        }
+        String admin = acesso(HOST_A, ADMIN);
+
+        mvc.perform(post("/api/v1/matches/" + JOGO_A + "/call-ups")
+                        .header("Authorization", "Bearer " + admin).with(host(HOST_A))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"athleteId\":\"" + ATLETA_1 + "\"}"))
+                .andExpect(status().isNoContent());
+
+        // Atleta e encarregado recebem a convocatória.
+        assertThat(contar("SELECT count(*) FROM email_outbox WHERE recipient = ?",
+                "atleta1@jogos.test")).isEqualTo(1);
+        assertThat(contar("SELECT count(*) FROM email_outbox WHERE recipient = ?", ENCARREGADO)).isEqualTo(1);
+
+        try (Connection c = superuser(); PreparedStatement ps = c.prepareStatement(
+                "SELECT subject, body FROM email_outbox WHERE recipient = ?")) {
+            ps.setString(1, ENCARREGADO);
+            try (ResultSet rs = ps.executeQuery()) {
+                assertThat(rs.next()).isTrue();
+                assertThat(rs.getString("subject")).contains("Convocatória", "Adversário A");
+                assertThat(rs.getString("body")).contains("Atleta Um", "Campeonato", "Casa");
+            }
+        }
+
+        // O mesmo e-mail no atleta e no encarregado é deduplicado.
+        try (Connection c = superuser()) {
+            executar(c, "UPDATE athlete SET email = ? WHERE id = ?", ENCARREGADO, ATLETA_1);
+            executar(c, "DELETE FROM call_up WHERE tenant_id = ? AND match_id = ? AND athlete_id = ?",
+                    CLUBE_A, JOGO_A, ATLETA_1);
+            executar(c, "DELETE FROM email_outbox");
+        }
+        mvc.perform(post("/api/v1/matches/" + JOGO_A + "/call-ups")
+                        .header("Authorization", "Bearer " + admin).with(host(HOST_A))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"athleteId\":\"" + ATLETA_1 + "\"}"))
+                .andExpect(status().isNoContent());
+        assertThat(contar("SELECT count(*) FROM email_outbox")).isEqualTo(1);
+
+        // Sem contacto de atleta nem encarregados, a convocatória continua a ser criada.
+        mvc.perform(post("/api/v1/matches/" + JOGO_A + "/call-ups")
+                        .header("Authorization", "Bearer " + admin).with(host(HOST_A))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"athleteId\":\"" + ATLETA_2 + "\"}"))
+                .andExpect(status().isNoContent());
+        assertThat(contar("SELECT count(*) FROM email_outbox")).isEqualTo(1);
+    }
+
     // --- validação ---
 
     @Test
@@ -621,6 +676,7 @@ class MatchFlowTest {
     }
 
     private static void limpar(Connection c) throws SQLException {
+        executar(c, "DELETE FROM email_outbox");
         executar(c, "DELETE FROM call_up WHERE tenant_id IN (?, ?)", CLUBE_A, CLUBE_B);
         executar(c, "DELETE FROM set_score WHERE tenant_id IN (?, ?)", CLUBE_A, CLUBE_B);
         executar(c, "DELETE FROM match WHERE tenant_id IN (?, ?)", CLUBE_A, CLUBE_B);

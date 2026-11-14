@@ -38,9 +38,17 @@ class BillingController {
 
     record ChargeRequest(@NotNull UUID athleteId, UUID guardianId, UUID feePlanId, @NotNull Long amountCents, @NotNull LocalDate dueDate, String status) {
     }
-    record ChargeResponse(UUID id, UUID athleteId, UUID guardianId, UUID feePlanId, long amountCents, LocalDate dueDate, String status) {
+    record ChargeResponse(UUID id, UUID athleteId, UUID guardianId, UUID feePlanId, long amountCents, LocalDate dueDate, String status, String billingPeriod) {
         static ChargeResponse from(BillingService.ChargeView v) {
-            return new ChargeResponse(v.id(), v.athleteId(), v.guardianId(), v.feePlanId(), v.amountCents(), v.dueDate(), v.status());
+            return new ChargeResponse(v.id(), v.athleteId(), v.guardianId(), v.feePlanId(), v.amountCents(), v.dueDate(), v.status(), v.billingPeriod());
+        }
+    }
+
+    record GenerateChargesRequest(String period, UUID feePlanId, Boolean dryRun) {
+    }
+    record GenerateChargesResponse(String period, int created, int skipped) {
+        static GenerateChargesResponse from(BillingService.GenerateView v) {
+            return new GenerateChargesResponse(v.period(), v.created(), v.skipped());
         }
     }
 
@@ -92,6 +100,14 @@ class BillingController {
     ResponseEntity<ChargeResponse> createCharge(@AuthenticationPrincipal Jwt jwt, @Valid @RequestBody ChargeRequest r) {
         ChargeResponse c = ChargeResponse.from(service.createCharge(actor(jwt), roles(jwt), r.athleteId(), r.guardianId(), r.feePlanId(), r.amountCents(), r.dueDate(), r.status()));
         return ResponseEntity.status(HttpStatus.CREATED).body(c);
+    }
+    @PostMapping("/charges/generate")
+    GenerateChargesResponse generateCharges(@AuthenticationPrincipal Jwt jwt,
+                                            @RequestBody(required = false) GenerateChargesRequest r) {
+        UUID feePlanId = r == null ? null : r.feePlanId();
+        boolean dryRun = r != null && Boolean.TRUE.equals(r.dryRun());
+        return GenerateChargesResponse.from(
+                service.generateCharges(actor(jwt), roles(jwt), r == null ? null : r.period(), feePlanId, dryRun));
     }
     @PatchMapping("/charges/{id}/status")
     ResponseEntity<Void> updateChargeStatus(@AuthenticationPrincipal Jwt jwt, @PathVariable UUID id, @RequestBody(required = false) StatusRequest r) {

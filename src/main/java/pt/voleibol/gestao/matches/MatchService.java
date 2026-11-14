@@ -1,7 +1,12 @@
 package pt.voleibol.gestao.matches;
 
 import java.time.Instant;
+import java.time.LocalDateTime;
+import java.time.ZoneId;
+import java.time.format.DateTimeFormatter;
+import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Locale;
 import java.util.Set;
 import java.util.UUID;
 
@@ -11,6 +16,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.server.ResponseStatusException;
 
+import pt.voleibol.gestao.notifications.EmailSender;
 import pt.voleibol.gestao.tenancy.TenantContext;
 
 @Service
@@ -19,6 +25,8 @@ class MatchService {
     private static final Set<String> MANAGERS = Set.of("ADMIN", "DIRECAO");
     private static final Set<String> MATCH_STATUSES = Set.of("SCHEDULED", "PLAYED", "CANCELLED", "POSTPONED");
     private static final Set<String> CALLUP_RESPONSES = Set.of("CONFIRMED", "DECLINED");
+    private static final ZoneId LISBOA = ZoneId.of("Europe/Lisbon");
+    private static final DateTimeFormatter MATCH_DATE_FORMAT = DateTimeFormatter.ofPattern("dd/MM/yyyy HH:mm");
 
     record MatchView(UUID id, UUID teamId, String competition, String opponent, String location, UUID courtId,
                      Instant matchDate, boolean isHome, String status, Instant createdAt, Instant updatedAt) {
@@ -32,10 +40,12 @@ class MatchService {
 
     private final MatchRepository matches;
     private final JdbcClient jdbc;
+    private final EmailSender emailSender;
 
-    MatchService(MatchRepository matches, JdbcClient jdbc) {
+    MatchService(MatchRepository matches, JdbcClient jdbc, EmailSender emailSender) {
         this.matches = matches;
         this.jdbc = jdbc;
+        this.emailSender = emailSender;
     }
 
     // --- matches ---
@@ -187,6 +197,7 @@ class MatchService {
         }
         matches.insertCallUp(tenantId, matchId, athleteId, actorId);
         matches.audit(tenantId, actorId, "MATCH_CALLUP_ADDED", matchId);
+        notifyCallUp(tenantId, row, athleteId);
     }
 
     @Transactional
@@ -230,6 +241,71 @@ class MatchService {
     }
 
     // --- helpers ---
+
+    /**
+     * Envia a convocatória por e-mail (outbox) para o atleta e encarregados com e-mail.
+     * Os destinatários são deduplicados e os registos sem contacto são ignorados.
+     */
+    private void notifyCallUp(UUID tenantId, MatchRepository.MatchRow match, UUID athleteId) {
+        String athleteName = jdbc.sql("""
+                        SELECT full_name FROM athlete
+                        WHERE tenant_id = :t AND id = :a AND anonymized_at IS NULL
+                        """)
+                .param("t", tenantId).param("a", athleteId).query(String.class).optional().orElse(null);
+        if (athleteName == null) {
+            return;
+        }
+
+        Set<String> recipients = new LinkedHashSet<>();
+        jdbc.sql("""
+                        SELECT email FROM athlete
+                        WHERE tenant_id = :t AND id = :a AND anonymized_at IS NULL AND email IS NOT NULL
+                        """)
+                .param("t", tenantId).param("a", athleteId)
+                .query(String.class).optional().ifPresent(email -> addRecipient(recipients, email));
+        jdbc.sql("""
+                        SELECT u.email FROM athlete_guardian g
+                        JOIN app_user u ON u.id = g.user_id
+                        WHERE g.tenant_id = :t AND g.athlete_id = :a AND u.status = 'ACTIVE'
+                        """)
+                .param("t", tenantId).param("a", athleteId)
+                .query(String.class).list().forEach(email -> addRecipient(recipients, email));
+        if (recipients.isEmpty()) {
+            return;
+        }
+
+        String teamName = jdbc.sql("SELECT name FROM team WHERE tenant_id = :t AND id = :id")
+                .param("t", tenantId).param("id", match.teamId())
+                .query(String.class).optional().orElse("equipa");
+        String quando = MATCH_DATE_FORMAT.format(LocalDateTime.ofInstant(match.matchDate(), LISBOA));
+        String local = match.isHome() ? "Casa" : "Fora";
+        if (match.location() != null && !match.location().isBlank()) {
+            local += " (" + match.location() + ")";
+        }
+        String competicao = match.competition() == null || match.competition().isBlank()
+                ? "" : "\nCompetição: " + match.competition();
+        String subject = "Convocatória: " + teamName + " vs " + match.opponent();
+        String body = """
+                O atleta %s foi convocado para o jogo %s vs %s.
+                Data: %s
+                Local: %s%s
+
+                Confirma ou recusa a convocatória na plataforma.
+                """.formatted(athleteName, teamName, match.opponent(), quando, local, competicao);
+        for (String recipient : recipients) {
+            emailSender.send(recipient, subject, body);
+        }
+    }
+
+    private static void addRecipient(Set<String> recipients, String email) {
+        if (email == null) {
+            return;
+        }
+        String normalized = email.trim().toLowerCase(Locale.ROOT);
+        if (!normalized.isEmpty()) {
+            recipients.add(normalized);
+        }
+    }
 
     private void requireWritable(Set<String> roles) {
         if (!isManager(roles) && !roles.contains("TREINADOR")) {

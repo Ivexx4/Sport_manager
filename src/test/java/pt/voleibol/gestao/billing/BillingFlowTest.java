@@ -9,6 +9,8 @@ import java.sql.DriverManager;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.SQLException;
+import java.time.LocalDate;
+import java.time.YearMonth;
 import java.util.Base64;
 import java.util.List;
 import java.util.UUID;
@@ -82,6 +84,12 @@ class BillingFlowTest {
     static final UUID LANCAMENTO_A = UUID.fromString("00000000-0000-0000-0000-00000000e401");
     static final UUID LANCAMENTO_B = UUID.fromString("00000000-0000-0000-0000-00000000e402");
 
+    static final UUID EPOCA_A = UUID.fromString("00000000-0000-0000-0000-00000000d405");
+    static final UUID ESCALAO_A = UUID.fromString("00000000-0000-0000-0000-00000000d406");
+    static final UUID ESCALAO_B = UUID.fromString("00000000-0000-0000-0000-00000000d407");
+    static final UUID EQUIPA_A = UUID.fromString("00000000-0000-0000-0000-00000000d408");
+    static final UUID EQUIPA_A2 = UUID.fromString("00000000-0000-0000-0000-00000000d409");
+
     private static String passwordHash;
 
     @DynamicPropertySource
@@ -101,6 +109,8 @@ class BillingFlowTest {
     TenantFilter tenantFilter;
     @Autowired
     PasswordEncoder passwordEncoder;
+    @Autowired
+    ChargeGenerator chargeGenerator;
 
     MockMvc mvc;
 
@@ -216,6 +226,133 @@ class BillingFlowTest {
         assertThat(contarAuditoria("PAYMENT_CREATED")).isPositive();
         assertThat(contarAuditoria("LEDGER_ENTRY_CREATED")).isPositive();
         assertThat(contarAuditoria("LEDGER_ENTRY_ANONYMIZED")).isPositive();
+    }
+
+    // --- geração automática ---
+
+    @Test
+    void geracaoAutomaticaDeCobrancas() throws Exception {
+        String admin = acesso(HOST_A, ADMIN);
+
+        UUID planoMensal = UUID.fromString(JsonPath.read(criarPlano(HOST_A, admin,
+                        "{\"name\":\"Quota 2026\",\"amountCents\":3000}")
+                .andExpect(status().isCreated())
+                .andReturn().getResponse().getContentAsString(), "$.id"));
+
+        String gerado = gerar(HOST_A, admin,
+                "{\"period\":\"2026-03\",\"feePlanId\":\"" + planoMensal + "\"}")
+                .andExpect(status().isOk())
+                .andReturn().getResponse().getContentAsString();
+        assertThat((String) JsonPath.read(gerado, "$.period")).isEqualTo("2026-03");
+        assertThat((Integer) JsonPath.read(gerado, "$.created")).isEqualTo(2);
+        assertThat((Integer) JsonPath.read(gerado, "$.skipped")).isZero();
+
+        assertThat(contar("SELECT count(*) FROM charge WHERE fee_plan_id = ? AND billing_period = '2026-03'",
+                planoMensal)).isEqualTo(2);
+        assertThat(contar("SELECT count(*) FROM charge WHERE fee_plan_id = ? AND due_date = ?",
+                planoMensal, Date.valueOf("2026-03-10"))).isEqualTo(2);
+        assertThat(contar("SELECT count(*) FROM charge WHERE fee_plan_id = ? AND athlete_id = ? "
+                + "AND guardian_id IS NOT NULL", planoMensal, ATLETA_1)).isEqualTo(1);
+        assertThat(contar("SELECT count(*) FROM charge WHERE fee_plan_id = ? AND athlete_id = ? "
+                + "AND guardian_id IS NULL", planoMensal, ATLETA_2)).isEqualTo(1);
+        assertThat(contar("SELECT count(*) FROM charge WHERE fee_plan_id = ? AND amount_cents = 3000 "
+                + "AND status = 'PENDING'", planoMensal)).isEqualTo(2);
+
+        // Repetir o mesmo período não duplica: conta como ignoradas.
+        String repetido = gerar(HOST_A, admin,
+                "{\"period\":\"2026-03\",\"feePlanId\":\"" + planoMensal + "\"}")
+                .andExpect(status().isOk())
+                .andReturn().getResponse().getContentAsString();
+        assertThat((Integer) JsonPath.read(repetido, "$.created")).isZero();
+        assertThat((Integer) JsonPath.read(repetido, "$.skipped")).isEqualTo(2);
+        assertThat(contar("SELECT count(*) FROM charge WHERE fee_plan_id = ? AND billing_period = '2026-03'",
+                planoMensal)).isEqualTo(2);
+
+        // dryRun calcula o que faria sem escrever.
+        String simulado = gerar(HOST_A, admin,
+                "{\"period\":\"2026-04\",\"feePlanId\":\"" + planoMensal + "\",\"dryRun\":true}")
+                .andExpect(status().isOk())
+                .andReturn().getResponse().getContentAsString();
+        assertThat((Integer) JsonPath.read(simulado, "$.created")).isEqualTo(2);
+        assertThat(contar("SELECT count(*) FROM charge WHERE fee_plan_id = ? AND billing_period = '2026-04'",
+                planoMensal)).isZero();
+
+        // O filtro por escalão só abrange os atletas desse escalão.
+        UUID planoEscalao = UUID.fromString(JsonPath.read(criarPlano(HOST_A, admin,
+                        "{\"name\":\"Quota Sub-16\",\"amountCents\":2500,\"ageGroupId\":\"" + ESCALAO_A + "\"}")
+                .andExpect(status().isCreated())
+                .andReturn().getResponse().getContentAsString(), "$.id"));
+        String porEscalao = gerar(HOST_A, admin,
+                "{\"period\":\"2026-05\",\"feePlanId\":\"" + planoEscalao + "\"}")
+                .andExpect(status().isOk())
+                .andReturn().getResponse().getContentAsString();
+        assertThat((Integer) JsonPath.read(porEscalao, "$.created")).isEqualTo(1);
+        assertThat(contar("SELECT count(*) FROM charge WHERE fee_plan_id = ? AND athlete_id = ?",
+                planoEscalao, ATLETA_1)).isEqualTo(1);
+        assertThat(contar("SELECT count(*) FROM charge WHERE fee_plan_id = ? AND athlete_id = ?",
+                planoEscalao, ATLETA_2)).isZero();
+
+        // Planos de pagamento único não geram cobranças automáticas.
+        UUID planoUnico = UUID.fromString(JsonPath.read(criarPlano(HOST_A, admin,
+                        "{\"name\":\"Seguro anual\",\"amountCents\":1500,\"periodicity\":\"ONE_TIME\"}")
+                .andExpect(status().isCreated())
+                .andReturn().getResponse().getContentAsString(), "$.id"));
+        String unico = gerar(HOST_A, admin,
+                "{\"period\":\"2026-06\",\"feePlanId\":\"" + planoUnico + "\"}")
+                .andExpect(status().isOk())
+                .andReturn().getResponse().getContentAsString();
+        assertThat((Integer) JsonPath.read(unico, "$.created")).isZero();
+
+        // Trimestral: só no mês que abre o trimestre, com período canónico e vencimento a 10.
+        UUID planoTrimestral = UUID.fromString(JsonPath.read(criarPlano(HOST_A, admin,
+                        "{\"name\":\"Quota trimestral\",\"amountCents\":9000,\"periodicity\":\"QUARTERLY\"}")
+                .andExpect(status().isCreated())
+                .andReturn().getResponse().getContentAsString(), "$.id"));
+        String foraDoTrimestre = gerar(HOST_A, admin,
+                "{\"period\":\"2026-02\",\"feePlanId\":\"" + planoTrimestral + "\"}")
+                .andExpect(status().isOk())
+                .andReturn().getResponse().getContentAsString();
+        assertThat((Integer) JsonPath.read(foraDoTrimestre, "$.created")).isZero();
+        String trimestre = gerar(HOST_A, admin,
+                "{\"period\":\"2026-04\",\"feePlanId\":\"" + planoTrimestral + "\"}")
+                .andExpect(status().isOk())
+                .andReturn().getResponse().getContentAsString();
+        assertThat((Integer) JsonPath.read(trimestre, "$.created")).isEqualTo(2);
+        assertThat(contar("SELECT count(*) FROM charge WHERE fee_plan_id = ? AND billing_period = '2026-Q2'",
+                planoTrimestral)).isEqualTo(2);
+        assertThat(contar("SELECT count(*) FROM charge WHERE fee_plan_id = ? AND due_date = ?",
+                planoTrimestral, Date.valueOf("2026-04-10"))).isEqualTo(2);
+
+        assertThat(contarAuditoria("CHARGE_GENERATED")).isPositive();
+    }
+
+    @Test
+    void agendadorGeraCobrancasDoMes() throws Exception {
+        UUID clube = CLUBE_A;
+        YearMonth periodo = YearMonth.of(2026, 7);
+
+        assertThat(chargeGenerator.generateForTenant(clube, periodo)).isEqualTo(2);
+        assertThat(contar("SELECT count(*) FROM charge WHERE tenant_id = ? AND billing_period = '2026-07'",
+                clube)).isEqualTo(2);
+        // A segunda passagem do agendador é idempotente.
+        assertThat(chargeGenerator.generateForTenant(clube, periodo)).isZero();
+        assertThat(contar("SELECT count(*) FROM charge WHERE tenant_id = ? AND billing_period = '2026-07'",
+                clube)).isEqualTo(2);
+    }
+
+    @Test
+    void validacoesDaGeracaoDeCobrancas() throws Exception {
+        String admin = acesso(HOST_A, ADMIN);
+
+        gerar(HOST_A, admin, "{\"period\":\"2026-13\"}").andExpect(status().isBadRequest());
+        gerar(HOST_A, admin, "{\"period\":\"marco\"}").andExpect(status().isBadRequest());
+        gerar(HOST_A, admin, "{\"feePlanId\":\"" + UUID.randomUUID() + "\"}")
+                .andExpect(status().isNotFound());
+
+        String treinador = acesso(HOST_A, TREINADOR);
+        gerar(HOST_A, treinador, "{\"period\":\"2026-03\"}").andExpect(status().isForbidden());
+        String atleta = acesso(HOST_A, ATLETA_USER);
+        gerar(HOST_A, atleta, "{\"period\":\"2026-03\"}").andExpect(status().isForbidden());
     }
 
     // --- validação ---
@@ -495,6 +632,12 @@ class BillingFlowTest {
                 .contentType(MediaType.APPLICATION_JSON).content(body));
     }
 
+    private ResultActions gerar(String host, String token, String body) throws Exception {
+        return mvc.perform(post("/api/v1/charges/generate")
+                .header("Authorization", "Bearer " + token).with(host(host))
+                .contentType(MediaType.APPLICATION_JSON).content(body));
+    }
+
     private String acesso(String host, String email) throws Exception {
         String resposta = mvc.perform(post("/api/v1/auth/login")
                         .contentType(MediaType.APPLICATION_JSON)
@@ -547,6 +690,14 @@ class BillingFlowTest {
             atleta(c, ATLETA_1, CLUBE_A, "Atleta Um", "F-A1", id(ATLETA_USER));
             atleta(c, ATLETA_2, CLUBE_A, "Atleta Dois", "F-A2", null);
             atleta(c, ATLETA_B, CLUBE_B, "Atleta de Outro Clube", "F-B1", null);
+
+            epoca(c, EPOCA_A, CLUBE_A, "2026/2027");
+            escalao(c, ESCALAO_A, CLUBE_A, EPOCA_A, "Sub-16");
+            escalao(c, ESCALAO_B, CLUBE_A, EPOCA_A, "Sub-18");
+            equipa(c, EQUIPA_A, CLUBE_A, "Equipa Sub-16", EPOCA_A, ESCALAO_A);
+            equipa(c, EQUIPA_A2, CLUBE_A, "Equipa Sub-18", EPOCA_A, ESCALAO_B);
+            plantel(c, CLUBE_A, EQUIPA_A, ATLETA_1);
+            plantel(c, CLUBE_A, EQUIPA_A2, ATLETA_2);
 
             executar(c, """
                     INSERT INTO athlete_guardian (tenant_id, athlete_id, user_id, relationship)
@@ -607,9 +758,43 @@ class BillingFlowTest {
                 INSERT INTO athlete (id, tenant_id, full_name, birth_date, gender, license_number, status, user_id)
                 VALUES (?, ?, ?, ?, 'F', ?, 'ACTIVE', ?)
                 ON CONFLICT (id) DO UPDATE SET full_name = EXCLUDED.full_name,
-                    license_number = EXCLUDED.license_number, status = 'ACTIVE',
-                    user_id = EXCLUDED.user_id, anonymized_at = NULL
-                """, athleteId, tenantId, nome, Date.valueOf("2010-01-01"), licenca, userId);
+                    birth_date = EXCLUDED.birth_date, license_number = EXCLUDED.license_number,
+                    status = 'ACTIVE', user_id = EXCLUDED.user_id, anonymized_at = NULL
+                """, athleteId, tenantId, nome, Date.valueOf(LocalDate.now().minusYears(12)), licenca, userId);
+    }
+
+    private static void epoca(Connection c, UUID seasonId, UUID tenantId, String nome) throws SQLException {
+        executar(c, """
+                INSERT INTO season (id, tenant_id, name) VALUES (?, ?, ?)
+                ON CONFLICT (id) DO UPDATE SET name = EXCLUDED.name, anonymized_at = NULL
+                """, seasonId, tenantId, nome);
+    }
+
+    private static void escalao(Connection c, UUID ageGroupId, UUID tenantId, UUID seasonId, String nome)
+            throws SQLException {
+        executar(c, """
+                INSERT INTO age_group (id, tenant_id, season_id, name, min_birth_year, max_birth_year)
+                VALUES (?, ?, ?, ?, 2010, 2016)
+                ON CONFLICT (id) DO UPDATE SET season_id = EXCLUDED.season_id, name = EXCLUDED.name,
+                    anonymized_at = NULL
+                """, ageGroupId, tenantId, seasonId, nome);
+    }
+
+    private static void equipa(Connection c, UUID teamId, UUID tenantId, String nome, UUID seasonId,
+                               UUID ageGroupId) throws SQLException {
+        executar(c, """
+                INSERT INTO team (id, tenant_id, name, status, season_id, age_group_id)
+                VALUES (?, ?, ?, 'ACTIVE', ?, ?)
+                ON CONFLICT (id) DO UPDATE SET name = EXCLUDED.name, status = 'ACTIVE',
+                    season_id = EXCLUDED.season_id, age_group_id = EXCLUDED.age_group_id, anonymized_at = NULL
+                """, teamId, tenantId, nome, seasonId, ageGroupId);
+    }
+
+    private static void plantel(Connection c, UUID tenantId, UUID teamId, UUID athleteId) throws SQLException {
+        executar(c, """
+                INSERT INTO team_athlete (tenant_id, team_id, athlete_id) VALUES (?, ?, ?)
+                ON CONFLICT (tenant_id, team_id, athlete_id) DO NOTHING
+                """, tenantId, teamId, athleteId);
     }
 
     private static void plano(Connection c, UUID planId, UUID tenantId, String nome, long amountCents)
