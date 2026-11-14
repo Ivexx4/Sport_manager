@@ -271,6 +271,89 @@ Exceção: os escalões (`age_group`) passaram a pertencer a uma época (`season
 o `DELETE` mantém a convenção de remoção não destrutiva (anonimização), preservando o registo e as
 equipas associadas.
 
+### Documentos, importação e estatísticas de atletas
+
+| Endpoint                                        | Quem pode                                                              | Descrição                                                              |
+|-------------------------------------------------|------------------------------------------------------------------------|------------------------------------------------------------------------|
+| `GET /api/v1/athletes/{athleteId}/documents`    | mesma visibilidade do atleta                                           | Lista os documentos do atleta                                          |
+| `POST /api/v1/athletes/{athleteId}/documents`   | `ADMIN`/`DIRECAO`, `TREINADOR` (atletas das suas equipas), `ATLETA`/`ENCARREGADO` (próprios) | `{type, fileName?, fileUrl?, validUntil?}` → 201; `FINANCEIRO` só lê (`403` na escrita) |
+| `PUT /api/v1/documents/{documentId}`            | idem                                                                   | Atualiza; uma nova validade reinicia os alertas de caducidade          |
+| `DELETE /api/v1/documents/{documentId}`         | idem                                                                   | Anonimiza o documento, preservando o registo                           |
+| `GET /api/v1/athletes/{athleteId}/stats`        | mesma visibilidade do atleta                                           | Convocatórias, jogos disputados, respostas e presenças em treinos      |
+| `POST /api/v1/athletes/import`                  | `ADMIN`, `DIRECAO`                                                     | `multipart/form-data` com `file` CSV → `{imported: n}`                 |
+
+O alerta de caducidade de documentos corre todos os dias às 08:00, avisa com 30 dias de antecedência e não
+repete o mesmo documento antes de 7 dias (ou até a validade ser alterada). O e-mail vai para o endereço do
+atleta e usa a outbox, pelo que beneficia das tentativas e do transporte configurado.
+
+### Endpoints de locais e treinos
+
+| Endpoint                                                  | Quem pode                                              | Descrição                                                          |
+|-----------------------------------------------------------|--------------------------------------------------------|--------------------------------------------------------------------|
+| `GET /api/v1/venues`                                      | qualquer membro                                        | Lista os locais (pavilhões/campos)                                 |
+| `GET /api/v1/venues/{id}`                                 | qualquer membro                                        | Detalhe; `404` se não existir no clube                             |
+| `POST /api/v1/venues`                                     | `ADMIN`, `DIRECAO`                                     | `{name, address?}` → 201; nome único por clube sem distinguir maiúsculas (`409`) |
+| `PUT /api/v1/venues/{id}`                                 | `ADMIN`, `DIRECAO`                                     | Atualiza                                                            |
+| `DELETE /api/v1/venues/{id}`                              | `ADMIN`, `DIRECAO`                                     | Anonimiza o local                                                   |
+| `GET /api/v1/training-sessions`                           | gestão/`TREINADOR`, e `ATLETA`/`ENCARREGADO` (âmbito)  | Lista; filtro opcional `teamId`; `FINANCEIRO` não tem acesso        |
+| `GET /api/v1/training-sessions/{id}`                      | visibilidade da equipa da sessão                       | Detalhe; fora do âmbito devolve `404`                              |
+| `POST /api/v1/training-sessions`                          | `ADMIN`/`DIRECAO`, `TREINADOR` (só nas suas equipas)   | `{teamId, courtId?, startTime, endTime, recurrence?, notes?, status?}` → 201 |
+| `PUT /api/v1/training-sessions/{id}`                      | idem                                                   | Atualiza; `endTime` tem de ser posterior a `startTime`             |
+| `DELETE /api/v1/training-sessions/{id}`                   | idem                                                   | Anonimiza a sessão (as presenças ficam preservadas)                |
+| `GET /api/v1/training-sessions/{id}/attendance`           | visibilidade da sessão                                 | Lista presenças                                                     |
+| `POST /api/v1/training-sessions/{id}/attendance`          | gestão/`TREINADOR` da equipa                           | `{athleteId, status?, justification?}` → 204 (upsert)              |
+| `PUT /api/v1/training-sessions/{id}/attendance/{athleteId}` | idem                                                 | Upsert por caminho (`{status?, justification?}` opcional)           |
+| `DELETE /api/v1/training-sessions/{id}/attendance/{athleteId}` | idem                                              | Remove a presença                                                  |
+
+Estados de sessão: `ACTIVE`/`CANCELLED`/`COMPLETED`. Presenças: `PRESENT`/`ABSENT`/`JUSTIFIED`/`LATE`.
+Para compatibilidade com os clientes iniciais, `courtId` também aceita `venueId`, e `startTime`/`endTime`
+aceitam `start`/`end` (ou `startDateTime`/`endDateTime`).
+
+### Endpoints de jogos
+
+| Endpoint                                             | Quem pode                                              | Descrição                                                              |
+|------------------------------------------------------|--------------------------------------------------------|------------------------------------------------------------------------|
+| `GET /api/v1/matches`                                | gestão/`TREINADOR`, e `ATLETA`/`ENCARREGADO` (âmbito)  | Lista; filtro opcional `teamId`                                        |
+| `GET /api/v1/matches/{id}`                           | visibilidade da equipa do jogo                         | Detalhe; fora do âmbito devolve `404`                                  |
+| `POST /api/v1/matches`                               | `ADMIN`/`DIRECAO`, `TREINADOR` (só nas suas equipas)   | `{teamId, opponent, matchDate, competition?, location?, courtId?, isHome?, status?}` → 201 |
+| `PUT /api/v1/matches/{id}`                           | idem                                                   | Atualiza                                                               |
+| `DELETE /api/v1/matches/{id}`                        | idem                                                   | Anonimiza o jogo (sets e convocatórias preservados)                    |
+| `GET /api/v1/matches/{id}/set-scores`                | visibilidade do jogo                                   | Lista os sets                                                          |
+| `POST /api/v1/matches/{id}/set-scores`               | gestão/`TREINADOR` da equipa                           | `{setNumber, ourPoints, opponentPoints}` → 204 (upsert)                |
+| `PUT /api/v1/matches/{id}/set-scores/{setNumber}`    | idem                                                   | Upsert por caminho                                                     |
+| `DELETE /api/v1/matches/{id}/set-scores/{setNumber}` | idem                                                   | Remove o set                                                           |
+| `GET /api/v1/matches/{id}/call-ups`                  | visibilidade do jogo                                   | Lista as convocatórias e respostas                                     |
+| `POST /api/v1/matches/{id}/call-ups`                 | gestão/`TREINADOR` da equipa                           | `{athleteId}` → 204; atleta tem de estar no plantel; `409` se repetido |
+| `DELETE /api/v1/matches/{id}/call-ups/{athleteId}`   | idem                                                   | Remove a convocatória                                                  |
+| `PATCH /api/v1/matches/{id}/call-ups/{athleteId}`    | gestão/`TREINADOR` da equipa ou o próprio atleta       | `{response}`: `CONFIRMED`/`DECLINED` (ou `null` para limpar) → 204     |
+
+`isHome` também aceita `home`, e `courtId` aceita `venueId`. Estados do jogo:
+`SCHEDULED`/`PLAYED`/`CANCELLED`/`POSTPONED`. O `ENCARREGADO` vê o jogo do educando mas não responde pela
+convocatória (só o atleta ou a gestão/treinador o podem fazer).
+
+## Financeiro (fase 3)
+
+| Endpoint                                      | Quem pode                                      | Descrição                                                                 |
+|-----------------------------------------------|------------------------------------------------|---------------------------------------------------------------------------|
+| `GET /api/v1/fee-plans`                       | `ADMIN`, `DIRECAO`, `FINANCEIRO`               | Lista os planos de quotas                                                 |
+| `POST /api/v1/fee-plans`                      | idem                                           | `{name, amountCents, seasonId?, ageGroupId?, periodicity?}` → 201; nome único (`409`) |
+| `DELETE /api/v1/fee-plans/{id}`               | idem                                           | Anonimiza o plano                                                        |
+| `GET /api/v1/charges`                         | gestão/`FINANCEIRO` (tudo) e `ATLETA`/`ENCARREGADO` (âmbito) | Lista; filtros `athleteId` e `status`                                    |
+| `POST /api/v1/charges`                        | `ADMIN`, `DIRECAO`, `FINANCEIRO`               | `{athleteId, amountCents, dueDate, guardianId?, feePlanId?, status?}` → 201 |
+| `PATCH /api/v1/charges/{id}/status`           | idem                                           | `{status}` → 204                                                          |
+| `DELETE /api/v1/charges/{id}`                 | idem                                           | Anonimiza a cobrança (pagamentos preservados)                             |
+| `GET /api/v1/charges/{id}/payments`           | idem                                           | Lista os pagamentos da cobrança                                           |
+| `POST /api/v1/payments`                       | idem                                           | `{chargeId, amountCents, method?, reference?}` → 201                      |
+| `GET /api/v1/ledger-entries`                  | idem                                           | Lista receitas/despesas                                                   |
+| `POST /api/v1/ledger-entries`                 | idem                                           | `{type, category, amountCents, entryDate, description?}` → 201            |
+| `DELETE /api/v1/ledger-entries/{id}`          | idem                                           | Anonimiza o lançamento                                                    |
+
+Valores em **cêntimos** (`amountCents`, inteiro ≥ 0). Periodicidade: `ONE_TIME`/`MONTHLY`/`QUARTERLY`/`YEARLY`;
+estados de cobrança: `PENDING`/`PAID`/`OVERDUE`/`CANCELLED`; métodos de pagamento:
+`CASH`/`MULTIBANCO`/`MBWAY`/`TRANSFER`/`OTHER`; tipo de lançamento: `INCOME`/`EXPENSE`. O `TREINADOR` não
+entra no financeiro (`403`), o `ATLETA`/`ENCARREGADO` só vêem as cobranças que lhes pertencem e a gestão/`FINANCEIRO`
+gere tudo.
+
 ## Modelo de dados
 
 Todas as tabelas abaixo levam `tenant_id`, `id` (UUID), `created_at`, `updated_at` e `created_by`; as que não referem tenant (`tenant`, `app_user`) são geridas pela plataforma.
