@@ -30,6 +30,30 @@ jobs:
       - name: Run tests
         run: mvn -B -ntp test
 
+      - name: Resumo da cobertura
+        if: always()
+        run: |
+          csv=target/site/jacoco/jacoco.csv
+          if [ -f "$csv" ]; then
+            awk -F, 'NR > 1 { lm += $8; lc += $9; bm += $6; bc += $7 }
+              END {
+                lt = lm + lc; bt = bm + bc;
+                printf "### Cobertura (JaCoCo)\n\n";
+                printf "| Métrica | Coberto | Total | Cobertura |\n";
+                printf "|---|---:|---:|---:|\n";
+                printf "| Linhas | %d | %d | %.1f%% |\n", lc, lt, (lt ? 100 * lc / lt : 0);
+                printf "| Ramos | %d | %d | %.1f%% |\n", bc, bt, (bt ? 100 * bc / bt : 0);
+              }' "$csv" >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - name: Publicar relatório de cobertura
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: cobertura-jacoco
+          path: target/site/jacoco
+          if-no-files-found: warn
+
   image:
     name: Imagem Docker
     needs: test

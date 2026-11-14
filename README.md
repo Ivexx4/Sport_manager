@@ -503,6 +503,42 @@ Os testes unitários (`LoginRateLimiterTest`, `ClientIpResolverTest`, `Provision
 `ExpiredDataPurgerUnitTest`) não precisam de Docker; os dois primeiros controlam o relógio para verificar a
 expiração do bloqueio sem esperar.
 
+### Cobertura de testes (JaCoCo)
+
+O build está instrumentado com JaCoCo 0.8.14; `mvn test` deixa o relatório em `target/site/jacoco/`:
+
+| Ficheiro     | Uso                                                             |
+|--------------|-----------------------------------------------------------------|
+| `index.html` | Relatório navegável (packages → classes → linhas e ramos)       |
+| `jacoco.xml` | Consumo por CI/SonarQube/Codecov                                |
+| `jacoco.csv` | Resumo por classe para scripts                                   |
+
+Resumo no terminal:
+
+```bash
+./scripts/coverage.ps1              # corre os testes e resume a cobertura por package
+./scripts/coverage.ps1 -Open        # idem e abre o HTML no browser
+./scripts/coverage.ps1 -NoTests     # relê o último relatório sem correr testes
+```
+
+Impor mínimos (o build falha abaixo deles):
+
+```bash
+mvn -Pcoverage-check verify
+mvn -Pcoverage-check verify -Djacoco.min.line=0.92 -Djacoco.min.branch=0.72
+```
+
+Os limiares por omissão são **90% de linhas** e **70% de ramos** (`pom.xml`). Fora do perfil a cobertura é
+apenas medida e nunca falha o build; os valores podem ser trocados na linha de comandos
+(`-Djacoco.min.line=0.92 -Djacoco.min.branch=0.72`). A conta abrange `src/main/java` (exclui só `package-info`).
+
+No último levantamento a suite dava **93,3% de linhas** e **74,2% de ramos**. A maior lacuna está em
+`notifications` (`EmailOutboxDispatcher` e `SmtpMailTransport`), sem impacto nos restantes módulos,
+que ficam acima de 93% de linhas.
+
+No CI, cada execução publica o relatório como artefacto `cobertura-jacoco` e escreve o resumo no
+*step summary* do workflow.
+
 Integração contínua: workflow GitHub Actions em `.github/workflows/ci.yml` (JDK 25, `mvn -B -ntp test`,
 com Docker disponível no runner). Em `main`, o mesmo workflow publica a imagem e faz deploy para staging
 (ver a secção seguinte).
@@ -621,6 +657,9 @@ documentos (`document.expiry_notified_at`) e `V16` geração de cobranças (`cha
 único parcial de idempotência). Papéis em
 `docker/postgres-init/01-roles.sql`, também
 usado pelos testes (passwords `dev`, só para desenvolvimento; o `volei_migrator` tem `BYPASSRLS`).
+
+Scripts de apoio em `scripts/`: `coverage.ps1` resume a cobertura JaCoCo por package (`-Open`, `-NoTests`,
+`-MinLine`).
 
 ## Roadmap
 
