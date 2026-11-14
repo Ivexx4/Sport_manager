@@ -389,6 +389,9 @@ Todas as tabelas abaixo levam `tenant_id`, `id` (UUID), `created_at`, `updated_a
 - Datas e horas em `timestamptz`, guardadas em UTC e mostradas no fuso do clube (`Europe/Lisbon`).
 - Um atleta pode ter várias épocas; o escalão é sempre derivado da época e da data de nascimento, não guardado no atleta.
 - Apagar atletas faz-se por anonimização (RGPD), mantendo os registos financeiros exigidos por lei.
+- A faturação da plataforma é uma mensalidade única por clube, igual para todos: sem planos, tiers ou preço
+  personalizado. Cada fatura guarda o valor cobrado no momento (snapshot), para que mudar o preço não reescreva
+  o histórico.
 
 ## Manutenção
 
@@ -603,7 +606,7 @@ usado pelos testes (passwords `dev`, só para desenvolvimento; o `volei_migrator
 | **2. Treinos e jogos** | 5 semanas | Calendário, recorrência, presenças, jogos e resultados, convocatórias com confirmação, notificações e PWA | Um treinador convoca e recebe respostas pelo telemóvel |
 | **3. Quotas e financeiro** | 6 semanas | Planos, geração de cobranças, pagamentos Multabanco/MB WAY, webhooks, reconciliação, mapa de dívidas, despesas | Primeiro mês de quotas cobrado e reconciliado sem intervenção manual |
 | **4. Piloto e endurecimento** | 3 semanas | RGPD (consentimentos, exportação, anonimização), testes de carga, backups testados, monitorização, manuais | 1 a 2 clubes em produção durante um mês completo |
-| **5. Onboarding multi-clube** | 3 semanas | Auto-registo de clubes, configuração de marca, planos SaaS e faturação da plataforma, backoffice | Novo clube criado e operacional em menos de 1 hora |
+| **5. Onboarding multi-clube** | 3 semanas | Auto-registo de clubes, configuração de marca, mensalidade única por clube (sem planos/tiers) e faturação da plataforma, backoffice | Novo clube criado e operacional em menos de 1 hora |
 
 **Depois da v1:** integração com a federação, app móvel nativo, estatísticas táticas, loja do clube, comunicação por WhatsApp/SMS, gestão de equipamentos e transportes.
 
@@ -619,5 +622,6 @@ usado pelos testes (passwords `dev`, só para desenvolvimento; o `volei_migrator
   falta permitir configurar a antecedência por clube.
 - Roadmap — fases seguintes: **4. Piloto e endurecimento** (RGPD: consentimentos, exportação e anonimização; testes
   de carga; backups testados; monitorização; manuais) e **5. Onboarding multi-clube** (auto-registo, configuração de
-  marca, planos SaaS e faturação da plataforma, backoffice). Depois da v1: integração com a federação, app móvel
-  nativa, estatísticas táticas, loja do clube, comunicação por WhatsApp/SMS, gestão de equipamentos e transportes.
+  marca, mensalidade única por clube — sem planos/tiers — e faturação da plataforma, backoffice). Depois da v1:
+  integração com a federação, app móvel nativa, estatísticas táticas, loja do clube, comunicação por WhatsApp/SMS,
+  gestão de equipamentos e transportes.
