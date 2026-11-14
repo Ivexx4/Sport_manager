@@ -26,6 +26,23 @@ docker compose up -d                              # PostgreSQL 16 (volei_migrato
 SPRING_PROFILES_ACTIVE=dev mvn spring-boot:run    # perfil dev: segredo JWT, SMTP local e bootstrap key
 ```
 
+### Frontend da Fase 1
+
+O frontend React/TypeScript está em `frontend/` e cobre o fluxo de gestão de épocas,
+escalões, atletas, equipas e importação CSV. Em desenvolvimento, arranca-o em paralelo
+com a API:
+
+```bash
+cd frontend
+npm install
+npm run dev
+```
+
+Como o backend resolve o clube pelo subdomínio, abre o frontend com o subdomínio do
+clube-piloto: [http://clube-piloto.localhost:5173](http://clube-piloto.localhost:5173).
+Usa `admin@clube-piloto.local` / `admin123` com o seed de desenvolvimento. Para outra
+API, define `VITE_API_URL` antes do `npm run dev` ou `npm run build`.
+
 Há duas formas de ter um clube em desenvolvimento (escolhe uma):
 
 **A. Dados de exemplo (seed)** — `clube-piloto`, com `admin@clube-piloto.local` / `admin123`:

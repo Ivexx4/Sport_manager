@@ -1,0 +1,97 @@
+package pt.voleibol.gestao.identity;
+
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.ArgumentMatchers.*;
+import static org.mockito.Mockito.*;
+
+import java.time.Duration;
+import java.util.Optional;
+import java.util.Set;
+import java.util.UUID;
+
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.Test;
+import org.springframework.security.crypto.password.PasswordEncoder;
+import org.springframework.security.oauth2.jwt.Jwt;
+import org.springframework.security.oauth2.jwt.JwtEncoder;
+import org.springframework.web.server.ResponseStatusException;
+
+import pt.voleibol.gestao.tenancy.TenantContext;
+
+class AuthServiceUnitTest {
+    private static final UUID TENANT = UUID.randomUUID();
+    private static final UUID USER = UUID.randomUUID();
+
+    @AfterEach
+    void cleanup() {
+        TenantContext.clear();
+    }
+
+    @Test
+    void loginFalhaParaUtilizadorDesconhecidoPasswordInvalidaOuSemPapel() {
+        TenantContext.set(TENANT);
+        AuthRepository repository = mock(AuthRepository.class);
+        PasswordEncoder encoder = mock(PasswordEncoder.class);
+        when(encoder.encode(anyString())).thenReturn("dummy");
+        when(encoder.matches(anyString(), anyString())).thenReturn(true);
+        JwtEncoder jwt = mock(JwtEncoder.class);
+        AuthService service = new AuthService(repository, encoder, jwt,
+                new JwtProperties("secret", "issuer", Duration.ofMinutes(5), Duration.ofDays(1)));
+
+        assertThat(service.login("missing@example.test", "password")).isEmpty();
+        verify(repository).audit(TENANT, null, "LOGIN_FAILED");
+
+        when(repository.findActiveUserByEmail("wrong@example.test"))
+                .thenReturn(Optional.of(new AuthRepository.UserRow(USER, "hash")));
+        when(encoder.matches(anyString(), eq("hash"))).thenReturn(false);
+        assertThat(service.login("wrong@example.test", "password")).isEmpty();
+        verify(repository).audit(TENANT, USER, "LOGIN_FAILED");
+
+        when(encoder.matches(anyString(), eq("hash"))).thenReturn(true);
+        when(repository.findActiveRoles(TENANT, USER)).thenReturn(Set.of());
+        assertThat(service.login("wrong@example.test", "password")).isEmpty();
+    }
+
+    @Test
+    void loginComHashVazioUsaDummyEPasswordLongaFalha() {
+        TenantContext.set(TENANT);
+        AuthRepository repository = mock(AuthRepository.class);
+        PasswordEncoder encoder = mock(PasswordEncoder.class);
+        when(encoder.encode(anyString())).thenReturn("dummy");
+        when(repository.findActiveUserByEmail("user@example.test"))
+                .thenReturn(Optional.of(new AuthRepository.UserRow(USER, " ")));
+        when(encoder.matches(anyString(), eq("dummy"))).thenReturn(true);
+        AuthService service = new AuthService(repository, encoder, mock(JwtEncoder.class),
+                new JwtProperties("secret", "issuer", Duration.ofMinutes(5), Duration.ofDays(1)));
+
+        assertThat(service.login("user@example.test", "a".repeat(100))).isEmpty();
+        verify(repository).audit(TENANT, USER, "LOGIN_FAILED");
+    }
+
+    @Test
+    void loginBemSucedidoEmiteTokens() {
+        TenantContext.set(TENANT);
+        AuthRepository repository = mock(AuthRepository.class);
+        PasswordEncoder encoder = mock(PasswordEncoder.class);
+        JwtEncoder jwtEncoder = mock(JwtEncoder.class);
+        when(encoder.encode(anyString())).thenReturn("dummy");
+        when(repository.findActiveUserByEmail("user@example.test"))
+                .thenReturn(Optional.of(new AuthRepository.UserRow(USER, "hash")));
+        when(encoder.matches("password", "hash")).thenReturn(true);
+        when(repository.findActiveRoles(TENANT, USER)).thenReturn(Set.of("ADMIN"));
+        when(jwtEncoder.encode(any())).thenReturn(Jwt.withTokenValue("access")
+                .header("alg", "none").claim("sub", USER.toString()).build());
+        AuthService service = new AuthService(repository, encoder, jwtEncoder,
+                new JwtProperties("secret", "issuer", Duration.ofMinutes(5), Duration.ofDays(1)));
+
+        assertThat(service.login("user@example.test", "password")).isPresent();
+        verify(repository).audit(TENANT, USER, "LOGIN_SUCCESS");
+        verify(repository).insertRefreshToken(eq(TENANT), eq(USER), anyString(), any());
+    }
+
+    @Test
+    void requireTenantSemContextoFalha() {
+        assertThat(org.assertj.core.api.Assertions.catchThrowable(() ->
+                AuthService.requireTenant())).isInstanceOf(ResponseStatusException.class);
+    }
+}
