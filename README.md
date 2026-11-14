@@ -1,11 +1,11 @@
 # Gestão de Clubes de Voleibol
 
 Monólito modular (Java 25, Spring Boot 4.1.2, Maven) com PostgreSQL e multitenancy por `tenant_id` + Row Level Security.
-Estado atual: **fases 0 e 1 concluídas, fase 2 em curso** com os módulos de **atletas** (CRUD, documentos com
-validade e importação CSV), **equipas** (com épocas, escalões e regra federativa FPV), **treinos e jogos**
-(sessões, presenças, jogos, resultados por set e convocatórias) e **financeiro** (planos de quotas, cobranças,
-pagamentos e lançamentos). Inclui ainda estatísticas de assiduidade/convocatórias por atleta e alertas de
-caducidade de documentos por e-mail:
+Estado atual: **fases 0 a 3 entregues no backend** — **atletas** (CRUD, documentos com validade e importação CSV),
+**equipas** (com épocas, escalões e regra federativa FPV), **treinos e jogos** (sessões, presenças, jogos,
+resultados por set e convocatórias) e **financeiro** (planos de quotas, cobranças, pagamentos e lançamentos).
+Inclui ainda estatísticas de assiduidade/convocatórias por atleta e alertas de caducidade de documentos por e-mail.
+Faltam a PWA/notificações push, a integração real de pagamentos e a fase 4 (RGPD e endurecimento):
 tenancy com RLS, papéis da base de dados, filtro de tenant, testes de isolamento, autenticação por JWT próprio,
 limitação de tentativas de login, convites/utilizadores, recuperação de password, provisionamento de clubes,
 e-mail por outbox (com tentativas), limpeza periódica de dados expirados, CI e CD para staging; atletas,
@@ -441,7 +441,9 @@ Os testes de integração precisam de Docker. Corre-se um PostgreSQL real com Te
   auditoria. Prova a autorização por recurso: `TREINADOR` só nas suas equipas (perde o acesso ao sair do plantel),
   `ATLETA` só no próprio registo, `ENCARREGADO` só nos educandos, `FINANCEIRO` só lê e `ADMIN`/`DIRECAO` gerem tudo.
   Cobre também a remoção não destrutiva: anonimização, preservação do plantel, remoção dos encarregados e
-  reutilização da licença e da conta.
+  reutilização da licença e da conta. Inclui ainda as estatísticas por atleta (convocatórias, jogos disputados,
+  respostas e presenças, com a mesma visibilidade da leitura do atleta) e a importação CSV (linhas válidas,
+  licenças repetidas e datas inválidas ignoradas, repetição sem duplicar e escrita restrita à gestão).
 - `TeamFlowTest`: CRUD de equipas, nome único, autorização da listagem, staff e plantel, isolamento entre clubes,
   remoção não destrutiva (a equipa é anonimizada e staff/plantel ficam preservados), o âmbito do `TREINADOR`
   (só vê as equipas em que é staff e não as gere) e a regra federativa FPV no plantel (faixa de escalão, subida com

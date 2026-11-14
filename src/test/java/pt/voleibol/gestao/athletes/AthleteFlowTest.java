@@ -19,6 +19,7 @@ import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.http.MediaType;
+import org.springframework.mock.web.MockMultipartFile;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
@@ -37,6 +38,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.springframework.security.test.web.servlet.setup.SecurityMockMvcConfigurers.springSecurity;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.multipart;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.patch;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
@@ -84,6 +86,11 @@ class AthleteFlowTest {
 
     static final UUID EPOCA = UUID.fromString("00000000-0000-0000-0000-00000000c201");
     static final UUID ESCALAO = UUID.fromString("00000000-0000-0000-0000-00000000c211");
+
+    static final UUID JOGO_DISPUTADO = UUID.fromString("00000000-0000-0000-0000-00000000d101");
+    static final UUID JOGO_AGENDADO = UUID.fromString("00000000-0000-0000-0000-00000000d102");
+    static final UUID TREINO_ESTATISTICAS = UUID.fromString("00000000-0000-0000-0000-00000000d201");
+    static final UUID TREINO_ESTATISTICAS_2 = UUID.fromString("00000000-0000-0000-0000-00000000d202");
 
     /** O mesmo hash para todos os utilizadores de teste: evita calcular bcrypt dezenas de vezes. */
     private static String passwordHash;
@@ -500,11 +507,109 @@ class AthleteFlowTest {
         String inativos = mvc.perform(get("/api/v1/athletes").param("status", "INACTIVE")
                         .header("Authorization", "Bearer " + admin).with(host(HOST_A)))
                 .andExpect(status().isOk()).andReturn().getResponse().getContentAsString();
-        assertThat(JsonPath.<List<String>>read(inativos, "$.items[*].id")).isEmpty();
+        assertThat(ids(inativos)).doesNotContain(ATLETA_2);
 
         mvc.perform(get("/api/v1/athletes").param("size", "101")
                         .header("Authorization", "Bearer " + admin).with(host(HOST_A)))
                 .andExpect(status().isBadRequest());
+    }
+
+    // --- estatísticas e importação CSV ---
+
+    @Test
+    void estatisticasDoAtleta() throws Exception {
+        semearEstatisticas();
+        String admin = acesso(HOST_A, ADMIN);
+
+        String stats = mvc.perform(get("/api/v1/athletes/" + ATLETA_2 + "/stats")
+                        .header("Authorization", "Bearer " + admin).with(host(HOST_A)))
+                .andExpect(status().isOk())
+                .andReturn().getResponse().getContentAsString();
+        assertThat(JsonPath.<Integer>read(stats, "$.matchesCalledUp")).isEqualTo(2);
+        assertThat(JsonPath.<Integer>read(stats, "$.matchesPlayed")).isEqualTo(1);
+        assertThat(JsonPath.<Integer>read(stats, "$.callUpsConfirmed")).isEqualTo(1);
+        assertThat(JsonPath.<Integer>read(stats, "$.callUpsDeclined")).isEqualTo(1);
+        assertThat(JsonPath.<Integer>read(stats, "$.trainingsRegistered")).isEqualTo(2);
+        assertThat(JsonPath.<Integer>read(stats, "$.trainingsPresent")).isEqualTo(1);
+
+        // Mesma visibilidade da leitura do atleta.
+        String treinador = acesso(HOST_A, TREINADOR);
+        String financeiro = acesso(HOST_A, FINANCEIRO);
+        mvc.perform(get("/api/v1/athletes/" + ATLETA_2 + "/stats")
+                        .header("Authorization", "Bearer " + treinador).with(host(HOST_A)))
+                .andExpect(status().isOk());
+        mvc.perform(get("/api/v1/athletes/" + ATLETA_2 + "/stats")
+                        .header("Authorization", "Bearer " + financeiro).with(host(HOST_A)))
+                .andExpect(status().isOk());
+
+        String atleta = acesso(HOST_A, ATLETA_USER);
+        mvc.perform(get("/api/v1/athletes/" + ATLETA_2 + "/stats")
+                        .header("Authorization", "Bearer " + atleta).with(host(HOST_A)))
+                .andExpect(status().isNotFound());
+        mvc.perform(get("/api/v1/athletes/" + ATLETA_1 + "/stats")
+                        .header("Authorization", "Bearer " + treinador).with(host(HOST_A)))
+                .andExpect(status().isNotFound());
+        mvc.perform(get("/api/v1/athletes/" + ATLETA_2 + "/stats")
+                        .with(host(HOST_B))
+                        .header("Authorization", "Bearer " + acesso(HOST_B, ADMIN_B)))
+                .andExpect(status().isNotFound());
+        mvc.perform(get("/api/v1/athletes/" + ATLETA_2 + "/stats").with(host(HOST_A)))
+                .andExpect(status().isUnauthorized());
+    }
+
+    @Test
+    void importacaoCsv() throws Exception {
+        String admin = acesso(HOST_A, ADMIN);
+        String csv = String.join("\n",
+                "fullName,birthDate,gender,nif,email,phone,licenseNumber,status",
+                "Importado Um,2011-01-01,F,111111111,um@importado.pt,910000001,IMP-1,ACTIVE",
+                "Importado Dois,2011-02-02,M,,,,IMP-2,",
+                "Importado Duplicado,2011-03-03,F,,,,A1-LIC,ACTIVE",
+                "Importado Data Invalida,31/12/2010,F,,,,IMP-3,ACTIVE",
+                ",2011-04-04,F,,,,IMP-4,ACTIVE",
+                "Importado Tres,2011-05-05,F,222222222,tres@importado.pt,910000002,IMP-3,INACTIVE",
+                "");
+
+        String resultado = importar(HOST_A, admin, csv.getBytes(StandardCharsets.UTF_8))
+                .andExpect(status().isOk())
+                .andReturn().getResponse().getContentAsString();
+        assertThat(JsonPath.<Integer>read(resultado, "$.imported")).isEqualTo(3);
+
+        String lista = mvc.perform(get("/api/v1/athletes").param("q", "Importado")
+                        .param("size", "10")
+                        .header("Authorization", "Bearer " + admin).with(host(HOST_A)))
+                .andExpect(status().isOk())
+                .andReturn().getResponse().getContentAsString();
+        assertThat(JsonPath.<List<String>>read(lista, "$.items[*].fullName"))
+                .containsExactlyInAnyOrder("Importado Um", "Importado Dois", "Importado Tres");
+        assertThat(JsonPath.<List<String>>read(lista, "$.items[*].status"))
+                .filteredOn(s -> s.equals("INACTIVE")).hasSize(1);
+
+        // Repetir o ficheiro não duplica atletas (licenças já existentes são ignoradas).
+        String repetido = importar(HOST_A, admin, csv.getBytes(StandardCharsets.UTF_8))
+                .andExpect(status().isOk())
+                .andReturn().getResponse().getContentAsString();
+        assertThat(JsonPath.<Integer>read(repetido, "$.imported")).isZero();
+
+        String vazio = importar(HOST_A, admin, "\n".getBytes(StandardCharsets.UTF_8))
+                .andExpect(status().isOk())
+                .andReturn().getResponse().getContentAsString();
+        assertThat(JsonPath.<Integer>read(vazio, "$.imported")).isZero();
+
+        // Só a gestão importa.
+        String treinador = acesso(HOST_A, TREINADOR);
+        String atleta = acesso(HOST_A, ATLETA_USER);
+        String financeiro = acesso(HOST_A, FINANCEIRO);
+        importar(HOST_A, treinador, csv.getBytes(StandardCharsets.UTF_8))
+                .andExpect(status().isForbidden());
+        importar(HOST_A, atleta, csv.getBytes(StandardCharsets.UTF_8))
+                .andExpect(status().isForbidden());
+        importar(HOST_A, financeiro, csv.getBytes(StandardCharsets.UTF_8))
+                .andExpect(status().isForbidden());
+        mvc.perform(multipart("/api/v1/athletes/import").with(host(HOST_A))
+                        .file(new MockMultipartFile("file", "atletas.csv", "text/csv",
+                                csv.getBytes(StandardCharsets.UTF_8))))
+                .andExpect(status().isUnauthorized());
     }
 
     // --- auxiliares de pedido ---
@@ -516,6 +621,12 @@ class AthleteFlowTest {
 
     private ResultActions getAtleta(String host, String token, UUID athleteId) throws Exception {
         return mvc.perform(get("/api/v1/athletes/" + athleteId)
+                .header("Authorization", "Bearer " + token).with(host(host)));
+    }
+
+    private ResultActions importar(String host, String token, byte[] csv) throws Exception {
+        return mvc.perform(multipart("/api/v1/athletes/import")
+                .file(new MockMultipartFile("file", "atletas.csv", "text/csv", csv))
                 .header("Authorization", "Bearer " + token).with(host(host)));
     }
 
@@ -642,6 +753,52 @@ class AthleteFlowTest {
                     INSERT INTO athlete_guardian (tenant_id, athlete_id, user_id, relationship)
                     VALUES (?, ?, ?, 'MAE') ON CONFLICT (tenant_id, athlete_id, user_id) DO NOTHING
                     """, CLUBE_A, ATLETA_3, id(ENCARREGADO));
+        }
+    }
+
+    /** Jogos, convocatórias e presenças para o teste de estatísticas do atleta ATLETA_2. */
+    private void semearEstatisticas() throws SQLException {
+        try (Connection c = superuser()) {
+            executar(c, """
+                    INSERT INTO match (id, tenant_id, team_id, opponent, match_date, status)
+                    VALUES (?, ?, ?, 'Adversario D', now(), 'PLAYED')
+                    ON CONFLICT (id) DO NOTHING
+                    """, JOGO_DISPUTADO, CLUBE_A, EQUIPA_A);
+            executar(c, """
+                    INSERT INTO match (id, tenant_id, team_id, opponent, match_date, status)
+                    VALUES (?, ?, ?, 'Adversario E', now(), 'SCHEDULED')
+                    ON CONFLICT (id) DO NOTHING
+                    """, JOGO_AGENDADO, CLUBE_A, EQUIPA_A);
+            executar(c, """
+                    INSERT INTO call_up (tenant_id, match_id, athlete_id, status, response)
+                    VALUES (?, ?, ?, 'CONFIRMED', 'CONFIRMED')
+                    ON CONFLICT (tenant_id, match_id, athlete_id) DO NOTHING
+                    """, CLUBE_A, JOGO_DISPUTADO, ATLETA_2);
+            executar(c, """
+                    INSERT INTO call_up (tenant_id, match_id, athlete_id, status, response)
+                    VALUES (?, ?, ?, 'DECLINED', 'DECLINED')
+                    ON CONFLICT (tenant_id, match_id, athlete_id) DO NOTHING
+                    """, CLUBE_A, JOGO_AGENDADO, ATLETA_2);
+            executar(c, """
+                    INSERT INTO training_session (id, tenant_id, team_id, start_time, end_time)
+                    VALUES (?, ?, ?, now(), now() + interval '1 hour')
+                    ON CONFLICT (id) DO NOTHING
+                    """, TREINO_ESTATISTICAS, CLUBE_A, EQUIPA_A);
+            executar(c, """
+                    INSERT INTO training_session (id, tenant_id, team_id, start_time, end_time)
+                    VALUES (?, ?, ?, now(), now() + interval '1 hour')
+                    ON CONFLICT (id) DO NOTHING
+                    """, TREINO_ESTATISTICAS_2, CLUBE_A, EQUIPA_A);
+            executar(c, """
+                    INSERT INTO attendance (tenant_id, session_id, athlete_id, status)
+                    VALUES (?, ?, ?, 'PRESENT')
+                    ON CONFLICT (tenant_id, session_id, athlete_id) DO NOTHING
+                    """, CLUBE_A, TREINO_ESTATISTICAS, ATLETA_2);
+            executar(c, """
+                    INSERT INTO attendance (tenant_id, session_id, athlete_id, status)
+                    VALUES (?, ?, ?, 'ABSENT')
+                    ON CONFLICT (tenant_id, session_id, athlete_id) DO NOTHING
+                    """, CLUBE_A, TREINO_ESTATISTICAS_2, ATLETA_2);
         }
     }
 
