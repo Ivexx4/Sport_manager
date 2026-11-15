@@ -16,6 +16,8 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.server.ResponseStatusException;
 
+import pt.voleibol.gestao.shared.Rules;
+
 /**
  * Provisionamento de novos clubes e do primeiro administrador (protegido por chave de bootstrap).
  */

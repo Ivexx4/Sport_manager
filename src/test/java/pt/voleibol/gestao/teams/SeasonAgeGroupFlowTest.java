@@ -54,8 +54,6 @@ class SeasonAgeGroupFlowTest extends FlowTestSupport {
     static UUID ESCALAO_A;
     static UUID ESCALAO_B;
 
-    private static String passwordHash;
-
     @BeforeEach
     void preparar() throws SQLException {
         semear();
@@ -293,9 +291,6 @@ class SeasonAgeGroupFlowTest extends FlowTestSupport {
     // --- semeadura ---
 
     private void semear() throws SQLException {
-        if (passwordHash == null) {
-            passwordHash = passwordEncoder.encode(PASS);
-        }
         try (Connection c = superuser()) {
             // Mantém cada teste independente dentro do mesmo contentor.
             executar(c, "DELETE FROM team_athlete");
@@ -320,27 +315,6 @@ class SeasonAgeGroupFlowTest extends FlowTestSupport {
         }
     }
 
-    private void membro(Connection c, String email, UUID tenant, String... roles) throws SQLException {
-        executar(c, """
-                INSERT INTO app_user (id, email, name, password_hash) VALUES (?, ?, 'Teste', ?)
-                ON CONFLICT (id) DO UPDATE SET email = EXCLUDED.email, name = EXCLUDED.name,
-                    password_hash = EXCLUDED.password_hash, status = 'ACTIVE'
-                """, id(email), email, passwordHash);
-        for (String role : roles) {
-            executar(c, """
-                    INSERT INTO membership (tenant_id, user_id, role) VALUES (?, ?, ?)
-                    ON CONFLICT (tenant_id, user_id, role) DO UPDATE SET status = 'ACTIVE'
-                    """, tenant, id(email), role);
-        }
-    }
 
-    private static void epoca(Connection c, UUID seasonId, UUID tenantId, String nome) throws SQLException {
-        executar(c, """
-                INSERT INTO season (id, tenant_id, name, start_date, end_date, is_active)
-                VALUES (?, ?, ?, ?, ?, true)
-                ON CONFLICT (id) DO UPDATE SET name = EXCLUDED.name, start_date = EXCLUDED.start_date,
-                    end_date = EXCLUDED.end_date, is_active = true, anonymized_at = NULL
-                """, seasonId, tenantId, nome, Date.valueOf("2025-08-01"), Date.valueOf("2026-07-31"));
-    }
 
 }

@@ -19,7 +19,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.server.ResponseStatusException;
 
-import pt.voleibol.gestao.tenancy.TenantContext;
+import pt.voleibol.gestao.shared.Rules;
 import pt.voleibol.gestao.billing.ChargeRepository;
 
 /**
@@ -37,7 +37,6 @@ import pt.voleibol.gestao.billing.ChargeRepository;
 @Service
 class AthleteService {
 
-    private static final Set<String> MANAGERS = Set.of("ADMIN", "DIRECAO");
     private static final Set<String> STATUSES = Set.of("ACTIVE", "INACTIVE");
 
     record AthleteView(UUID id, String fullName, LocalDate birthDate, String gender, String nif,
@@ -72,8 +71,8 @@ class AthleteService {
         if (size < 1 || size > 100) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Tamanho da página entre 1 e 100");
         }
-        UUID tenantId = requireTenant();
-        String normalizedStatus = status == null || status.isBlank() ? null : validStatus(status);
+        UUID tenantId = Rules.tenant();
+        String normalizedStatus = status == null || status.isBlank() ? null : Rules.status(status, STATUSES);
         List<AthleteView> items = athletes
                 .list(tenantId, actorId, roles, query, normalizedStatus, teamId, size, (long) page * size)
                 .stream().map(AthleteService::view).toList();
@@ -83,7 +82,7 @@ class AthleteService {
 
     @Transactional(readOnly = true)
     AthleteView get(UUID actorId, Set<String> roles, UUID athleteId) {
-        UUID tenantId = requireTenant();
+        UUID tenantId = Rules.tenant();
         return athletes.findVisible(tenantId, athleteId, actorId, roles)
                 .map(AthleteService::view)
                 .orElseThrow(AthleteService::notFound);
@@ -91,8 +90,8 @@ class AthleteService {
 
     @Transactional
     AthleteView create(UUID actorId, Set<String> roles, AthleteRepository.Data data) {
-        UUID tenantId = requireTenant();
-        requireManager(roles);
+        UUID tenantId = Rules.tenant();
+        Rules.requireManager(roles);
 
         if (data.licenseNumber() != null && athletes.licenseExists(tenantId, data.licenseNumber(), null)) {
             throw new ResponseStatusException(HttpStatus.CONFLICT, "Já existe um atleta com esta licença");
@@ -116,8 +115,8 @@ class AthleteService {
 
     @Transactional
     int importCsv(UUID actorId, Set<String> roles, Reader reader) throws IOException {
-        requireManager(roles);
-        UUID tenantId = requireTenant();
+        Rules.requireManager(roles);
+        UUID tenantId = Rules.tenant();
         BufferedReader br = reader instanceof BufferedReader ? (BufferedReader) reader
                 : new BufferedReader(reader);
         String line;
@@ -177,7 +176,7 @@ class AthleteService {
 
     @Transactional
     AthleteView update(UUID actorId, Set<String> roles, UUID athleteId, AthleteRepository.Data data) {
-        UUID tenantId = requireTenant();
+        UUID tenantId = Rules.tenant();
         requireWritable(tenantId, athleteId, actorId, roles);
 
         if (data.licenseNumber() != null
@@ -197,8 +196,8 @@ class AthleteService {
 
     @Transactional
     void delete(UUID actorId, Set<String> roles, UUID athleteId) {
-        UUID tenantId = requireTenant();
-        if (!isManager(roles)) {
+        UUID tenantId = Rules.tenant();
+        if (!Rules.isManager(roles)) {
             // 404 se não o pode ver; 403 se o vê mas não o pode apagar.
             requireVisible(tenantId, athleteId, actorId, roles);
             throw new ResponseStatusException(HttpStatus.FORBIDDEN);
@@ -208,7 +207,7 @@ class AthleteService {
         if (!athletes.anonymize(tenantId, athleteId)) {
             throw notFound();
         }
-        athletes.deleteGuardians(tenantId, athleteId);
+        athletes.deleteGuardian(tenantId, athleteId, null);
         athletes.audit(tenantId, actorId, "ATHLETE_ANONYMIZED", athleteId);
     }
 
@@ -216,8 +215,8 @@ class AthleteService {
 
     @Transactional
     AthleteView linkAccount(UUID actorId, Set<String> roles, UUID athleteId, UUID userId) {
-        UUID tenantId = requireTenant();
-        requireManager(roles);
+        UUID tenantId = Rules.tenant();
+        Rules.requireManager(roles);
         requireVisible(tenantId, athleteId, actorId, roles);
         requireMembership(tenantId, userId);
         if (athletes.userLinked(tenantId, userId, athleteId)) {
@@ -236,8 +235,8 @@ class AthleteService {
 
     @Transactional
     AthleteView unlinkAccount(UUID actorId, Set<String> roles, UUID athleteId) {
-        UUID tenantId = requireTenant();
-        requireManager(roles);
+        UUID tenantId = Rules.tenant();
+        Rules.requireManager(roles);
         requireVisible(tenantId, athleteId, actorId, roles);
         if (!athletes.unlinkUser(tenantId, athleteId)) {
             throw notFound();
@@ -248,10 +247,10 @@ class AthleteService {
 
     @Transactional
     AthleteView changeStatus(UUID actorId, Set<String> roles, UUID athleteId, String status) {
-        UUID tenantId = requireTenant();
-        requireManager(roles);
+        UUID tenantId = Rules.tenant();
+        Rules.requireManager(roles);
         requireVisible(tenantId, athleteId, actorId, roles);
-        if (!athletes.updateStatus(tenantId, athleteId, validStatus(status))) {
+        if (!athletes.updateStatus(tenantId, athleteId, Rules.status(status, STATUSES))) {
             throw notFound();
         }
 
@@ -261,8 +260,8 @@ class AthleteService {
 
     @Transactional
     AthleteView registerWithdrawal(UUID actorId, Set<String> roles, UUID athleteId, LocalDate withdrawalDate) {
-        UUID tenantId = requireTenant();
-        requireManager(roles);
+        UUID tenantId = Rules.tenant();
+        Rules.requireManager(roles);
         if (withdrawalDate == null) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Data de desistência obrigatória");
         }
@@ -279,7 +278,7 @@ class AthleteService {
 
     @Transactional(readOnly = true)
     List<GuardianView> listGuardians(UUID actorId, Set<String> roles, UUID athleteId) {
-        UUID tenantId = requireTenant();
+        UUID tenantId = Rules.tenant();
         requireVisible(tenantId, athleteId, actorId, roles);
         return athletes.listGuardians(tenantId, athleteId).stream()
                 .map(g -> new GuardianView(g.userId(), g.name(), g.email(), g.relationship()))
@@ -289,8 +288,8 @@ class AthleteService {
     @Transactional
     List<GuardianView> addGuardian(UUID actorId, Set<String> roles, UUID athleteId, UUID userId,
                                    String relationship) {
-        UUID tenantId = requireTenant();
-        requireManager(roles);
+        UUID tenantId = Rules.tenant();
+        Rules.requireManager(roles);
         requireVisible(tenantId, athleteId, actorId, roles);
         requireMembership(tenantId, userId);
         if (athletes.guardianExists(tenantId, athleteId, userId)) {
@@ -307,8 +306,8 @@ class AthleteService {
 
     @Transactional
     void removeGuardian(UUID actorId, Set<String> roles, UUID athleteId, UUID userId) {
-        UUID tenantId = requireTenant();
-        requireManager(roles);
+        UUID tenantId = Rules.tenant();
+        Rules.requireManager(roles);
         requireVisible(tenantId, athleteId, actorId, roles);
         if (!athletes.deleteGuardian(tenantId, athleteId, userId)) {
             throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Encarregado não associado ao atleta");
@@ -329,17 +328,10 @@ class AthleteService {
                 trimToNull(email) == null ? null : email.trim().toLowerCase(Locale.ROOT),
                 trimToNull(phone),
                 trimToNull(licenseNumber),
-                validStatus(status == null ? "ACTIVE" : status),
+                Rules.status(status == null ? "ACTIVE" : status, STATUSES),
                 userId);
     }
 
-    static String validStatus(String status) {
-        String normalized = status.trim().toUpperCase(Locale.ROOT);
-        if (!STATUSES.contains(normalized)) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Estado inválido");
-        }
-        return normalized;
-    }
 
     private void requireVisible(UUID tenantId, UUID athleteId, UUID actorId, Set<String> roles) {
         athletes.findVisible(tenantId, athleteId, actorId, roles).orElseThrow(AthleteService::notFound);
@@ -363,20 +355,8 @@ class AthleteService {
         }
     }
 
-    private static void requireManager(Set<String> roles) {
-        if (!isManager(roles)) {
-            throw new ResponseStatusException(HttpStatus.FORBIDDEN);
-        }
-    }
 
-    private static boolean isManager(Set<String> roles) {
-        return roles.stream().anyMatch(MANAGERS::contains);
-    }
 
-    private static UUID requireTenant() {
-        return TenantContext.current().orElseThrow(() ->
-                new ResponseStatusException(HttpStatus.BAD_REQUEST, "Pedido sem clube: usa o subdomínio do clube"));
-    }
 
     private static String trimToNull(String value) {
         return value == null || value.isBlank() ? null : value.trim();

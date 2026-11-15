@@ -16,6 +16,8 @@ import org.springframework.security.oauth2.jwt.Jwt;
 import org.springframework.security.oauth2.jwt.JwtEncoder;
 import org.springframework.web.server.ResponseStatusException;
 
+
+import pt.voleibol.gestao.shared.Rules;
 import pt.voleibol.gestao.tenancy.TenantContext;
 
 class AuthServiceUnitTest {
@@ -92,6 +94,6 @@ class AuthServiceUnitTest {
     @Test
     void requireTenantSemContextoFalha() {
         assertThat(org.assertj.core.api.Assertions.catchThrowable(() ->
-                AuthService.requireTenant())).isInstanceOf(ResponseStatusException.class);
+                Rules.tenant())).isInstanceOf(ResponseStatusException.class);
     }
 }

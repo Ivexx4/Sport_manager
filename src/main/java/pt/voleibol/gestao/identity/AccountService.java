@@ -17,6 +17,8 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.server.ResponseStatusException;
 
+import pt.voleibol.gestao.shared.Rules;
+
 import pt.voleibol.gestao.notifications.EmailSender;
 
 /**
@@ -30,7 +32,6 @@ class AccountService {
     private static final Set<String> ROLES =
             Set.of("ADMIN", "DIRECAO", "FINANCEIRO", "TREINADOR", "ATLETA", "ENCARREGADO");
     /** Papéis que dão poder de gestão: só um ADMIN os pode atribuir. */
-    private static final Set<String> PRIVILEGED = Set.of("ADMIN", "DIRECAO");
 
     private static final Duration INVITATION_TTL = Duration.ofDays(7);
     private static final Duration RESET_TTL = Duration.ofHours(1);
@@ -55,9 +56,9 @@ class AccountService {
 
     @Transactional
     void invite(UUID inviterId, Set<String> inviterRoles, String email, String name, Set<String> requestedRoles) {
-        UUID tenantId = AuthService.requireTenant();
+        UUID tenantId = Rules.tenant();
 
-        if (inviterRoles.stream().noneMatch(PRIVILEGED::contains)) {
+        if (inviterRoles.stream().noneMatch(Rules.MANAGERS::contains)) {
             throw new ResponseStatusException(HttpStatus.FORBIDDEN);
         }
         Set<String> roles = requestedRoles.stream()
@@ -66,7 +67,7 @@ class AccountService {
         if (roles.isEmpty() || !ROLES.containsAll(roles)) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Papel inválido");
         }
-        if (!inviterRoles.contains("ADMIN") && roles.stream().anyMatch(PRIVILEGED::contains)) {
+        if (!inviterRoles.contains("ADMIN") && roles.stream().anyMatch(Rules.MANAGERS::contains)) {
             throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Só um administrador atribui este papel");
         }
 
@@ -97,7 +98,7 @@ class AccountService {
      */
     @Transactional
     void acceptInvitation(String rawToken, String name, String password) {
-        UUID tenantId = AuthService.requireTenant();
+        UUID tenantId = Rules.tenant();
 
         AccountRepository.Invitation invitation = accounts
                 .findInvitation(tenantId, OpaqueTokens.hash(rawToken))
@@ -134,7 +135,7 @@ class AccountService {
      */
     @Transactional
     void forgotPassword(String email) {
-        UUID tenantId = AuthService.requireTenant();
+        UUID tenantId = Rules.tenant();
         String mail = normalizeEmail(email);
 
         Optional<AuthRepository.UserRow> user = auth.findActiveUserByEmail(mail);
@@ -164,7 +165,7 @@ class AccountService {
 
     @Transactional
     void resetPassword(String rawToken, String newPassword) {
-        UUID tenantId = AuthService.requireTenant();
+        UUID tenantId = Rules.tenant();
 
         AccountRepository.ResetToken token = accounts
                 .findResetToken(tenantId, OpaqueTokens.hash(rawToken))
@@ -184,7 +185,7 @@ class AccountService {
     /** Devolve false se a password atual estiver errada (o controlador responde 400, e a tentativa fica auditada). */
     @Transactional
     boolean changePassword(UUID userId, String currentPassword, String newPassword) {
-        UUID tenantId = AuthService.requireTenant();
+        UUID tenantId = Rules.tenant();
 
         String hash = accounts.findPasswordHash(userId);
         boolean currentOk = !hash.isBlank() && PasswordPolicy.fitsBcrypt(currentPassword)
@@ -213,7 +214,7 @@ class AccountService {
 
     @Transactional(readOnly = true)
     java.util.List<MemberView> listMembers() {
-        UUID tenantId = AuthService.requireTenant();
+        UUID tenantId = Rules.tenant();
         return accounts.listMembers(tenantId).stream()
                 .map(m -> new MemberView(m.userId(), m.email(), m.name(), m.userStatus(),
                         accounts.listRoles(tenantId, m.userId())))
@@ -222,8 +223,8 @@ class AccountService {
 
     @Transactional
     void disableMember(UUID actorId, Set<String> actorRoles, UUID targetUserId) {
-        UUID tenantId = AuthService.requireTenant();
-        requireManager(actorRoles);
+        UUID tenantId = Rules.tenant();
+        Rules.requireManager(actorRoles);
         if (actorId.equals(targetUserId)) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Não podes desativar a tua própria conta");
         }
@@ -231,7 +232,7 @@ class AccountService {
         if (targetRoles.isEmpty()) {
             throw new ResponseStatusException(HttpStatus.NOT_FOUND);
         }
-        if (!actorRoles.contains("ADMIN") && targetRoles.stream().anyMatch(PRIVILEGED::contains)) {
+        if (!actorRoles.contains("ADMIN") && targetRoles.stream().anyMatch(Rules.MANAGERS::contains)) {
             throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Só um administrador gere membros com este papel");
         }
         if (accounts.hasActiveRole(tenantId, targetUserId, "ADMIN") && accounts.countActiveAdmins(tenantId) <= 1) {
@@ -244,8 +245,8 @@ class AccountService {
 
     @Transactional
     void removeRole(UUID actorId, Set<String> actorRoles, UUID targetUserId, String role) {
-        UUID tenantId = AuthService.requireTenant();
-        requireManager(actorRoles);
+        UUID tenantId = Rules.tenant();
+        Rules.requireManager(actorRoles);
         String normalized = role == null ? "" : role.trim().toUpperCase(Locale.ROOT);
         if (!ROLES.contains(normalized)) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Papel inválido");
@@ -253,7 +254,7 @@ class AccountService {
         if (actorId.equals(targetUserId)) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Não podes retirar o teu próprio papel");
         }
-        if (!actorRoles.contains("ADMIN") && PRIVILEGED.contains(normalized)) {
+        if (!actorRoles.contains("ADMIN") && Rules.MANAGERS.contains(normalized)) {
             throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Só um administrador retira este papel");
         }
         Set<String> targetRoles = accounts.findRoles(tenantId, targetUserId);
@@ -276,11 +277,6 @@ class AccountService {
         auth.audit(tenantId, actorId, "MEMBER_ROLE_REMOVED");
     }
 
-    private static void requireManager(Set<String> actorRoles) {
-        if (actorRoles.stream().noneMatch(PRIVILEGED::contains)) {
-            throw new ResponseStatusException(HttpStatus.FORBIDDEN);
-        }
-    }
 
     // --- auxiliares ---
 

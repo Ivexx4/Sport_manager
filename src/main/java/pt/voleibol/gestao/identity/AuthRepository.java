@@ -110,11 +110,6 @@ class AuthRepository {
     }
 
     void audit(UUID tenantId, UUID userId, String action) {
-        jdbc.sql("""
-                        INSERT INTO audit_log (tenant_id, user_id, action, entity, entity_id)
-                        VALUES (:tenant, :user, :action, 'session', :user)
-                        """)
-                .param("tenant", tenantId).param("user", userId).param("action", action)
-                .update();
+        Db.audit(jdbc, tenantId, userId, action, "session", userId);
     }
 }

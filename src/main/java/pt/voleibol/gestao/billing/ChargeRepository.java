@@ -179,8 +179,7 @@ public class ChargeRepository {
     }
 
     void audit(UUID tenantId, UUID actorId, String action, UUID entityId) {
-        jdbc.sql("INSERT INTO audit_log (tenant_id, user_id, action, entity, entity_id) VALUES (:t,:a,:act,'charge',:e)")
-                .param("t", tenantId).param("a", actorId).param("act", action).param("e", entityId).update();
+        Db.audit(jdbc, tenantId, actorId, action, "charge", entityId);
     }
 
     private static Row map(java.sql.ResultSet rs, int n) throws java.sql.SQLException {

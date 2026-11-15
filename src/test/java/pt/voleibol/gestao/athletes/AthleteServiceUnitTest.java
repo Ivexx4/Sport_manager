@@ -10,6 +10,8 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.dao.DuplicateKeyException;
 
+
+import pt.voleibol.gestao.shared.Rules;
 import pt.voleibol.gestao.tenancy.TenantContext;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -89,7 +91,7 @@ class AthleteServiceUnitTest {
         assertThat(data.status()).isEqualTo("ACTIVE");
         assertThat(AthleteService.data("Ana", data.birthDate(), "M", null, "", " ", null,
                 "inactive", ACTOR).status()).isEqualTo("INACTIVE");
-        assertThatThrownBy(() -> AthleteService.validStatus("pending"))
+        assertThatThrownBy(() -> Rules.status("pending", Set.of("ACTIVE", "INACTIVE")))
                 .isInstanceOf(RuntimeException.class);
     }
 }

@@ -309,13 +309,7 @@ class TeamRepository {
     }
 
     void audit(UUID tenantId, UUID actorId, String action, UUID teamId) {
-        jdbc.sql("""
-                        INSERT INTO audit_log (tenant_id, user_id, action, entity, entity_id)
-                        VALUES (:tenant, :actor, :action, 'team', :entity)
-                        """)
-                .param("tenant", tenantId).param("actor", actorId).param("action", action)
-                .param("entity", teamId)
-                .update();
+        Db.audit(jdbc, tenantId, actorId, action, "team", teamId);
     }
 
     private static TeamRow map(java.sql.ResultSet rs, int rowNum) throws java.sql.SQLException {

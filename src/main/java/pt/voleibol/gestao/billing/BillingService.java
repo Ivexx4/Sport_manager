@@ -14,7 +14,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.server.ResponseStatusException;
 
-import pt.voleibol.gestao.tenancy.TenantContext;
+import pt.voleibol.gestao.shared.Rules;
 
 @Service
 class BillingService {
@@ -66,9 +66,6 @@ class BillingService {
         }
     }
 
-    private UUID tenant() {
-        return TenantContext.current().orElseThrow(() -> new ResponseStatusException(HttpStatus.BAD_REQUEST, "Pedido sem clube"));
-    }
 
     private static void requireAmount(long amountCents) {
         if (amountCents < 0) throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Valor inválido");
@@ -84,13 +81,13 @@ class BillingService {
     @Transactional(readOnly = true)
     List<FeePlanView> listFeePlans(Set<String> roles) {
         requireWriter(roles);
-        return feePlans.list(tenant()).stream().map(f -> new FeePlanView(f.id(), f.name(), f.seasonId(), f.ageGroupId(), f.amountCents(), f.periodicity())).toList();
+        return feePlans.list(Rules.tenant()).stream().map(f -> new FeePlanView(f.id(), f.name(), f.seasonId(), f.ageGroupId(), f.amountCents(), f.periodicity())).toList();
     }
 
     @Transactional
     FeePlanView createFeePlan(UUID actorId, Set<String> roles, String name, UUID seasonId, UUID ageGroupId, long amountCents, String periodicity) {
         requireWriter(roles);
-        UUID t = tenant();
+        UUID t = Rules.tenant();
         if (name == null || name.isBlank())
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Nome obrigatório");
         requireAmount(amountCents);
@@ -107,7 +104,7 @@ class BillingService {
     @Transactional
     void deleteFeePlan(UUID actorId, Set<String> roles, UUID id) {
         requireWriter(roles);
-        UUID t = tenant();
+        UUID t = Rules.tenant();
         if (!feePlans.anonymize(t, id)) throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Plano não encontrado");
         feePlans.audit(t, actorId, "FEE_PLAN_ANONYMIZED", id);
     }
@@ -115,7 +112,7 @@ class BillingService {
     @Transactional(readOnly = true)
     List<PromotionView> listPromotions(Set<String> roles, UUID athleteId) {
         requireWriter(roles);
-        return feePlans.listPromotions(tenant(), athleteId).stream()
+        return feePlans.listPromotions(Rules.tenant(), athleteId).stream()
                 .map(p -> new PromotionView(p.id(), p.athleteId(), p.feePlanId(), p.amountCents(),
                         p.validFrom(), p.validTo(), p.reason(), p.active(), p.applicationScope(), p.billingPeriod())).toList();
     }
@@ -125,7 +122,7 @@ class BillingService {
                                   long amountCents, LocalDate validFrom, LocalDate validTo, String reason,
                                   String applicationScope, String billingPeriod) {
         requireWriter(roles);
-        UUID t = tenant();
+        UUID t = Rules.tenant();
         requireAmount(amountCents);
         if (validFrom == null || (validTo != null && validTo.isBefore(validFrom))) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Período da promoção inválido");
@@ -159,7 +156,7 @@ class BillingService {
     @Transactional
     void setPromotionActive(UUID actorId, Set<String> roles, UUID id, boolean active) {
         requireWriter(roles);
-        if (!feePlans.setPromotionActive(tenant(), id, active)) {
+        if (!feePlans.setPromotionActive(Rules.tenant(), id, active)) {
             throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Promoção não encontrada");
         }
     }
@@ -171,7 +168,7 @@ class BillingService {
         if (!writer && !roles.contains("ATLETA") && !roles.contains("ENCARREGADO")) {
             throw new ResponseStatusException(HttpStatus.FORBIDDEN);
         }
-        return charges.list(tenant(), actorId, roles, athleteId, status).stream()
+        return charges.list(Rules.tenant(), actorId, roles, athleteId, status).stream()
                 .map(c -> new ChargeView(c.id(), c.athleteId(), c.guardianId(), c.feePlanId(), c.amountCents(), c.dueDate(), c.status(), c.billingPeriod()))
                 .toList();
     }
@@ -179,7 +176,7 @@ class BillingService {
     @Transactional
     ChargeView createCharge(UUID actorId, Set<String> roles, UUID athleteId, UUID guardianId, UUID feePlanId, long amountCents, LocalDate dueDate, String status) {
         requireWriter(roles);
-        UUID t = tenant();
+        UUID t = Rules.tenant();
         requireAmount(amountCents);
         if (dueDate == null)
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Data de vencimento obrigatória");
@@ -216,7 +213,7 @@ class BillingService {
     @Transactional
     GenerateView generateCharges(UUID actorId, Set<String> roles, String period, UUID feePlanId, boolean dryRun) {
         requireWriter(roles);
-        return generate(tenant(), actorId, parsePeriod(period), feePlanId, dryRun);
+        return generate(Rules.tenant(), actorId, parsePeriod(period), feePlanId, dryRun);
     }
 
     /**
@@ -343,7 +340,7 @@ class BillingService {
     @Transactional
     void updateChargeStatus(UUID actorId, Set<String> roles, UUID id, String status) {
         requireWriter(roles);
-        UUID t = tenant();
+        UUID t = Rules.tenant();
         requireValue(status, CHARGE_STATUSES, "Estado");
         if (!charges.updateStatus(t, id, status))
             throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Cobrança não encontrada");
@@ -353,7 +350,7 @@ class BillingService {
     @Transactional
     void deleteCharge(UUID actorId, Set<String> roles, UUID id) {
         requireWriter(roles);
-        UUID t = tenant();
+        UUID t = Rules.tenant();
         if (!charges.anonymize(t, id))
             throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Cobrança não encontrada");
         charges.audit(t, actorId, "CHARGE_ANONYMIZED", id);
@@ -363,7 +360,7 @@ class BillingService {
     @Transactional(readOnly = true)
     List<PaymentView> listPayments(Set<String> roles, UUID chargeId) {
         requireWriter(roles);
-        UUID t = tenant();
+        UUID t = Rules.tenant();
         if (charges.findById(t, chargeId).isEmpty()) {
             throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Cobrança não encontrada");
         }
@@ -373,7 +370,7 @@ class BillingService {
     @Transactional
     PaymentView createPayment(UUID actorId, Set<String> roles, UUID chargeId, String method, long amountCents, String reference) {
         requireWriter(roles);
-        UUID t = tenant();
+        UUID t = Rules.tenant();
         requireAmount(amountCents);
         String paymentMethod = method == null ? "CASH" : method;
         requireValue(paymentMethod, PAYMENT_METHODS, "Método");
@@ -390,13 +387,13 @@ class BillingService {
     @Transactional(readOnly = true)
     List<LedgerView> listLedger(Set<String> roles) {
         requireWriter(roles);
-        return ledger.list(tenant()).stream().map(l -> new LedgerView(l.id(), l.type(), l.category(), l.amountCents(), l.entryDate(), l.description())).toList();
+        return ledger.list(Rules.tenant()).stream().map(l -> new LedgerView(l.id(), l.type(), l.category(), l.amountCents(), l.entryDate(), l.description())).toList();
     }
 
     @Transactional
     LedgerView createLedger(UUID actorId, Set<String> roles, String type, String category, long amountCents, LocalDate entryDate, String description) {
         requireWriter(roles);
-        UUID t = tenant();
+        UUID t = Rules.tenant();
         requireAmount(amountCents);
         requireValue(type, LEDGER_TYPES, "Tipo");
         if (category == null || category.isBlank())
@@ -411,7 +408,7 @@ class BillingService {
     @Transactional
     void deleteLedger(UUID actorId, Set<String> roles, UUID id) {
         requireWriter(roles);
-        UUID t = tenant();
+        UUID t = Rules.tenant();
         if (!ledger.anonymize(t, id))
             throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Lançamento não encontrado");
         ledger.audit(t, actorId, "LEDGER_ENTRY_ANONYMIZED", id);

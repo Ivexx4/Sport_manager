@@ -10,7 +10,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.server.ResponseStatusException;
 
-import pt.voleibol.gestao.tenancy.TenantContext;
+import pt.voleibol.gestao.shared.Rules;
 
 @Service
 class DocumentService {
@@ -29,7 +29,7 @@ class DocumentService {
 
     @Transactional(readOnly = true)
     List<DocumentView> list(UUID actorId, Set<String> roles, UUID athleteId) {
-        UUID tenantId = requireTenant();
+        UUID tenantId = Rules.tenant();
         requireVisibleAthlete(tenantId, athleteId, actorId, roles);
         return documents.list(tenantId, athleteId).stream()
                 .map(d -> new DocumentView(d.id(), d.athleteId(), d.type(), d.fileName(), d.fileUrl(),
@@ -40,7 +40,7 @@ class DocumentService {
     @Transactional
     DocumentView create(UUID actorId, Set<String> roles, UUID athleteId, String type, String fileName,
                        String fileUrl, LocalDate validUntil) {
-        UUID tenantId = requireTenant();
+        UUID tenantId = Rules.tenant();
         requireWritableAthlete(tenantId, athleteId, actorId, roles);
         if (type == null || type.isBlank()) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Tipo obrigatório");
@@ -54,7 +54,7 @@ class DocumentService {
     @Transactional
     DocumentView update(UUID actorId, Set<String> roles, UUID documentId, String type, String fileName,
                        String fileUrl, LocalDate validUntil) {
-        UUID tenantId = requireTenant();
+        UUID tenantId = Rules.tenant();
         DocumentRepository.DocumentRow current = documents.findById(tenantId, documentId)
                 .orElseThrow(DocumentService::notFound);
         requireWritableAthlete(tenantId, current.athleteId(), actorId, roles);
@@ -70,7 +70,7 @@ class DocumentService {
 
     @Transactional
     void delete(UUID actorId, Set<String> roles, UUID documentId) {
-        UUID tenantId = requireTenant();
+        UUID tenantId = Rules.tenant();
         DocumentRepository.DocumentRow current = documents.findById(tenantId, documentId)
                 .orElseThrow(DocumentService::notFound);
         requireWritableAthlete(tenantId, current.athleteId(), actorId, roles);
@@ -95,11 +95,6 @@ class DocumentService {
         if (athletes.findWritable(tenantId, athleteId, actorId, roles).isEmpty()) {
             throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Atleta não encontrado");
         }
-    }
-
-    private static UUID requireTenant() {
-        return TenantContext.current().orElseThrow(() ->
-                new ResponseStatusException(HttpStatus.BAD_REQUEST, "Pedido sem clube: usa o subdomínio do clube"));
     }
 
     private static ResponseStatusException notFound() {

@@ -10,7 +10,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.server.ResponseStatusException;
 
-import pt.voleibol.gestao.tenancy.TenantContext;
+import pt.voleibol.gestao.shared.Rules;
 
 /**
  * Catálogo federal FPV. Os escalões são comuns a todos os clubes e não são configuráveis pelo clube.
@@ -23,33 +23,24 @@ class AgeGroupService {
     }
 
     private final AgeGroupRepository ageGroups;
-    AgeGroupService(AgeGroupRepository ageGroups, SeasonRepository seasons) {
+
+    AgeGroupService(AgeGroupRepository ageGroups) {
         this.ageGroups = ageGroups;
     }
+
     @Transactional(readOnly = true)
     List<AgeGroupView> list(UUID actorId, Set<String> roles) {
-        requireMember(roles);
-        return ageGroups.list(requireTenant()).stream().map(AgeGroupService::view).toList();
+        Rules.requireMember(roles);
+        return ageGroups.list(Rules.tenant()).stream().map(AgeGroupService::view).toList();
     }
 
     @Transactional(readOnly = true)
     AgeGroupView get(UUID actorId, Set<String> roles, UUID ageGroupId) {
-        requireMember(roles);
-        return view(ageGroups.findById(requireTenant(), ageGroupId).orElseThrow(AgeGroupService::notFound));
+        Rules.requireMember(roles);
+        return view(ageGroups.findById(Rules.tenant(), ageGroupId).orElseThrow(AgeGroupService::notFound));
     }
 
     // O catálogo é mantido por migrações federativas, não por endpoints do clube.
-
-    private static void requireMember(Set<String> roles) {
-        if (roles.isEmpty()) {
-            throw new ResponseStatusException(HttpStatus.FORBIDDEN);
-        }
-    }
-
-    private static UUID requireTenant() {
-        return TenantContext.current().orElseThrow(() ->
-                new ResponseStatusException(HttpStatus.BAD_REQUEST, "Pedido sem clube: usa o subdomínio do clube"));
-    }
 
     static ResponseStatusException notFound() {
         return new ResponseStatusException(HttpStatus.NOT_FOUND, "Escalão não encontrado");

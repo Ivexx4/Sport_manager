@@ -76,7 +76,6 @@ class AthleteFlowTest extends FlowTestSupport {
     static final UUID TREINO_ESTATISTICAS_2 = UUID.fromString("00000000-0000-0000-0000-00000000d202");
 
     /** O mesmo hash para todos os utilizadores de teste: evita calcular bcrypt dezenas de vezes. */
-    private static String passwordHash;
 
     @BeforeEach
     void preparar() throws SQLException {
@@ -648,9 +647,6 @@ class AthleteFlowTest extends FlowTestSupport {
 
     /** Clubes, utilizadores, atletas, equipas e relações de teste. Idempotente. */
     private void semear() throws SQLException {
-        if (passwordHash == null) {
-            passwordHash = passwordEncoder.encode(PASS);
-        }
         try (Connection c = superuser()) {
             clube(c, CLUBE_A, "Clube Atletas", "clube-atletas");
             clube(c, CLUBE_B, "Clube Atletas B", "clube-atletas-b");
@@ -734,19 +730,6 @@ class AthleteFlowTest extends FlowTestSupport {
         }
     }
 
-    private void membro(Connection c, String email, UUID tenant, String... roles) throws SQLException {
-        executar(c, """
-                INSERT INTO app_user (id, email, name, password_hash) VALUES (?, ?, 'Teste', ?)
-                ON CONFLICT (id) DO UPDATE SET email = EXCLUDED.email, name = EXCLUDED.name,
-                    password_hash = EXCLUDED.password_hash, status = 'ACTIVE'
-                """, id(email), email, passwordHash);
-        for (String role : roles) {
-            executar(c, """
-                    INSERT INTO membership (tenant_id, user_id, role) VALUES (?, ?, ?)
-                    ON CONFLICT (tenant_id, user_id, role) DO UPDATE SET status = 'ACTIVE'
-                    """, tenant, id(email), role);
-        }
-    }
 
     private static void atleta(Connection c, UUID athleteId, UUID tenantId, String nome, String nascimento,
                                String genero, String licenca, UUID userId) throws SQLException {
@@ -762,28 +745,7 @@ class AthleteFlowTest extends FlowTestSupport {
                 """, athleteId, tenantId, nome, Date.valueOf(nascimento), genero, licenca, userId);
     }
 
-    private static void equipa(Connection c, UUID teamId, UUID tenantId, String nome) throws SQLException {
-        executar(c, """
-                INSERT INTO team (id, tenant_id, name, status) VALUES (?, ?, ?, 'ACTIVE')
-                ON CONFLICT (id) DO UPDATE SET name = EXCLUDED.name, status = 'ACTIVE', anonymized_at = NULL
-                """, teamId, tenantId, nome);
-    }
 
-    private static void equipa(Connection c, UUID teamId, UUID tenantId, String nome, UUID seasonId, UUID ageGroupId) throws SQLException {
-        executar(c, """
-                INSERT INTO team (id, tenant_id, name, status, season_id, age_group_id) VALUES (?, ?, ?, 'ACTIVE', ?, ?)
-                ON CONFLICT (id) DO UPDATE SET name = EXCLUDED.name, status = 'ACTIVE', season_id = EXCLUDED.season_id,
-                    age_group_id = EXCLUDED.age_group_id, anonymized_at = NULL
-                """, teamId, tenantId, nome, seasonId, ageGroupId);
-    }
 
-    private static void epoca(Connection c, UUID seasonId, UUID tenantId, String nome) throws SQLException {
-        executar(c, """
-                INSERT INTO season (id, tenant_id, name, start_date, end_date, is_active)
-                VALUES (?, ?, ?, ?, ?, true)
-                ON CONFLICT (id) DO UPDATE SET name = EXCLUDED.name, start_date = EXCLUDED.start_date,
-                    end_date = EXCLUDED.end_date, is_active = true, anonymized_at = NULL
-                """, seasonId, tenantId, nome, Date.valueOf("2025-08-01"), Date.valueOf("2026-07-31"));
-    }
 
 }

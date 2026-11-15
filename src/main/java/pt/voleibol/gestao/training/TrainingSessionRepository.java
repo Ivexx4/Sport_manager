@@ -148,13 +148,7 @@ class TrainingSessionRepository {
     }
 
     void audit(UUID tenantId, UUID actorId, String action, UUID entityId) {
-        jdbc.sql("""
-                        INSERT INTO audit_log (tenant_id, user_id, action, entity, entity_id)
-                        VALUES (:tenant, :actor, :action, 'training_session', :entity)
-                        """)
-                .param("tenant", tenantId).param("actor", actorId).param("action", action)
-                .param("entity", entityId)
-                .update();
+        Db.audit(jdbc, tenantId, actorId, action, "training_session", entityId);
     }
 
     private static SessionRow mapSession(java.sql.ResultSet rs, int rowNum) throws java.sql.SQLException {

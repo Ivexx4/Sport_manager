@@ -17,7 +17,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.server.ResponseStatusException;
 
-import pt.voleibol.gestao.tenancy.TenantContext;
+import pt.voleibol.gestao.shared.Rules;
 
 /**
  * Login, rotação de refresh tokens e logout, sempre no contexto de um clube (o do subdomínio).
@@ -49,7 +49,7 @@ class AuthService {
 
     @Transactional
     Optional<Tokens> login(String email, String password) {
-        UUID tenantId = requireTenant();
+        UUID tenantId = Rules.tenant();
 
         Optional<AuthRepository.UserRow> user = repository.findActiveUserByEmail(email);
         String hash = user.map(AuthRepository.UserRow::passwordHash).orElse(dummyHash);
@@ -78,7 +78,7 @@ class AuthService {
     /** Rotação: cada refresh token só serve uma vez. Reutilizar um já usado revoga toda a sessão. */
     @Transactional
     Optional<Tokens> refresh(String rawRefreshToken) {
-        UUID tenantId = requireTenant();
+        UUID tenantId = Rules.tenant();
 
         Optional<AuthRepository.RefreshRow> found =
                 repository.findRefreshToken(tenantId, OpaqueTokens.hash(rawRefreshToken));
@@ -113,7 +113,7 @@ class AuthService {
 
     @Transactional
     void logout(String rawRefreshToken) {
-        UUID tenantId = requireTenant();
+        UUID tenantId = Rules.tenant();
         repository.findRefreshToken(tenantId, OpaqueTokens.hash(rawRefreshToken)).ifPresent(token -> {
             if (repository.revokeIfActive(tenantId, token.id())) {
                 repository.audit(tenantId, token.userId(), "LOGOUT");
@@ -143,8 +143,4 @@ class AuthService {
         return new Tokens(accessToken, refreshToken, properties.accessTokenTtl().toSeconds());
     }
 
-    static UUID requireTenant() {
-        return TenantContext.current().orElseThrow(() ->
-                new ResponseStatusException(HttpStatus.BAD_REQUEST, "Pedido sem clube: usa o subdomínio do clube"));
-    }
 }

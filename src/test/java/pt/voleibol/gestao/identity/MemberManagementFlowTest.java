@@ -73,7 +73,6 @@ class MemberManagementFlowTest extends FlowTestSupport {
     static final String RACE_D_UNICO = "race-d-unico@membros-d.test";
 
     /** O mesmo hash para todos os membros de teste: evita calcular bcrypt dezenas de vezes. */
-    private static String passwordHash;
 
     @BeforeEach
     void preparar() throws SQLException {
@@ -341,17 +340,6 @@ class MemberManagementFlowTest extends FlowTestSupport {
         }
     }
 
-    private void membro(Connection c, String email, UUID tenant, String... roles) throws SQLException {
-        if (passwordHash == null) {
-            passwordHash = passwordEncoder.encode(PASS);
-        }
-        executar(c, "INSERT INTO app_user (id, email, name, password_hash) VALUES (?, ?, 'Teste', ?) "
-                + "ON CONFLICT DO NOTHING", id(email), email, passwordHash);
-        for (String role : roles) {
-            executar(c, "INSERT INTO membership (tenant_id, user_id, role) VALUES (?, ?, ?) "
-                    + "ON CONFLICT DO NOTHING", tenant, id(email), role);
-        }
-    }
 
     private static void ativar(Connection c, UUID tenant, String email) throws SQLException {
         executar(c, "UPDATE membership SET status = 'ACTIVE', updated_at = now() "

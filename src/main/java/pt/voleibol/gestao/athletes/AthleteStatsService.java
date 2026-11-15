@@ -9,7 +9,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.server.ResponseStatusException;
 
-import pt.voleibol.gestao.tenancy.TenantContext;
+import pt.voleibol.gestao.shared.Rules;
 
 @Service
 class AthleteStatsService {
@@ -28,7 +28,7 @@ class AthleteStatsService {
 
     @Transactional(readOnly = true)
     Stats get(UUID actorId, Set<String> roles, UUID athleteId) {
-        UUID t = TenantContext.current().orElseThrow(() -> new ResponseStatusException(HttpStatus.BAD_REQUEST, "Pedido sem clube"));
+        UUID t = Rules.tenant();
         if (athletes.findVisible(t, athleteId, actorId, roles).isEmpty()) {
             throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Atleta não encontrado");
         }

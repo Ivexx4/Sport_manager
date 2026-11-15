@@ -14,7 +14,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.server.ResponseStatusException;
 
-import pt.voleibol.gestao.tenancy.TenantContext;
+import pt.voleibol.gestao.shared.Rules;
 
 /**
  * Base mínima de equipas. Só ADMIN/DIRECAO escrevem; TREINADOR vê as equipas em que é staff.
@@ -25,7 +25,6 @@ import pt.voleibol.gestao.tenancy.TenantContext;
 @Service
 class TeamService {
 
-    private static final Set<String> MANAGERS = Set.of("ADMIN", "DIRECAO");
     private static final Set<String> STAFF_ROLES = Set.of("TREINADOR", "TREINADOR_ADJUNTO");
     private static final Set<String> STATUSES = Set.of("ACTIVE", "INACTIVE");
 
@@ -51,32 +50,32 @@ class TeamService {
 
     @Transactional(readOnly = true)
     List<TeamView> list(UUID actorId, Set<String> roles) {
-        UUID tenantId = requireTenant();
-        if (!isManager(roles) && !roles.contains("TREINADOR")) {
+        UUID tenantId = Rules.tenant();
+        if (!Rules.isManager(roles) && !roles.contains("TREINADOR")) {
             throw new ResponseStatusException(HttpStatus.FORBIDDEN);
         }
-        return teams.list(tenantId, actorId, isManager(roles)).stream()
+        return teams.list(tenantId, actorId, Rules.isManager(roles)).stream()
                 .map(TeamService::view).toList();
     }
 
     @Transactional(readOnly = true)
     TeamView get(UUID actorId, Set<String> roles, UUID teamId) {
-        return view(requireVisible(requireTenant(), teamId, actorId, roles));
+        return view(requireVisible(Rules.tenant(), teamId, actorId, roles));
     }
 
     @Transactional
     TeamView create(UUID actorId, Set<String> roles, String name, String status, UUID seasonId,
                     UUID ageGroupId) {
-        UUID tenantId = requireTenant();
-        requireManager(roles);
-        String normalizedName = requiredText(name);
+        UUID tenantId = Rules.tenant();
+        Rules.requireManager(roles);
+        String normalizedName = Rules.requiredText(name);
         requireReferences(tenantId, seasonId, ageGroupId);
         if (teams.nameExists(tenantId, normalizedName, null)) {
             throw new ResponseStatusException(HttpStatus.CONFLICT, "Já existe uma equipa com este nome");
         }
         UUID id = UUID.randomUUID();
         try {
-            teams.insert(id, tenantId, normalizedName, validStatus(status == null ? "ACTIVE" : status),
+            teams.insert(id, tenantId, normalizedName, Rules.status(status == null ? "ACTIVE" : status, STATUSES),
                     seasonId, ageGroupId, actorId);
         } catch (DuplicateKeyException e) {
             throw new ResponseStatusException(HttpStatus.CONFLICT, "Já existe uma equipa com este nome");
@@ -88,17 +87,17 @@ class TeamService {
     @Transactional
     TeamView update(UUID actorId, Set<String> roles, UUID teamId, String name, String status,
                     UUID seasonId, UUID ageGroupId) {
-        UUID tenantId = requireTenant();
-        requireManager(roles);
+        UUID tenantId = Rules.tenant();
+        Rules.requireManager(roles);
         TeamRepository.TeamRow current = teams.findById(tenantId, teamId).orElseThrow(TeamService::notFound);
-        String normalizedName = requiredText(name);
+        String normalizedName = Rules.requiredText(name);
         requireReferences(tenantId, seasonId, ageGroupId);
         if (teams.nameExists(tenantId, normalizedName, teamId)) {
             throw new ResponseStatusException(HttpStatus.CONFLICT, "Já existe uma equipa com este nome");
         }
         try {
             if (!teams.update(tenantId, teamId, normalizedName,
-                    status == null || status.isBlank() ? current.status() : validStatus(status),
+                    status == null || status.isBlank() ? current.status() : Rules.status(status, STATUSES),
                     seasonId, ageGroupId)) {
                 throw notFound();
             }
@@ -111,8 +110,8 @@ class TeamService {
 
     @Transactional
     void delete(UUID actorId, Set<String> roles, UUID teamId) {
-        UUID tenantId = requireTenant();
-        requireManager(roles);
+        UUID tenantId = Rules.tenant();
+        Rules.requireManager(roles);
         // Remoção não destrutiva: desativa e anonimiza, preservando staff e plantel para histórico.
         if (!teams.anonymize(tenantId, teamId)) {
             throw notFound();
@@ -124,7 +123,7 @@ class TeamService {
 
     @Transactional(readOnly = true)
     List<StaffView> listStaff(UUID actorId, Set<String> roles, UUID teamId) {
-        UUID tenantId = requireTenant();
+        UUID tenantId = Rules.tenant();
         requireVisible(tenantId, teamId, actorId, roles);
         return teams.listStaff(tenantId, teamId).stream()
                 .map(s -> new StaffView(s.userId(), s.name(), s.email(), s.role()))
@@ -133,8 +132,8 @@ class TeamService {
 
     @Transactional
     List<StaffView> addStaff(UUID actorId, Set<String> roles, UUID teamId, UUID userId, String role) {
-        UUID tenantId = requireTenant();
-        requireManager(roles);
+        UUID tenantId = Rules.tenant();
+        Rules.requireManager(roles);
         requireVisible(tenantId, teamId, actorId, roles);
         if (!teams.activeMembershipExists(tenantId, userId)) {
             throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Utilizador sem papel ativo no clube");
@@ -154,8 +153,8 @@ class TeamService {
 
     @Transactional
     void removeStaff(UUID actorId, Set<String> roles, UUID teamId, UUID userId) {
-        UUID tenantId = requireTenant();
-        requireManager(roles);
+        UUID tenantId = Rules.tenant();
+        Rules.requireManager(roles);
         requireVisible(tenantId, teamId, actorId, roles);
         if (!teams.deleteStaff(tenantId, teamId, userId)) {
             throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Utilizador não é staff da equipa");
@@ -167,7 +166,7 @@ class TeamService {
 
     @Transactional(readOnly = true)
     List<RosterView> listAthletes(UUID actorId, Set<String> roles, UUID teamId) {
-        UUID tenantId = requireTenant();
+        UUID tenantId = Rules.tenant();
         requireVisible(tenantId, teamId, actorId, roles);
         return teams.listAthletes(tenantId, teamId).stream()
                 .map(a -> new RosterView(a.athleteId(), a.fullName(), a.status()))
@@ -177,8 +176,8 @@ class TeamService {
     @Transactional
     List<RosterView> addAthleteToTeam(UUID actorId, Set<String> roles, UUID teamId, UUID athleteId,
                                       UUID registrationAgeGroupId) {
-        UUID tenantId = requireTenant();
-        requireManager(roles);
+        UUID tenantId = Rules.tenant();
+        Rules.requireManager(roles);
         requireVisible(tenantId, teamId, actorId, roles);
         if (!teams.athleteExists(tenantId, athleteId)) {
             throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Atleta não encontrado");
@@ -251,8 +250,8 @@ class TeamService {
 
     @Transactional
     void removeAthlete(UUID actorId, Set<String> roles, UUID teamId, UUID athleteId) {
-        UUID tenantId = requireTenant();
-        requireManager(roles);
+        UUID tenantId = Rules.tenant();
+        Rules.requireManager(roles);
         requireVisible(tenantId, teamId, actorId, roles);
         if (!teams.deleteAthlete(tenantId, teamId, athleteId)) {
             throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Atleta não pertence à equipa");
@@ -309,7 +308,7 @@ class TeamService {
     }
 
     private TeamRepository.TeamRow requireVisible(UUID tenantId, UUID teamId, UUID actorId, Set<String> roles) {
-        if (isManager(roles)) {
+        if (Rules.isManager(roles)) {
             return teams.findById(tenantId, teamId).orElseThrow(TeamService::notFound);
         }
         if (roles.contains("TREINADOR")) {
@@ -318,11 +317,6 @@ class TeamService {
         throw new ResponseStatusException(HttpStatus.FORBIDDEN);
     }
 
-    private static void requireManager(Set<String> roles) {
-        if (!isManager(roles)) {
-            throw new ResponseStatusException(HttpStatus.FORBIDDEN);
-        }
-    }
 
     /** A época e o escalão têm de existir no clube e não podem estar anonimizados. */
     private void requireReferences(UUID tenantId, UUID seasonId, UUID ageGroupId) {
@@ -337,17 +331,7 @@ class TeamService {
         }
     }
 
-    private static boolean isManager(Set<String> roles) {
-        return roles.stream().anyMatch(MANAGERS::contains);
-    }
 
-    private static String validStatus(String status) {
-        String normalized = status.trim().toUpperCase(Locale.ROOT);
-        if (!STATUSES.contains(normalized)) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Estado inválido");
-        }
-        return normalized;
-    }
 
     private static String validStaffRole(String role) {
         if (role == null || role.isBlank()) {
@@ -360,17 +344,7 @@ class TeamService {
         return normalized;
     }
 
-    private static String requiredText(String value) {
-        if (value == null || value.isBlank()) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Nome obrigatório");
-        }
-        return value.trim();
-    }
 
-    private static UUID requireTenant() {
-        return TenantContext.current().orElseThrow(() ->
-                new ResponseStatusException(HttpStatus.BAD_REQUEST, "Pedido sem clube: usa o subdomínio do clube"));
-    }
 
     private static ResponseStatusException notFound() {
         return new ResponseStatusException(HttpStatus.NOT_FOUND, "Equipa não encontrada");

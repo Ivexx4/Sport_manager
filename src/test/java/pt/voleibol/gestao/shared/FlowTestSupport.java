@@ -4,6 +4,7 @@ import com.jayway.jsonpath.JsonPath;
 
 import java.nio.charset.StandardCharsets;
 import java.sql.Connection;
+import java.sql.Date;
 import java.sql.DriverManager;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
@@ -70,12 +71,18 @@ public abstract class FlowTestSupport {
 
     protected MockMvc mvc;
 
+    /** Hash da palavra-passe comum, calculado uma vez por classe no arranque dos testes. */
+    protected static String passwordHash;
+
     @BeforeEach
     void prepararMockMvc() {
         mvc = MockMvcBuilders.webAppContextSetup(context)
                 .addFilters(tenantFilter)
                 .apply(springSecurity())
                 .build();
+        if (passwordHash == null) {
+            passwordHash = passwordEncoder.encode(PASS);
+        }
     }
 
     // --- pedidos ---
@@ -170,5 +177,75 @@ public abstract class FlowTestSupport {
                 INSERT INTO team_athlete (tenant_id, team_id, athlete_id) VALUES (?, ?, ?)
                 ON CONFLICT (tenant_id, team_id, athlete_id) DO NOTHING
                 """, tenantId, teamId, athleteId);
+    }
+
+    /** Conta de teste com a palavra-passe comum e os papéis indicados no clube. */
+    protected static void membro(Connection c, String email, UUID tenantId, String... roles) throws SQLException {
+        executar(c, """
+                INSERT INTO app_user (id, email, name, password_hash) VALUES (?, ?, 'Teste', ?)
+                ON CONFLICT (id) DO UPDATE SET email = EXCLUDED.email, name = EXCLUDED.name,
+                    password_hash = EXCLUDED.password_hash, status = 'ACTIVE'
+                """, id(email), email, passwordHash);
+        for (String role : roles) {
+            executar(c, """
+                    INSERT INTO membership (tenant_id, user_id, role) VALUES (?, ?, ?)
+                    ON CONFLICT (tenant_id, user_id, role) DO UPDATE SET status = 'ACTIVE'
+                    """, tenantId, id(email), role);
+        }
+    }
+
+    protected static void equipa(Connection c, UUID teamId, UUID tenantId, String nome) throws SQLException {
+        executar(c, """
+                INSERT INTO team (id, tenant_id, name, status) VALUES (?, ?, ?, 'ACTIVE')
+                ON CONFLICT (id) DO UPDATE SET name = EXCLUDED.name, status = 'ACTIVE', anonymized_at = NULL
+                """, teamId, tenantId, nome);
+    }
+
+    protected static void equipa(Connection c, UUID teamId, UUID tenantId, String nome, UUID seasonId,
+                                 UUID ageGroupId) throws SQLException {
+        executar(c, """
+                INSERT INTO team (id, tenant_id, name, status, season_id, age_group_id)
+                VALUES (?, ?, ?, 'ACTIVE', ?, ?)
+                ON CONFLICT (id) DO UPDATE SET name = EXCLUDED.name, status = 'ACTIVE',
+                    season_id = EXCLUDED.season_id, age_group_id = EXCLUDED.age_group_id,
+                    anonymized_at = NULL
+                """, teamId, tenantId, nome, seasonId, ageGroupId);
+    }
+
+    protected static void epoca(Connection c, UUID seasonId, UUID tenantId, String nome) throws SQLException {
+        executar(c, """
+                INSERT INTO season (id, tenant_id, name, start_date, end_date, is_active)
+                VALUES (?, ?, ?, ?, ?, true)
+                ON CONFLICT (id) DO UPDATE SET name = EXCLUDED.name, start_date = EXCLUDED.start_date,
+                    end_date = EXCLUDED.end_date, is_active = true, anonymized_at = NULL
+                """, seasonId, tenantId, nome, Date.valueOf("2025-08-01"), Date.valueOf("2026-07-31"));
+    }
+
+    /** Época com data de corte, usada nos testes de escalões por ano de nascimento. */
+    protected static void epocaComCorte(Connection c, UUID seasonId, UUID tenantId, String nome)
+            throws SQLException {
+        executar(c, """
+                INSERT INTO season (id, tenant_id, name, start_date, end_date, cutoff_date, is_active)
+                VALUES (?, ?, ?, ?, ?, ?, true)
+                ON CONFLICT (id) DO UPDATE SET name = EXCLUDED.name, start_date = EXCLUDED.start_date,
+                    end_date = EXCLUDED.end_date, cutoff_date = EXCLUDED.cutoff_date, is_active = true,
+                    anonymized_at = NULL
+                """, seasonId, tenantId, nome, Date.valueOf("2025-08-01"), Date.valueOf("2026-07-31"),
+                Date.valueOf("2026-01-01"));
+    }
+
+    protected static void local(Connection c, UUID venueId, UUID tenantId, String nome) throws SQLException {
+        executar(c, """
+                INSERT INTO venue (id, tenant_id, name) VALUES (?, ?, ?)
+                ON CONFLICT (id) DO UPDATE SET name = EXCLUDED.name, anonymized_at = NULL
+                """, venueId, tenantId, nome);
+    }
+
+    /** Apaga os dados das tabelas indicadas para os dois clubes envolvidos na maioria dos testes. */
+    protected static void limpar(Connection c, UUID tenantA, UUID tenantB, String... tabelas)
+            throws SQLException {
+        for (String tabela : tabelas) {
+            executar(c, "DELETE FROM " + tabela + " WHERE tenant_id IN (?, ?)", tenantA, tenantB);
+        }
     }
 }

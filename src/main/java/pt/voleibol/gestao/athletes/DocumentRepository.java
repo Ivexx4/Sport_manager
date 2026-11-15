@@ -127,13 +127,7 @@ class DocumentRepository {
     }
 
     void audit(UUID tenantId, UUID actorId, String action, UUID entityId) {
-        jdbc.sql("""
-                        INSERT INTO audit_log (tenant_id, user_id, action, entity, entity_id)
-                        VALUES (:tenant, :actor, :action, 'document', :entity)
-                        """)
-                .param("tenant", tenantId).param("actor", actorId).param("action", action)
-                .param("entity", entityId)
-                .update();
+        Db.audit(jdbc, tenantId, actorId, action, "document", entityId);
     }
 
     private static DocumentRow map(java.sql.ResultSet rs, int rowNum) throws java.sql.SQLException {

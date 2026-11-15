@@ -87,13 +87,7 @@ class VenueRepository {
     }
 
     void audit(UUID tenantId, UUID actorId, String action, UUID entityId) {
-        jdbc.sql("""
-                        INSERT INTO audit_log (tenant_id, user_id, action, entity, entity_id)
-                        VALUES (:tenant, :actor, :action, 'venue', :entity)
-                        """)
-                .param("tenant", tenantId).param("actor", actorId).param("action", action)
-                .param("entity", entityId)
-                .update();
+        Db.audit(jdbc, tenantId, actorId, action, "venue", entityId);
     }
 
     private static VenueRow map(java.sql.ResultSet rs, int rowNum) throws java.sql.SQLException {

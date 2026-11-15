@@ -69,8 +69,6 @@ class DocumentFlowTest extends FlowTestSupport {
     static final String EMAIL_ATLETA = "atleta1@docs.test";
     static final String EMAIL_ATLETA_B = "atleta-b@docs.test";
 
-    private static String passwordHash;
-
     @Autowired
     DocumentExpiryNotifier notifier;
 
@@ -357,9 +355,6 @@ class DocumentFlowTest extends FlowTestSupport {
     // --- semeadura ---
 
     private void semear() throws SQLException {
-        if (passwordHash == null) {
-            passwordHash = passwordEncoder.encode(PASS);
-        }
         try (Connection c = superuser()) {
             limpar(c);
             clube(c, CLUBE_A, "Clube Documentos", "clube-docs");
@@ -414,23 +409,10 @@ class DocumentFlowTest extends FlowTestSupport {
     }
 
     private static void limpar(Connection c) throws SQLException {
-        executar(c, "DELETE FROM document WHERE tenant_id IN (?, ?)", CLUBE_A, CLUBE_B);
         executar(c, "DELETE FROM email_outbox");
+        limpar(c, CLUBE_A, CLUBE_B, "document");
     }
 
-    private void membro(Connection c, String email, UUID tenant, String... roles) throws SQLException {
-        executar(c, """
-                INSERT INTO app_user (id, email, name, password_hash) VALUES (?, ?, 'Teste', ?)
-                ON CONFLICT (id) DO UPDATE SET email = EXCLUDED.email, name = EXCLUDED.name,
-                    password_hash = EXCLUDED.password_hash, status = 'ACTIVE'
-                """, id(email), email, passwordHash);
-        for (String role : roles) {
-            executar(c, """
-                    INSERT INTO membership (tenant_id, user_id, role) VALUES (?, ?, ?)
-                    ON CONFLICT (tenant_id, user_id, role) DO UPDATE SET status = 'ACTIVE'
-                    """, tenant, id(email), role);
-        }
-    }
 
     private static void atleta(Connection c, UUID athleteId, UUID tenantId, String nome, String nascimento,
                                String genero, String licenca, UUID userId, String email)
@@ -446,12 +428,6 @@ class DocumentFlowTest extends FlowTestSupport {
                 """, athleteId, tenantId, nome, Date.valueOf(nascimento), genero, licenca, email, userId);
     }
 
-    private static void equipa(Connection c, UUID teamId, UUID tenantId, String nome) throws SQLException {
-        executar(c, """
-                INSERT INTO team (id, tenant_id, name, status) VALUES (?, ?, ?, 'ACTIVE')
-                ON CONFLICT (id) DO UPDATE SET name = EXCLUDED.name, status = 'ACTIVE', anonymized_at = NULL
-                """, teamId, tenantId, nome);
-    }
 
     private static void documento(Connection c, UUID documentId, UUID tenantId, UUID athleteId,
                                   String type, String validUntilExpression, boolean anonymized)

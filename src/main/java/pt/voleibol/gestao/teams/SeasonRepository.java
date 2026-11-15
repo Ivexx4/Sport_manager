@@ -104,13 +104,7 @@ class SeasonRepository {
     }
 
     void audit(UUID tenantId, UUID actorId, String action, UUID seasonId) {
-        jdbc.sql("""
-                        INSERT INTO audit_log (tenant_id, user_id, action, entity, entity_id)
-                        VALUES (:tenant, :actor, :action, 'season', :entity)
-                        """)
-                .param("tenant", tenantId).param("actor", actorId).param("action", action)
-                .param("entity", seasonId)
-                .update();
+        Db.audit(jdbc, tenantId, actorId, action, "season", seasonId);
     }
 
     private static SeasonRow map(java.sql.ResultSet rs, int rowNum) throws java.sql.SQLException {

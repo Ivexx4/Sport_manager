@@ -68,8 +68,6 @@ class TrainingFlowTest extends FlowTestSupport {
     static final UUID SESSAO_OUTRA = UUID.fromString("00000000-0000-0000-0000-00000000ac02");
     static final UUID SESSAO_B = UUID.fromString("00000000-0000-0000-0000-00000000ac03");
 
-    private static String passwordHash;
-
     @BeforeEach
     void preparar() throws SQLException {
         semear();
@@ -440,9 +438,6 @@ class TrainingFlowTest extends FlowTestSupport {
     // --- semeadura ---
 
     private void semear() throws SQLException {
-        if (passwordHash == null) {
-            passwordHash = passwordEncoder.encode(PASS);
-        }
         try (Connection c = superuser()) {
             limpar(c);
             clube(c, CLUBE_A, "Clube Treinos", "clube-treinos");
@@ -501,24 +496,9 @@ class TrainingFlowTest extends FlowTestSupport {
     }
 
     private static void limpar(Connection c) throws SQLException {
-        executar(c, "DELETE FROM attendance WHERE tenant_id IN (?, ?)", CLUBE_A, CLUBE_B);
-        executar(c, "DELETE FROM training_session WHERE tenant_id IN (?, ?)", CLUBE_A, CLUBE_B);
-        executar(c, "DELETE FROM venue WHERE tenant_id IN (?, ?)", CLUBE_A, CLUBE_B);
+        limpar(c, CLUBE_A, CLUBE_B, "attendance", "training_session", "venue");
     }
 
-    private void membro(Connection c, String email, UUID tenant, String... roles) throws SQLException {
-        executar(c, """
-                INSERT INTO app_user (id, email, name, password_hash) VALUES (?, ?, 'Teste', ?)
-                ON CONFLICT (id) DO UPDATE SET email = EXCLUDED.email, name = EXCLUDED.name,
-                    password_hash = EXCLUDED.password_hash, status = 'ACTIVE'
-                """, id(email), email, passwordHash);
-        for (String role : roles) {
-            executar(c, """
-                    INSERT INTO membership (tenant_id, user_id, role) VALUES (?, ?, ?)
-                    ON CONFLICT (tenant_id, user_id, role) DO UPDATE SET status = 'ACTIVE'
-                    """, tenant, id(email), role);
-        }
-    }
 
     private static void atleta(Connection c, UUID athleteId, UUID tenantId, String nome, String nascimento,
                                String genero, String licenca, UUID userId) throws SQLException {
@@ -532,19 +512,7 @@ class TrainingFlowTest extends FlowTestSupport {
                 """, athleteId, tenantId, nome, Date.valueOf(nascimento), genero, licenca, userId);
     }
 
-    private static void equipa(Connection c, UUID teamId, UUID tenantId, String nome) throws SQLException {
-        executar(c, """
-                INSERT INTO team (id, tenant_id, name, status) VALUES (?, ?, ?, 'ACTIVE')
-                ON CONFLICT (id) DO UPDATE SET name = EXCLUDED.name, status = 'ACTIVE', anonymized_at = NULL
-                """, teamId, tenantId, nome);
-    }
 
-    private static void local(Connection c, UUID venueId, UUID tenantId, String nome) throws SQLException {
-        executar(c, """
-                INSERT INTO venue (id, tenant_id, name) VALUES (?, ?, ?)
-                ON CONFLICT (id) DO UPDATE SET name = EXCLUDED.name, anonymized_at = NULL
-                """, venueId, tenantId, nome);
-    }
 
     private static void sessao(Connection c, UUID sessionId, UUID tenantId, UUID teamId, UUID courtId,
                                String inicio) throws SQLException {

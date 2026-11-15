@@ -12,7 +12,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.server.ResponseStatusException;
 
-import pt.voleibol.gestao.tenancy.TenantContext;
+import pt.voleibol.gestao.shared.Rules;
 
 /**
  * Épocas do clube (FPV). Qualquer membro autenticado lê; a criação, edição e remoção são exclusivas
@@ -20,8 +20,6 @@ import pt.voleibol.gestao.tenancy.TenantContext;
  */
 @Service
 class SeasonService {
-
-    private static final Set<String> MANAGERS = Set.of("ADMIN", "DIRECAO");
 
     record SeasonView(UUID id, String name, LocalDate startDate, LocalDate endDate, LocalDate cutoffDate, boolean isActive,
                       Instant createdAt, Instant updatedAt) {
@@ -35,15 +33,15 @@ class SeasonService {
 
     @Transactional(readOnly = true)
     List<SeasonView> list(UUID actorId, Set<String> roles) {
-        requireMember(roles);
-        UUID tenantId = requireTenant();
+        Rules.requireMember(roles);
+        UUID tenantId = Rules.tenant();
         return seasons.list(tenantId).stream().map(SeasonService::view).toList();
     }
 
     @Transactional(readOnly = true)
     SeasonView get(UUID actorId, Set<String> roles, UUID seasonId) {
-        requireMember(roles);
-        return view(seasons.findById(requireTenant(), seasonId).orElseThrow(SeasonService::notFound));
+        Rules.requireMember(roles);
+        return view(seasons.findById(Rules.tenant(), seasonId).orElseThrow(SeasonService::notFound));
     }
 
     @Transactional
@@ -55,9 +53,9 @@ class SeasonService {
     @Transactional
     SeasonView create(UUID actorId, Set<String> roles, String name, LocalDate startDate,
                       LocalDate endDate, LocalDate cutoffDate, Boolean isActive) {
-        UUID tenantId = requireTenant();
-        requireManager(roles);
-        String normalizedName = requiredText(name);
+        UUID tenantId = Rules.tenant();
+        Rules.requireManager(roles);
+        String normalizedName = Rules.requiredText(name);
         requireValidPeriod(startDate, endDate);
         cutoffDate = defaultCutoff(cutoffDate);
         if (seasons.nameExists(tenantId, normalizedName, null)) {
@@ -83,12 +81,12 @@ class SeasonService {
 
     @Transactional
     SeasonView update(UUID actorId, Set<String> roles, UUID seasonId, String name,
-                      LocalDate startDate,                       LocalDate endDate, LocalDate cutoffDate, Boolean isActive) {
-        UUID tenantId = requireTenant();
-        requireManager(roles);
+                      LocalDate startDate, LocalDate endDate, LocalDate cutoffDate, Boolean isActive) {
+        UUID tenantId = Rules.tenant();
+        Rules.requireManager(roles);
         SeasonRepository.SeasonRow current =
                 seasons.findById(tenantId, seasonId).orElseThrow(SeasonService::notFound);
-        String normalizedName = requiredText(name);
+        String normalizedName = Rules.requiredText(name);
         requireValidPeriod(startDate, endDate);
         cutoffDate = defaultCutoff(cutoffDate);
         if (seasons.nameExists(tenantId, normalizedName, seasonId)) {
@@ -96,8 +94,7 @@ class SeasonService {
         }
         try {
             if (!seasons.update(tenantId, seasonId, new SeasonRepository.Data(normalizedName, startDate, endDate,
-                    cutoffDate,
-                    isActive == null ? current.isActive() : isActive))) {
+                    cutoffDate, isActive == null ? current.isActive() : isActive))) {
                 throw notFound();
             }
         } catch (DuplicateKeyException e) {
@@ -109,8 +106,8 @@ class SeasonService {
 
     @Transactional
     void delete(UUID actorId, Set<String> roles, UUID seasonId) {
-        UUID tenantId = requireTenant();
-        requireManager(roles);
+        UUID tenantId = Rules.tenant();
+        Rules.requireManager(roles);
         // Remoção não destrutiva: marca a época como não ativa e anonimiza, preservando as equipas
         // associadas para histórico.
         if (!seasons.anonymize(tenantId, seasonId)) {
@@ -121,18 +118,6 @@ class SeasonService {
 
     // --- auxiliares ---
 
-    private static void requireMember(Set<String> roles) {
-        if (roles.isEmpty()) {
-            throw new ResponseStatusException(HttpStatus.FORBIDDEN);
-        }
-    }
-
-    private static void requireManager(Set<String> roles) {
-        if (roles.stream().noneMatch(MANAGERS::contains)) {
-            throw new ResponseStatusException(HttpStatus.FORBIDDEN);
-        }
-    }
-
     private static void requireValidPeriod(LocalDate startDate, LocalDate endDate) {
         if (startDate != null && endDate != null && endDate.isBefore(startDate)) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
@@ -142,18 +127,6 @@ class SeasonService {
 
     private static LocalDate defaultCutoff(LocalDate cutoffDate) {
         return cutoffDate == null ? LocalDate.of(LocalDate.now().getYear() + 1, 1, 1) : cutoffDate;
-    }
-
-    private static String requiredText(String value) {
-        if (value == null || value.isBlank()) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Nome obrigatório");
-        }
-        return value.trim();
-    }
-
-    private static UUID requireTenant() {
-        return TenantContext.current().orElseThrow(() ->
-                new ResponseStatusException(HttpStatus.BAD_REQUEST, "Pedido sem clube: usa o subdomínio do clube"));
     }
 
     static ResponseStatusException notFound() {

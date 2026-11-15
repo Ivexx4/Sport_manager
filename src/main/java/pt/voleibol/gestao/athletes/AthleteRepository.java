@@ -67,22 +67,37 @@ class AthleteRepository {
     }
 
     Optional<AthleteRow> findVisible(UUID tenantId, UUID athleteId, UUID actorId, Set<String> roles) {
-        return scoped(jdbc.sql(SELECT + " WHERE a.tenant_id = :tenant AND a.id = :id"
-                + " AND a.anonymized_at IS NULL AND " + SCOPE), tenantId, athleteId, actorId, roles, false)
-                .query(AthleteRepository::map)
-                .optional();
+        return find(tenantId, athleteId, actorId, roles, false);
     }
 
     Optional<AthleteRow> findWritable(UUID tenantId, UUID athleteId, UUID actorId, Set<String> roles) {
+        return find(tenantId, athleteId, actorId, roles, true);
+    }
+
+    private Optional<AthleteRow> find(UUID tenantId, UUID athleteId, UUID actorId, Set<String> roles,
+                                      boolean writable) {
         return scoped(jdbc.sql(SELECT + " WHERE a.tenant_id = :tenant AND a.id = :id"
-                + " AND a.anonymized_at IS NULL AND " + SCOPE), tenantId, athleteId, actorId, roles, true)
+                + " AND a.anonymized_at IS NULL AND " + SCOPE), tenantId, athleteId, actorId, roles, writable)
                 .query(AthleteRepository::map)
                 .optional();
     }
 
     List<AthleteRow> list(UUID tenantId, UUID actorId, Set<String> roles, String query, String status,
                           UUID teamId, int limit, long offset) {
-        StringBuilder sql = new StringBuilder(SELECT)
+        return filtered(SELECT, " ORDER BY a.full_name, a.id LIMIT :limit OFFSET :offset",
+                tenantId, actorId, roles, query, status, teamId)
+                .param("limit", limit).param("offset", offset).query(AthleteRepository::map).list();
+    }
+
+    long count(UUID tenantId, UUID actorId, Set<String> roles, String query, String status, UUID teamId) {
+        return filtered("SELECT count(*) FROM athlete a", "", tenantId, actorId, roles, query, status, teamId)
+                .query(Long.class).single();
+    }
+
+    /** Seleção de atletas visíveis, com os filtros opcionais da listagem já aplicados. */
+    private JdbcClient.StatementSpec filtered(String select, String suffix, UUID tenantId, UUID actorId,
+                                              Set<String> roles, String query, String status, UUID teamId) {
+        StringBuilder sql = new StringBuilder(select)
                 .append(" WHERE a.tenant_id = :tenant AND a.anonymized_at IS NULL AND ").append(SCOPE);
         if (query != null && !query.isBlank()) {
             sql.append(" AND a.full_name ILIKE '%' || :q || '%'");
@@ -98,8 +113,7 @@ class AthleteRepository {
                           AND ta.team_id = :teamId)
                     """);
         }
-        sql.append(" ORDER BY a.full_name, a.id LIMIT :limit OFFSET :offset");
-
+        sql.append(suffix);
         JdbcClient.StatementSpec spec = scoped(jdbc.sql(sql.toString()), tenantId, null, actorId, roles, false);
         if (query != null && !query.isBlank()) {
             spec = spec.param("q", query.trim());
@@ -107,41 +121,7 @@ class AthleteRepository {
         if (status != null) {
             spec = spec.param("status", status);
         }
-        if (teamId != null) {
-            spec = spec.param("teamId", teamId);
-        }
-        return spec.param("limit", limit).param("offset", offset).query(AthleteRepository::map).list();
-    }
-
-    long count(UUID tenantId, UUID actorId, Set<String> roles, String query, String status, UUID teamId) {
-        StringBuilder sql = new StringBuilder("SELECT count(*) FROM athlete a WHERE a.tenant_id = :tenant"
-                + " AND a.anonymized_at IS NULL AND ")
-                .append(SCOPE);
-        if (query != null && !query.isBlank()) {
-            sql.append(" AND a.full_name ILIKE '%' || :q || '%'");
-        }
-        if (status != null) {
-            sql.append(" AND a.status = :status");
-        }
-        if (teamId != null) {
-            sql.append("""
-                     AND EXISTS (
-                        SELECT 1 FROM team_athlete ta
-                        WHERE ta.tenant_id = a.tenant_id AND ta.athlete_id = a.id
-                          AND ta.team_id = :teamId)
-                    """);
-        }
-        JdbcClient.StatementSpec spec = scoped(jdbc.sql(sql.toString()), tenantId, null, actorId, roles, false);
-        if (query != null && !query.isBlank()) {
-            spec = spec.param("q", query.trim());
-        }
-        if (status != null) {
-            spec = spec.param("status", status);
-        }
-        if (teamId != null) {
-            spec = spec.param("teamId", teamId);
-        }
-        return spec.query(Long.class).single();
+        return teamId == null ? spec : spec.param("teamId", teamId);
     }
 
     private static JdbcClient.StatementSpec scoped(JdbcClient.StatementSpec spec, UUID tenantId,
@@ -241,38 +221,29 @@ class AthleteRepository {
     // --- validações ---
 
     boolean licenseExists(UUID tenantId, String licenseNumber, UUID excludeId) {
-        String sql = "SELECT EXISTS (SELECT 1 FROM athlete WHERE tenant_id = :tenant "
-                + "AND anonymized_at IS NULL AND lower(license_number) = lower(:license)";
-        JdbcClient.StatementSpec spec = jdbc.sql(excludeId == null ? sql + ")"
-                        : sql + " AND id <> :exclude)")
-                .param("tenant", tenantId).param("license", licenseNumber);
-        if (excludeId != null) {
-            spec = spec.param("exclude", excludeId);
-        }
-        return spec.query(Boolean.class).single();
+        return existsExcluding("lower(license_number) = lower(:value)", tenantId, licenseNumber, excludeId);
     }
 
     boolean userLinked(UUID tenantId, UUID userId, UUID excludeId) {
-        String sql = "SELECT EXISTS (SELECT 1 FROM athlete WHERE tenant_id = :tenant "
-                + "AND anonymized_at IS NULL AND user_id = :user";
-        JdbcClient.StatementSpec spec = jdbc.sql(excludeId == null ? sql + ")"
-                        : sql + " AND id <> :exclude)")
-                .param("tenant", tenantId).param("user", userId);
-        if (excludeId != null) {
-            spec = spec.param("exclude", excludeId);
-        }
-        return spec.query(Boolean.class).single();
+        return existsExcluding("user_id = :value", tenantId, userId, excludeId);
+    }
+
+    /** Atleta não anonimizado que satisfaz a condição, ignorando o próprio registo em edição. */
+    private boolean existsExcluding(String condition, UUID tenantId, Object value, UUID excludeId) {
+        String sql = "SELECT EXISTS (SELECT 1 FROM athlete WHERE tenant_id = :tenant"
+                + " AND anonymized_at IS NULL AND " + condition
+                + (excludeId == null ? ")" : " AND id <> :exclude)");
+        JdbcClient.StatementSpec spec = jdbc.sql(sql).param("tenant", tenantId).param("value", value);
+        return Db.exists(excludeId == null ? spec : spec.param("exclude", excludeId));
     }
 
     boolean activeMembershipExists(UUID tenantId, UUID userId) {
-        return jdbc.sql("""
+        return Db.exists(jdbc.sql("""
                         SELECT EXISTS (
                             SELECT 1 FROM membership
                             WHERE tenant_id = :tenant AND user_id = :user AND status = 'ACTIVE')
                         """)
-                .param("tenant", tenantId).param("user", userId)
-                .query(Boolean.class)
-                .single();
+                .param("tenant", tenantId).param("user", userId));
     }
 
     // --- encarregados ---
@@ -295,14 +266,12 @@ class AthleteRepository {
     }
 
     boolean guardianExists(UUID tenantId, UUID athleteId, UUID userId) {
-        return jdbc.sql("""
+        return Db.exists(jdbc.sql("""
                         SELECT EXISTS (
                             SELECT 1 FROM athlete_guardian
                             WHERE tenant_id = :tenant AND athlete_id = :athlete AND user_id = :user)
                         """)
-                .param("tenant", tenantId).param("athlete", athleteId).param("user", userId)
-                .query(Boolean.class)
-                .single();
+                .param("tenant", tenantId).param("athlete", athleteId).param("user", userId));
     }
 
     void insertGuardian(UUID tenantId, UUID athleteId, UUID userId, String relationship, UUID actorId) {
@@ -315,35 +284,16 @@ class AthleteRepository {
                 .update();
     }
 
+    /** Remove a associação de um encarregado; sem {@code userId} remove todas (anonimização). */
     boolean deleteGuardian(UUID tenantId, UUID athleteId, UUID userId) {
-        return jdbc.sql("""
-                        DELETE FROM athlete_guardian
-                        WHERE tenant_id = :tenant AND athlete_id = :athlete AND user_id = :user
-                        """)
-                .param("tenant", tenantId).param("athlete", athleteId).param("user", userId)
-                .update() == 1;
-    }
-
-    /**
-     * Remove as associações de encarregados aquando da anonimização (são dados pessoais).
-     */
-    void deleteGuardians(UUID tenantId, UUID athleteId) {
-        jdbc.sql("""
-                        DELETE FROM athlete_guardian
-                        WHERE tenant_id = :tenant AND athlete_id = :athlete
-                        """)
-                .param("tenant", tenantId).param("athlete", athleteId)
-                .update();
+        String sql = "DELETE FROM athlete_guardian WHERE tenant_id = :tenant AND athlete_id = :athlete"
+                + (userId == null ? "" : " AND user_id = :user");
+        JdbcClient.StatementSpec spec = jdbc.sql(sql).param("tenant", tenantId).param("athlete", athleteId);
+        return (userId == null ? spec : spec.param("user", userId)).update() == 1;
     }
 
     void audit(UUID tenantId, UUID actorId, String action, UUID athleteId) {
-        jdbc.sql("""
-                        INSERT INTO audit_log (tenant_id, user_id, action, entity, entity_id)
-                        VALUES (:tenant, :actor, :action, 'athlete', :entity)
-                        """)
-                .param("tenant", tenantId).param("actor", actorId).param("action", action)
-                .param("entity", athleteId)
-                .update();
+        Db.audit(jdbc, tenantId, actorId, action, "athlete", athleteId);
     }
 
     private static AthleteRow map(java.sql.ResultSet rs, int rowNum) throws java.sql.SQLException {

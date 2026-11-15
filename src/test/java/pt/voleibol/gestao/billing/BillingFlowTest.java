@@ -74,8 +74,6 @@ class BillingFlowTest extends FlowTestSupport {
     static final UUID EQUIPA_A = UUID.fromString("00000000-0000-0000-0000-00000000d408");
     static final UUID EQUIPA_A2 = UUID.fromString("00000000-0000-0000-0000-00000000d409");
 
-    private static String passwordHash;
-
     @Autowired
     ChargeGenerator chargeGenerator;
 
@@ -602,9 +600,6 @@ class BillingFlowTest extends FlowTestSupport {
     // --- semeadura ---
 
     private void semear() throws SQLException {
-        if (passwordHash == null) {
-            passwordHash = passwordEncoder.encode(PASS);
-        }
         try (Connection c = superuser()) {
             limpar(c);
             clube(c, CLUBE_A, "Clube Billing", "clube-billing");
@@ -622,7 +617,7 @@ class BillingFlowTest extends FlowTestSupport {
             atleta(c, ATLETA_2, CLUBE_A, "Atleta Dois", "F-A2", null);
             atleta(c, ATLETA_B, CLUBE_B, "Atleta de Outro Clube", "F-B1", null);
 
-            epoca(c, EPOCA_A, CLUBE_A, "2026/2027");
+            epocaSimples(c, EPOCA_A, CLUBE_A, "2026/2027");
             ESCALAO_A = escalao(c, "INFANTIS");
             ESCALAO_B = escalao(c, "INICIADOS");
             equipa(c, EQUIPA_A, CLUBE_A, "Equipa Sub-16", EPOCA_A, ESCALAO_A);
@@ -656,25 +651,9 @@ class BillingFlowTest extends FlowTestSupport {
     }
 
     private static void limpar(Connection c) throws SQLException {
-        executar(c, "DELETE FROM payment WHERE tenant_id IN (?, ?)", CLUBE_A, CLUBE_B);
-        executar(c, "DELETE FROM charge WHERE tenant_id IN (?, ?)", CLUBE_A, CLUBE_B);
-        executar(c, "DELETE FROM ledger_entry WHERE tenant_id IN (?, ?)", CLUBE_A, CLUBE_B);
-        executar(c, "DELETE FROM fee_plan WHERE tenant_id IN (?, ?)", CLUBE_A, CLUBE_B);
+        limpar(c, CLUBE_A, CLUBE_B, "payment", "charge", "ledger_entry", "fee_plan");
     }
 
-    private void membro(Connection c, String email, UUID tenant, String... roles) throws SQLException {
-        executar(c, """
-                INSERT INTO app_user (id, email, name, password_hash) VALUES (?, ?, 'Teste', ?)
-                ON CONFLICT (id) DO UPDATE SET email = EXCLUDED.email, name = EXCLUDED.name,
-                    password_hash = EXCLUDED.password_hash, status = 'ACTIVE'
-                """, id(email), email, passwordHash);
-        for (String role : roles) {
-            executar(c, """
-                    INSERT INTO membership (tenant_id, user_id, role) VALUES (?, ?, ?)
-                    ON CONFLICT (tenant_id, user_id, role) DO UPDATE SET status = 'ACTIVE'
-                    """, tenant, id(email), role);
-        }
-    }
 
     private static void atleta(Connection c, UUID athleteId, UUID tenantId, String nome, String licenca,
                                UUID userId) throws SQLException {
@@ -687,22 +666,13 @@ class BillingFlowTest extends FlowTestSupport {
                 """, athleteId, tenantId, nome, Date.valueOf(LocalDate.now().minusYears(12)), licenca, userId);
     }
 
-    private static void epoca(Connection c, UUID seasonId, UUID tenantId, String nome) throws SQLException {
+    private static void epocaSimples(Connection c, UUID seasonId, UUID tenantId, String nome) throws SQLException {
         executar(c, """
                 INSERT INTO season (id, tenant_id, name) VALUES (?, ?, ?)
                 ON CONFLICT (id) DO UPDATE SET name = EXCLUDED.name, anonymized_at = NULL
                 """, seasonId, tenantId, nome);
     }
 
-    private static void equipa(Connection c, UUID teamId, UUID tenantId, String nome, UUID seasonId,
-                               UUID ageGroupId) throws SQLException {
-        executar(c, """
-                INSERT INTO team (id, tenant_id, name, status, season_id, age_group_id)
-                VALUES (?, ?, ?, 'ACTIVE', ?, ?)
-                ON CONFLICT (id) DO UPDATE SET name = EXCLUDED.name, status = 'ACTIVE',
-                    season_id = EXCLUDED.season_id, age_group_id = EXCLUDED.age_group_id, anonymized_at = NULL
-                """, teamId, tenantId, nome, seasonId, ageGroupId);
-    }
 
     private static void plano(Connection c, UUID planId, UUID tenantId, String nome, long amountCents)
             throws SQLException {
