@@ -12,7 +12,6 @@ import com.jayway.jsonpath.JsonPath;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.http.MediaType;
-import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 import org.springframework.test.web.servlet.ResultActions;
@@ -46,7 +45,6 @@ class MemberManagementFlowTest extends FlowTestSupport {
     static final UUID CLUBE_D = UUID.fromString("00000000-0000-0000-0000-00000000f104");
 
     static final String HOST_A = "clube-membros.localhost";
-    static final String HOST_B = "clube-membros-b.localhost";
     static final String HOST_C = "clube-membros-c.localhost";
     static final String HOST_D = "clube-membros-d.localhost";
 
@@ -71,8 +69,6 @@ class MemberManagementFlowTest extends FlowTestSupport {
     static final String RACE_C_UNICO = "race-c-unico@membros-c.test";
     static final String RACE_D_ACTOR = "race-d-actor@membros-d.test";
     static final String RACE_D_UNICO = "race-d-unico@membros-d.test";
-
-    /** O mesmo hash para todos os membros de teste: evita calcular bcrypt dezenas de vezes. */
 
     @BeforeEach
     void preparar() throws SQLException {
@@ -253,8 +249,7 @@ class MemberManagementFlowTest extends FlowTestSupport {
         return mvc.perform(get("/api/v1/users")
                         .header("Authorization", "Bearer " + token)
                         .with(host(host)))
-                .andExpect(status().isOk())
-                .andReturn().getResponse().getContentAsString();
+                .andExpect(status().isOk()).andReturn().getResponse().getContentAsString();
     }
 
     private ResultActions desativar(String host, String token, UUID userId) throws Exception {
@@ -339,7 +334,6 @@ class MemberManagementFlowTest extends FlowTestSupport {
             ativar(c, CLUBE_D, RACE_D_ACTOR);
         }
     }
-
 
     private static void ativar(Connection c, UUID tenant, String email) throws SQLException {
         executar(c, "UPDATE membership SET status = 'ACTIVE', updated_at = now() "

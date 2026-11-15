@@ -4,7 +4,6 @@ import com.jayway.jsonpath.JsonPath;
 
 import java.nio.charset.StandardCharsets;
 import java.sql.Connection;
-import java.sql.Date;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.SQLException;
@@ -16,7 +15,6 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.http.MediaType;
 import org.springframework.mock.web.MockMultipartFile;
-import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 import org.springframework.test.web.servlet.ResultActions;
@@ -75,8 +73,6 @@ class AthleteFlowTest extends FlowTestSupport {
     static final UUID TREINO_ESTATISTICAS = UUID.fromString("00000000-0000-0000-0000-00000000d201");
     static final UUID TREINO_ESTATISTICAS_2 = UUID.fromString("00000000-0000-0000-0000-00000000d202");
 
-    /** O mesmo hash para todos os utilizadores de teste: evita calcular bcrypt dezenas de vezes. */
-
     @BeforeEach
     void preparar() throws SQLException {
         semear();
@@ -90,14 +86,12 @@ class AthleteFlowTest extends FlowTestSupport {
 
         String criado = criar(HOST_A, admin, corpo("Novo Atleta", "2012-03-04", "F", null,
                 null, null, "NOVA-1", null, null))
-                .andExpect(status().isCreated())
-                .andReturn().getResponse().getContentAsString();
+                .andExpect(status().isCreated()).andReturn().getResponse().getContentAsString();
         UUID id = UUID.fromString(JsonPath.read(criado, "$.id"));
         assertThat((String) JsonPath.read(criado, "$.status")).isEqualTo("ACTIVE");
 
         String detalhe = getAtleta(HOST_A, admin, id)
-                .andExpect(status().isOk())
-                .andReturn().getResponse().getContentAsString();
+                .andExpect(status().isOk()).andReturn().getResponse().getContentAsString();
         assertThat((String) JsonPath.read(detalhe, "$.fullName")).isEqualTo("Novo Atleta");
         assertThat((String) JsonPath.read(detalhe, "$.birthDate")).isEqualTo("2012-03-04");
 
@@ -105,8 +99,7 @@ class AthleteFlowTest extends FlowTestSupport {
                 "NOVO@EXEMPLO.PT", "912345678", "NOVA-1", null, null))
                 .andExpect(status().isOk());
         String atualizado = getAtleta(HOST_A, admin, id)
-                .andExpect(status().isOk())
-                .andReturn().getResponse().getContentAsString();
+                .andExpect(status().isOk()).andReturn().getResponse().getContentAsString();
         assertThat((String) JsonPath.read(atualizado, "$.fullName")).isEqualTo("Atleta Renomeado");
         assertThat((String) JsonPath.read(atualizado, "$.email")).isEqualTo("novo@exemplo.pt");
         assertThat((String) JsonPath.read(atualizado, "$.nif")).isEqualTo("123456789");
@@ -125,8 +118,7 @@ class AthleteFlowTest extends FlowTestSupport {
 
         String criado = criar(HOST_A, admin, corpo("Atleta a Remover", "2011-02-03", "M",
                 "123456789", "remover@exemplo.pt", "910000000", "REM-1", null, null))
-                .andExpect(status().isCreated())
-                .andReturn().getResponse().getContentAsString();
+                .andExpect(status().isCreated()).andReturn().getResponse().getContentAsString();
         UUID id = UUID.fromString(JsonPath.read(criado, "$.id"));
 
         // Liga uma conta, associa um encarregado e coloca o atleta no plantel.
@@ -182,8 +174,7 @@ class AthleteFlowTest extends FlowTestSupport {
         // A licença e a conta ficam livres para reutilização.
         String novo = criar(HOST_A, admin, corpo("Atleta Novo", "2011-02-03", "M", "123456789",
                 "remover@exemplo.pt", "910000000", "REM-1", null, null))
-                .andExpect(status().isCreated())
-                .andReturn().getResponse().getContentAsString();
+                .andExpect(status().isCreated()).andReturn().getResponse().getContentAsString();
         UUID novoId = UUID.fromString(JsonPath.read(novo, "$.id"));
         mvc.perform(post("/api/v1/athletes/" + novoId + "/account")
                         .header("Authorization", "Bearer " + admin).with(host(HOST_A))
@@ -228,8 +219,7 @@ class AthleteFlowTest extends FlowTestSupport {
 
         String criado = criar(HOST_A, direcao, corpo("Atleta da Direcao", "2011-05-06", "M", null,
                 null, null, "DIR-1", null, null))
-                .andExpect(status().isCreated())
-                .andReturn().getResponse().getContentAsString();
+                .andExpect(status().isCreated()).andReturn().getResponse().getContentAsString();
         UUID id = UUID.fromString(JsonPath.read(criado, "$.id"));
 
         atualizar(HOST_A, direcao, id, corpo("Atleta da Direcao 2", "2011-05-06", "M", null,
@@ -243,8 +233,7 @@ class AthleteFlowTest extends FlowTestSupport {
     void financeiroLeMasNaoEscreve() throws Exception {
         String financeiro = acesso(HOST_A, FINANCEIRO);
 
-        String lista = listar(HOST_A, financeiro).andExpect(status().isOk())
-                .andReturn().getResponse().getContentAsString();
+        String lista = listar(HOST_A, financeiro).andExpect(status().isOk()).andReturn().getResponse().getContentAsString();
         assertThat(atletaIds(lista)).contains(ATLETA_1, ATLETA_2, ATLETA_3, ATLETA_4);
 
         getAtleta(HOST_A, financeiro, ATLETA_1).andExpect(status().isOk());
@@ -262,8 +251,7 @@ class AthleteFlowTest extends FlowTestSupport {
     void treinadorSoVeEGereAtletasDasSuasEquipas() throws Exception {
         String treinador = acesso(HOST_A, TREINADOR);
 
-        String lista = listar(HOST_A, treinador).andExpect(status().isOk())
-                .andReturn().getResponse().getContentAsString();
+        String lista = listar(HOST_A, treinador).andExpect(status().isOk()).andReturn().getResponse().getContentAsString();
         assertThat(atletaIds(lista)).containsExactly(ATLETA_2);
 
         getAtleta(HOST_A, treinador, ATLETA_2).andExpect(status().isOk());
@@ -313,8 +301,7 @@ class AthleteFlowTest extends FlowTestSupport {
     void atletaSoVeEGereORegistroProprio() throws Exception {
         String atleta = acesso(HOST_A, ATLETA_USER);
 
-        String lista = listar(HOST_A, atleta).andExpect(status().isOk())
-                .andReturn().getResponse().getContentAsString();
+        String lista = listar(HOST_A, atleta).andExpect(status().isOk()).andReturn().getResponse().getContentAsString();
         assertThat(atletaIds(lista)).containsExactly(ATLETA_1);
 
         getAtleta(HOST_A, atleta, ATLETA_1).andExpect(status().isOk());
@@ -341,8 +328,7 @@ class AthleteFlowTest extends FlowTestSupport {
     void encarregadoSoVeEGereOsEducandos() throws Exception {
         String encarregado = acesso(HOST_A, ENCARREGADO);
 
-        String lista = listar(HOST_A, encarregado).andExpect(status().isOk())
-                .andReturn().getResponse().getContentAsString();
+        String lista = listar(HOST_A, encarregado).andExpect(status().isOk()).andReturn().getResponse().getContentAsString();
         assertThat(atletaIds(lista)).containsExactly(ATLETA_3);
 
         getAtleta(HOST_A, encarregado, ATLETA_3).andExpect(status().isOk());
@@ -457,8 +443,7 @@ class AthleteFlowTest extends FlowTestSupport {
                         .param("teamId", EQUIPA_A.toString())
                         .param("page", "0").param("size", "1")
                         .header("Authorization", "Bearer " + admin).with(host(HOST_A)))
-                .andExpect(status().isOk())
-                .andReturn().getResponse().getContentAsString();
+                .andExpect(status().isOk()).andReturn().getResponse().getContentAsString();
         assertThat(JsonPath.<Integer>read(resposta, "$.total")).isEqualTo(1);
         assertThat(JsonPath.<List<String>>read(resposta, "$.items[*].id")).containsExactly(ATLETA_2.toString());
 
@@ -481,8 +466,7 @@ class AthleteFlowTest extends FlowTestSupport {
 
         String stats = mvc.perform(get("/api/v1/athletes/" + ATLETA_2 + "/stats")
                         .header("Authorization", "Bearer " + admin).with(host(HOST_A)))
-                .andExpect(status().isOk())
-                .andReturn().getResponse().getContentAsString();
+                .andExpect(status().isOk()).andReturn().getResponse().getContentAsString();
         assertThat(JsonPath.<Integer>read(stats, "$.matchesCalledUp")).isEqualTo(2);
         assertThat(JsonPath.<Integer>read(stats, "$.matchesPlayed")).isEqualTo(1);
         assertThat(JsonPath.<Integer>read(stats, "$.callUpsConfirmed")).isEqualTo(1);
@@ -529,15 +513,13 @@ class AthleteFlowTest extends FlowTestSupport {
                 "");
 
         String resultado = importar(HOST_A, admin, csv.getBytes(StandardCharsets.UTF_8))
-                .andExpect(status().isOk())
-                .andReturn().getResponse().getContentAsString();
+                .andExpect(status().isOk()).andReturn().getResponse().getContentAsString();
         assertThat(JsonPath.<Integer>read(resultado, "$.imported")).isEqualTo(3);
 
         String lista = mvc.perform(get("/api/v1/athletes").param("q", "Importado")
                         .param("size", "10")
                         .header("Authorization", "Bearer " + admin).with(host(HOST_A)))
-                .andExpect(status().isOk())
-                .andReturn().getResponse().getContentAsString();
+                .andExpect(status().isOk()).andReturn().getResponse().getContentAsString();
         assertThat(JsonPath.<List<String>>read(lista, "$.items[*].fullName"))
                 .containsExactlyInAnyOrder("Importado Um", "Importado Dois", "Importado Tres");
         assertThat(JsonPath.<List<String>>read(lista, "$.items[*].status"))
@@ -545,13 +527,11 @@ class AthleteFlowTest extends FlowTestSupport {
 
         // Repetir o ficheiro não duplica atletas (licenças já existentes são ignoradas).
         String repetido = importar(HOST_A, admin, csv.getBytes(StandardCharsets.UTF_8))
-                .andExpect(status().isOk())
-                .andReturn().getResponse().getContentAsString();
+                .andExpect(status().isOk()).andReturn().getResponse().getContentAsString();
         assertThat(JsonPath.<Integer>read(repetido, "$.imported")).isZero();
 
         String vazio = importar(HOST_A, admin, "\n".getBytes(StandardCharsets.UTF_8))
-                .andExpect(status().isOk())
-                .andReturn().getResponse().getContentAsString();
+                .andExpect(status().isOk()).andReturn().getResponse().getContentAsString();
         assertThat(JsonPath.<Integer>read(vazio, "$.imported")).isZero();
 
         // Só a gestão importa.
@@ -729,23 +709,5 @@ class AthleteFlowTest extends FlowTestSupport {
                     """, CLUBE_A, TREINO_ESTATISTICAS_2, ATLETA_2);
         }
     }
-
-
-    private static void atleta(Connection c, UUID athleteId, UUID tenantId, String nome, String nascimento,
-                               String genero, String licenca, UUID userId) throws SQLException {
-        executar(c, """
-                INSERT INTO athlete (id, tenant_id, full_name, birth_date, gender, nif, email, phone,
-                                     license_number, status, user_id)
-                VALUES (?, ?, ?, ?, ?, NULL, NULL, NULL, ?, 'ACTIVE', ?)
-                ON CONFLICT (id) DO UPDATE SET full_name = EXCLUDED.full_name,
-                    birth_date = EXCLUDED.birth_date, gender = EXCLUDED.gender,
-                    nif = NULL, email = NULL, phone = NULL,
-                    license_number = EXCLUDED.license_number, status = 'ACTIVE',
-                    user_id = EXCLUDED.user_id, anonymized_at = NULL
-                """, athleteId, tenantId, nome, Date.valueOf(nascimento), genero, licenca, userId);
-    }
-
-
-
 
 }

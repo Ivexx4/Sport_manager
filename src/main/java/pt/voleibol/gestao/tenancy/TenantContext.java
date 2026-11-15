@@ -34,9 +34,7 @@ public final class TenantContext {
         try {
             return work.get();
         } finally {
-            if (previous == null) {
-                CURRENT.remove();
-            } else {
+            if (previous == null) CURRENT.remove(); else {
                 CURRENT.set(previous);
             }
         }

@@ -5,7 +5,6 @@ import java.util.List;
 import java.util.Set;
 import java.util.UUID;
 
-import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.server.ResponseStatusException;
@@ -42,9 +41,7 @@ class DocumentService {
                        String fileUrl, LocalDate validUntil) {
         UUID tenantId = Rules.tenant();
         requireWritableAthlete(tenantId, athleteId, actorId, roles);
-        if (type == null || type.isBlank()) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Tipo obrigatório");
-        }
+        if (type == null || type.isBlank()) throw Rules.badRequest("Tipo obrigatório");
         UUID id = UUID.randomUUID();
         documents.insert(id, tenantId, athleteId, type.trim(), fileName, fileUrl, validUntil, actorId);
         documents.audit(tenantId, actorId, "ATHLETE_DOCUMENT_CREATED", id);
@@ -58,12 +55,8 @@ class DocumentService {
         DocumentRepository.DocumentRow current = documents.findById(tenantId, documentId)
                 .orElseThrow(DocumentService::notFound);
         requireWritableAthlete(tenantId, current.athleteId(), actorId, roles);
-        if (type == null || type.isBlank()) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Tipo obrigatório");
-        }
-        if (!documents.update(tenantId, documentId, type.trim(), fileName, fileUrl, validUntil)) {
-            throw notFound();
-        }
+        if (type == null || type.isBlank()) throw Rules.badRequest("Tipo obrigatório");
+        if (!documents.update(tenantId, documentId, type.trim(), fileName, fileUrl, validUntil)) throw notFound();
         documents.audit(tenantId, actorId, "ATHLETE_DOCUMENT_UPDATED", documentId);
         return view(documents.findById(tenantId, documentId).orElseThrow(DocumentService::notFound));
     }
@@ -74,31 +67,25 @@ class DocumentService {
         DocumentRepository.DocumentRow current = documents.findById(tenantId, documentId)
                 .orElseThrow(DocumentService::notFound);
         requireWritableAthlete(tenantId, current.athleteId(), actorId, roles);
-        if (!documents.anonymize(tenantId, documentId)) {
-            throw notFound();
-        }
+        if (!documents.anonymize(tenantId, documentId)) throw notFound();
         documents.audit(tenantId, actorId, "ATHLETE_DOCUMENT_ANONYMIZED", documentId);
     }
 
     private void requireVisibleAthlete(UUID tenantId, UUID athleteId, UUID actorId, Set<String> roles) {
-        if (athletes.findVisible(tenantId, athleteId, actorId, roles).isEmpty()) {
-            throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Atleta não encontrado");
-        }
+        if (athletes.findVisible(tenantId, athleteId, actorId, roles).isEmpty()) throw Rules.notFound("Atleta não encontrado");
     }
 
     private void requireWritableAthlete(UUID tenantId, UUID athleteId, UUID actorId, Set<String> roles) {
         // FINANCEIRO só lê: não deve conseguir escrever mesmo que tenha visibilidade do atleta.
         if (roles.contains("FINANCEIRO") && roles.stream().noneMatch(
                 role -> Set.of("ADMIN", "DIRECAO", "TREINADOR", "ATLETA", "ENCARREGADO").contains(role))) {
-            throw new ResponseStatusException(HttpStatus.FORBIDDEN);
+            throw Rules.forbidden();
         }
-        if (athletes.findWritable(tenantId, athleteId, actorId, roles).isEmpty()) {
-            throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Atleta não encontrado");
-        }
+        if (athletes.findWritable(tenantId, athleteId, actorId, roles).isEmpty()) throw Rules.notFound("Atleta não encontrado");
     }
 
     private static ResponseStatusException notFound() {
-        return new ResponseStatusException(HttpStatus.NOT_FOUND, "Documento não encontrado");
+        return Rules.notFound("Documento não encontrado");
     }
 
     private static DocumentView view(DocumentRepository.DocumentRow row) {

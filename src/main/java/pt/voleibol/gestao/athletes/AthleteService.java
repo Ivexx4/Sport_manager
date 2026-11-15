@@ -5,7 +5,6 @@ import java.io.IOException;
 import java.io.Reader;
 import java.time.Instant;
 import java.time.LocalDate;
-import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
 import java.util.Optional;
@@ -14,7 +13,6 @@ import java.util.UUID;
 
 import org.springframework.dao.DuplicateKeyException;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.server.ResponseStatusException;
@@ -65,12 +63,8 @@ class AthleteService {
 
     @Transactional(readOnly = true)
     Page list(UUID actorId, Set<String> roles, String query, String status, UUID teamId, int page, int size) {
-        if (page < 0) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Página inválida");
-        }
-        if (size < 1 || size > 100) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Tamanho da página entre 1 e 100");
-        }
+        if (page < 0) throw Rules.badRequest("Página inválida");
+        if (size < 1 || size > 100) throw Rules.badRequest("Tamanho da página entre 1 e 100");
         UUID tenantId = Rules.tenant();
         String normalizedStatus = status == null || status.isBlank() ? null : Rules.status(status, STATUSES);
         List<AthleteView> items = athletes
@@ -93,21 +87,18 @@ class AthleteService {
         UUID tenantId = Rules.tenant();
         Rules.requireManager(roles);
 
-        if (data.licenseNumber() != null && athletes.licenseExists(tenantId, data.licenseNumber(), null)) {
-            throw new ResponseStatusException(HttpStatus.CONFLICT, "Já existe um atleta com esta licença");
-        }
+        if (data.licenseNumber() != null && athletes.licenseExists(tenantId, data.licenseNumber(), null))
+            throw Rules.conflict("Já existe um atleta com esta licença");
         if (data.userId() != null) {
             requireMembership(tenantId, data.userId());
-            if (athletes.userLinked(tenantId, data.userId(), null)) {
-                throw new ResponseStatusException(HttpStatus.CONFLICT, "Esta conta já está ligada a um atleta");
-            }
+            if (athletes.userLinked(tenantId, data.userId(), null)) throw Rules.conflict("Esta conta já está ligada a um atleta");
         }
 
         UUID id = UUID.randomUUID();
         try {
             athletes.insert(id, tenantId, data, actorId);
         } catch (DuplicateKeyException e) {
-            throw new ResponseStatusException(HttpStatus.CONFLICT, "Já existe um atleta com estes dados");
+            throw Rules.conflict("Já existe um atleta com estes dados");
         }
         athletes.audit(tenantId, actorId, "ATHLETE_CREATED", id);
         return get(actorId, roles, id);
@@ -128,9 +119,7 @@ class AthleteService {
             if (header) {
                 header = false;
                 // skip header row if first column looks like a header
-                if (cols.length > 0 && cols[0].trim().equalsIgnoreCase("fullName")) {
-                    continue;
-                }
+                if (cols.length > 0 && cols[0].trim().equalsIgnoreCase("fullName")) continue;
             }
             // expected: fullName,birthDate,gender,nif,email,phone,licenseNumber,status
             if (cols.length < 3) continue;
@@ -144,18 +133,16 @@ class AthleteService {
             }
             String gender = cols[2].trim().toUpperCase(Locale.ROOT);
             if (!gender.equals("F") && !gender.equals("M")) gender = "M";
-            String nif = cols.length > 3 ? emptyToNull(cols[3]) : null;
-            String email = cols.length > 4 ? emptyToNull(cols[4]) : null;
-            String phone = cols.length > 5 ? emptyToNull(cols[5]) : null;
-            String license = cols.length > 6 ? emptyToNull(cols[6]) : null;
+            String nif = cols.length > 3 ? trimToNull(cols[3]) : null;
+            String email = cols.length > 4 ? trimToNull(cols[4]) : null;
+            String phone = cols.length > 5 ? trimToNull(cols[5]) : null;
+            String license = cols.length > 6 ? trimToNull(cols[6]) : null;
             String status = cols.length > 7 ? cols[7].trim().toUpperCase(Locale.ROOT) : "ACTIVE";
             if (!STATUSES.contains(status)) status = "ACTIVE";
 
             AthleteRepository.Data data = new AthleteRepository.Data(fullName, birthDate, gender, nif, email,
                     phone, license, status, null);
-            if (license != null && athletes.licenseExists(tenantId, license, null)) {
-                continue;
-            }
+            if (license != null && athletes.licenseExists(tenantId, license, null)) continue;
             UUID id = UUID.randomUUID();
             try {
                 athletes.insert(id, tenantId, data, actorId);
@@ -168,12 +155,6 @@ class AthleteService {
         return count;
     }
 
-    private static String emptyToNull(String v) {
-        if (v == null) return null;
-        String t = v.trim();
-        return t.isEmpty() ? null : t;
-    }
-
     @Transactional
     AthleteView update(UUID actorId, Set<String> roles, UUID athleteId, AthleteRepository.Data data) {
         UUID tenantId = Rules.tenant();
@@ -181,14 +162,12 @@ class AthleteService {
 
         if (data.licenseNumber() != null
                 && athletes.licenseExists(tenantId, data.licenseNumber(), athleteId)) {
-            throw new ResponseStatusException(HttpStatus.CONFLICT, "Já existe um atleta com esta licença");
+            throw Rules.conflict("Já existe um atleta com esta licença");
         }
         try {
-            if (!athletes.update(tenantId, athleteId, data)) {
-                throw notFound();
-            }
+            if (!athletes.update(tenantId, athleteId, data)) throw notFound();
         } catch (DuplicateKeyException e) {
-            throw new ResponseStatusException(HttpStatus.CONFLICT, "Já existe um atleta com esta licença");
+            throw Rules.conflict("Já existe um atleta com esta licença");
         }
         athletes.audit(tenantId, actorId, "ATHLETE_UPDATED", athleteId);
         return get(actorId, roles, athleteId);
@@ -197,16 +176,11 @@ class AthleteService {
     @Transactional
     void delete(UUID actorId, Set<String> roles, UUID athleteId) {
         UUID tenantId = Rules.tenant();
-        if (!Rules.isManager(roles)) {
-            // 404 se não o pode ver; 403 se o vê mas não o pode apagar.
-            requireVisible(tenantId, athleteId, actorId, roles);
-            throw new ResponseStatusException(HttpStatus.FORBIDDEN);
-        }
         requireVisible(tenantId, athleteId, actorId, roles);
+        // 403 se o vê mas não o pode apagar.
+        if (!Rules.isManager(roles)) throw Rules.forbidden();
         // Remoção não destrutiva: desativa e anonimiza, preservando a linha e as relações.
-        if (!athletes.anonymize(tenantId, athleteId)) {
-            throw notFound();
-        }
+        if (!athletes.anonymize(tenantId, athleteId)) throw notFound();
         athletes.deleteGuardian(tenantId, athleteId, null);
         athletes.audit(tenantId, actorId, "ATHLETE_ANONYMIZED", athleteId);
     }
@@ -219,15 +193,11 @@ class AthleteService {
         Rules.requireManager(roles);
         requireVisible(tenantId, athleteId, actorId, roles);
         requireMembership(tenantId, userId);
-        if (athletes.userLinked(tenantId, userId, athleteId)) {
-            throw new ResponseStatusException(HttpStatus.CONFLICT, "Esta conta já está ligada a outro atleta");
-        }
+        if (athletes.userLinked(tenantId, userId, athleteId)) throw Rules.conflict("Esta conta já está ligada a outro atleta");
         try {
-            if (!athletes.linkUser(tenantId, athleteId, userId)) {
-                throw notFound();
-            }
+            if (!athletes.linkUser(tenantId, athleteId, userId)) throw notFound();
         } catch (DuplicateKeyException e) {
-            throw new ResponseStatusException(HttpStatus.CONFLICT, "Esta conta já está ligada a outro atleta");
+            throw Rules.conflict("Esta conta já está ligada a outro atleta");
         }
         athletes.audit(tenantId, actorId, "ATHLETE_ACCOUNT_LINKED", athleteId);
         return get(actorId, roles, athleteId);
@@ -238,9 +208,7 @@ class AthleteService {
         UUID tenantId = Rules.tenant();
         Rules.requireManager(roles);
         requireVisible(tenantId, athleteId, actorId, roles);
-        if (!athletes.unlinkUser(tenantId, athleteId)) {
-            throw notFound();
-        }
+        if (!athletes.unlinkUser(tenantId, athleteId)) throw notFound();
         athletes.audit(tenantId, actorId, "ATHLETE_ACCOUNT_UNLINKED", athleteId);
         return get(actorId, roles, athleteId);
     }
@@ -250,9 +218,7 @@ class AthleteService {
         UUID tenantId = Rules.tenant();
         Rules.requireManager(roles);
         requireVisible(tenantId, athleteId, actorId, roles);
-        if (!athletes.updateStatus(tenantId, athleteId, Rules.status(status, STATUSES))) {
-            throw notFound();
-        }
+        if (!athletes.updateStatus(tenantId, athleteId, Rules.status(status, STATUSES))) throw notFound();
 
         athletes.audit(tenantId, actorId, "ATHLETE_STATUS_CHANGED", athleteId);
         return get(actorId, roles, athleteId);
@@ -262,13 +228,9 @@ class AthleteService {
     AthleteView registerWithdrawal(UUID actorId, Set<String> roles, UUID athleteId, LocalDate withdrawalDate) {
         UUID tenantId = Rules.tenant();
         Rules.requireManager(roles);
-        if (withdrawalDate == null) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Data de desistência obrigatória");
-        }
+        if (withdrawalDate == null) throw Rules.badRequest("Data de desistência obrigatória");
         requireVisible(tenantId, athleteId, actorId, roles);
-        if (!athletes.registerWithdrawal(tenantId, athleteId, withdrawalDate)) {
-            throw notFound();
-        }
+        if (!athletes.registerWithdrawal(tenantId, athleteId, withdrawalDate)) throw notFound();
         charges.cancelFutureRecurring(tenantId, athleteId, withdrawalDate);
         athletes.audit(tenantId, actorId, "ATHLETE_WITHDRAWN", athleteId);
         return get(actorId, roles, athleteId);
@@ -292,13 +254,11 @@ class AthleteService {
         Rules.requireManager(roles);
         requireVisible(tenantId, athleteId, actorId, roles);
         requireMembership(tenantId, userId);
-        if (athletes.guardianExists(tenantId, athleteId, userId)) {
-            throw new ResponseStatusException(HttpStatus.CONFLICT, "Este encarregado já está associado ao atleta");
-        }
+        if (athletes.guardianExists(tenantId, athleteId, userId)) throw Rules.conflict("Este encarregado já está associado ao atleta");
         try {
             athletes.insertGuardian(tenantId, athleteId, userId, trimToNull(relationship), actorId);
         } catch (DuplicateKeyException e) {
-            throw new ResponseStatusException(HttpStatus.CONFLICT, "Este encarregado já está associado ao atleta");
+            throw Rules.conflict("Este encarregado já está associado ao atleta");
         }
         athletes.audit(tenantId, actorId, "ATHLETE_GUARDIAN_ADDED", athleteId);
         return listGuardians(actorId, roles, athleteId);
@@ -309,9 +269,7 @@ class AthleteService {
         UUID tenantId = Rules.tenant();
         Rules.requireManager(roles);
         requireVisible(tenantId, athleteId, actorId, roles);
-        if (!athletes.deleteGuardian(tenantId, athleteId, userId)) {
-            throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Encarregado não associado ao atleta");
-        }
+        if (!athletes.deleteGuardian(tenantId, athleteId, userId)) throw Rules.notFound("Encarregado não associado ao atleta");
         athletes.audit(tenantId, actorId, "ATHLETE_GUARDIAN_REMOVED", athleteId);
     }
 
@@ -320,18 +278,12 @@ class AthleteService {
     static AthleteRepository.Data data(String fullName, LocalDate birthDate, String gender, String nif,
                                        String email, String phone, String licenseNumber, String status,
                                        UUID userId) {
-        return new AthleteRepository.Data(
-                fullName.trim(),
-                birthDate,
-                gender.trim().toUpperCase(Locale.ROOT),
-                trimToNull(nif),
+        return new AthleteRepository.Data(fullName.trim(), birthDate,
+                gender.trim().toUpperCase(Locale.ROOT), trimToNull(nif),
                 trimToNull(email) == null ? null : email.trim().toLowerCase(Locale.ROOT),
-                trimToNull(phone),
-                trimToNull(licenseNumber),
-                Rules.status(status == null ? "ACTIVE" : status, STATUSES),
-                userId);
+                trimToNull(phone), trimToNull(licenseNumber),
+                Rules.status(status == null ? "ACTIVE" : status, STATUSES), userId);
     }
-
 
     private void requireVisible(UUID tenantId, UUID athleteId, UUID actorId, Set<String> roles) {
         athletes.findVisible(tenantId, athleteId, actorId, roles).orElseThrow(AthleteService::notFound);
@@ -340,35 +292,25 @@ class AthleteService {
     private void requireWritable(UUID tenantId, UUID athleteId, UUID actorId, Set<String> roles) {
         Optional<AthleteRepository.AthleteRow> writable =
                 athletes.findWritable(tenantId, athleteId, actorId, roles);
-        if (writable.isPresent()) {
-            return;
-        }
-        if (athletes.findVisible(tenantId, athleteId, actorId, roles).isPresent()) {
-            throw new ResponseStatusException(HttpStatus.FORBIDDEN);
-        }
+        if (writable.isPresent()) return;
+        if (athletes.findVisible(tenantId, athleteId, actorId, roles).isPresent()) throw Rules.forbidden();
         throw notFound();
     }
 
     private void requireMembership(UUID tenantId, UUID userId) {
-        if (!athletes.activeMembershipExists(tenantId, userId)) {
-            throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Utilizador sem papel ativo no clube");
-        }
+        if (!athletes.activeMembershipExists(tenantId, userId)) throw Rules.notFound("Utilizador sem papel ativo no clube");
     }
-
-
-
 
     private static String trimToNull(String value) {
         return value == null || value.isBlank() ? null : value.trim();
     }
 
     private static ResponseStatusException notFound() {
-        return new ResponseStatusException(HttpStatus.NOT_FOUND, "Atleta não encontrado");
+        return Rules.notFound("Atleta não encontrado");
     }
 
     private static AthleteView view(AthleteRepository.AthleteRow row) {
-        return new AthleteView(row.id(), row.fullName(), row.birthDate(), row.gender(), row.nif(),
-                row.email(), row.phone(), row.licenseNumber(), row.status(), row.userId(),
-                row.createdAt(), row.updatedAt());
+        return new AthleteView(row.id(), row.fullName(), row.birthDate(), row.gender(), row.nif(), row.email(),
+                row.phone(), row.licenseNumber(), row.status(), row.userId(), row.createdAt(), row.updatedAt());
     }
 }

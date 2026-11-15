@@ -71,9 +71,7 @@ class AuthController {
         }
 
         Optional<AuthService.Tokens> tokens = authService.login(request.email(), request.password());
-        if (tokens.isPresent()) {
-            loginRateLimiter.recordSuccess(tenantId, clientIp);
-        } else {
+        if (tokens.isPresent()) loginRateLimiter.recordSuccess(tenantId, clientIp); else {
             loginRateLimiter.recordFailure(tenantId, clientIp);
         }
         return respond(tokens);

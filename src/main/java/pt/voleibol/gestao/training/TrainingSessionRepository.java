@@ -105,23 +105,18 @@ class TrainingSessionRepository {
                         ORDER BY at.full_name, at.id
                         """)
                 .param("tenant", tenantId).param("session", sessionId)
-                .query((rs, i) -> new AttendanceRow(
-                        rs.getObject("athlete_id", UUID.class),
-                        rs.getString("full_name"),
-                        rs.getString("status"),
-                        rs.getString("justification")))
+                .query((rs, i) -> new AttendanceRow(Db.uuid(rs, "athlete_id"), rs.getString("full_name"),
+                        rs.getString("status"), rs.getString("justification")))
                 .list();
     }
 
     boolean attendanceExists(UUID tenantId, UUID sessionId, UUID athleteId) {
-        return jdbc.sql("""
+        return Db.exists(jdbc.sql("""
                         SELECT EXISTS (
                             SELECT 1 FROM attendance
                             WHERE tenant_id = :tenant AND session_id = :session AND athlete_id = :athlete)
                         """)
-                .param("tenant", tenantId).param("session", sessionId).param("athlete", athleteId)
-                .query(Boolean.class)
-                .single();
+                .param("tenant", tenantId).param("session", sessionId).param("athlete", athleteId));
     }
 
     void upsertAttendance(UUID tenantId, UUID sessionId, UUID athleteId, String status, String justification,
@@ -152,16 +147,9 @@ class TrainingSessionRepository {
     }
 
     private static SessionRow mapSession(java.sql.ResultSet rs, int rowNum) throws java.sql.SQLException {
-        return new SessionRow(
-                rs.getObject("id", UUID.class),
-                rs.getObject("team_id", UUID.class),
-                rs.getObject("court_id", UUID.class),
-                Db.instant(rs, "start_time"),
-                Db.instant(rs, "end_time"),
-                rs.getString("recurrence"),
-                rs.getString("notes"),
-                rs.getString("status"),
-                Db.instant(rs, "created_at"),
+        return new SessionRow(Db.uuid(rs, "id"), Db.uuid(rs, "team_id"), Db.uuid(rs, "court_id"),
+                Db.instant(rs, "start_time"), Db.instant(rs, "end_time"), rs.getString("recurrence"),
+                rs.getString("notes"), rs.getString("status"), Db.instant(rs, "created_at"),
                 Db.instant(rs, "updated_at"));
     }
 }

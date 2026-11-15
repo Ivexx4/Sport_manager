@@ -96,8 +96,7 @@ public abstract class FlowTestSupport {
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("{\"email\":\"" + email + "\",\"password\":\"" + password + "\"}")
                         .with(host(host)))
-                .andExpect(status().isOk())
-                .andReturn().getResponse().getContentAsString();
+                .andExpect(status().isOk()).andReturn().getResponse().getContentAsString();
         return JsonPath.read(resposta, "$.accessToken");
     }
 
@@ -177,6 +176,26 @@ public abstract class FlowTestSupport {
                 INSERT INTO team_athlete (tenant_id, team_id, athlete_id) VALUES (?, ?, ?)
                 ON CONFLICT (tenant_id, team_id, athlete_id) DO NOTHING
                 """, tenantId, teamId, athleteId);
+    }
+
+    /** Atleta semeado; email e conta ligada são opcionais e ficam nulos quando não são indicados. */
+    protected static void atleta(Connection c, UUID athleteId, UUID tenantId, String nome, String nascimento,
+                                 String genero, String licenca, UUID userId, String email) throws SQLException {
+        executar(c, """
+                INSERT INTO athlete (id, tenant_id, full_name, birth_date, gender, nif, email, phone,
+                                     license_number, status, user_id)
+                VALUES (?, ?, ?, ?, ?, NULL, ?, NULL, ?, 'ACTIVE', ?)
+                ON CONFLICT (id) DO UPDATE SET full_name = EXCLUDED.full_name,
+                    birth_date = EXCLUDED.birth_date, gender = EXCLUDED.gender,
+                    nif = NULL, email = EXCLUDED.email, phone = NULL,
+                    license_number = EXCLUDED.license_number, status = 'ACTIVE',
+                    user_id = EXCLUDED.user_id, anonymized_at = NULL
+                """, athleteId, tenantId, nome, Date.valueOf(nascimento), genero, email, licenca, userId);
+    }
+
+    protected static void atleta(Connection c, UUID athleteId, UUID tenantId, String nome, String nascimento,
+                                 String genero, String licenca, UUID userId) throws SQLException {
+        atleta(c, athleteId, tenantId, nome, nascimento, genero, licenca, userId, null);
     }
 
     /** Conta de teste com a palavra-passe comum e os papéis indicados no clube. */

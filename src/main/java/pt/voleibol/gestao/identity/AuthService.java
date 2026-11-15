@@ -6,7 +6,6 @@ import java.util.Set;
 import java.util.TreeSet;
 import java.util.UUID;
 
-import org.springframework.http.HttpStatus;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.security.oauth2.jose.jws.MacAlgorithm;
 import org.springframework.security.oauth2.jwt.JwsHeader;
@@ -15,7 +14,6 @@ import org.springframework.security.oauth2.jwt.JwtEncoder;
 import org.springframework.security.oauth2.jwt.JwtEncoderParameters;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
-import org.springframework.web.server.ResponseStatusException;
 
 import pt.voleibol.gestao.shared.Rules;
 
@@ -53,9 +51,7 @@ class AuthService {
 
         Optional<AuthRepository.UserRow> user = repository.findActiveUserByEmail(email);
         String hash = user.map(AuthRepository.UserRow::passwordHash).orElse(dummyHash);
-        if (hash == null || hash.isBlank()) {
-            hash = dummyHash;
-        }
+        if (hash == null || hash.isBlank()) hash = dummyHash;
         // Passwords com mais de 72 bytes nunca existem (ver PasswordPolicy); comparar na mesma, para manter o tempo.
         boolean fits = PasswordPolicy.fitsBcrypt(password);
         boolean passwordOk = passwordEncoder.matches(fits ? password : "", hash) && fits;
@@ -82,9 +78,7 @@ class AuthService {
 
         Optional<AuthRepository.RefreshRow> found =
                 repository.findRefreshToken(tenantId, OpaqueTokens.hash(rawRefreshToken));
-        if (found.isEmpty()) {
-            return Optional.empty();
-        }
+        if (found.isEmpty()) return Optional.empty();
         AuthRepository.RefreshRow token = found.get();
 
         // A password mudou depois de este token ser emitido (inclui mudanças feitas noutros clubes).
@@ -99,15 +93,11 @@ class AuthService {
             repository.audit(tenantId, token.userId(), "REFRESH_TOKEN_REUSE");
             return Optional.empty();
         }
-        if (token.expiresAt().isBefore(Instant.now())) {
-            return Optional.empty();
-        }
+        if (token.expiresAt().isBefore(Instant.now())) return Optional.empty();
 
         // Os papéis são relidos: se o acesso foi retirado ao utilizador, o refresh deixa de funcionar.
         Set<String> roles = repository.findActiveRoles(tenantId, token.userId());
-        if (roles.isEmpty()) {
-            return Optional.empty();
-        }
+        if (roles.isEmpty()) return Optional.empty();
         return Optional.of(issueTokens(tenantId, token.userId(), roles));
     }
 
@@ -115,9 +105,7 @@ class AuthService {
     void logout(String rawRefreshToken) {
         UUID tenantId = Rules.tenant();
         repository.findRefreshToken(tenantId, OpaqueTokens.hash(rawRefreshToken)).ifPresent(token -> {
-            if (repository.revokeIfActive(tenantId, token.id())) {
-                repository.audit(tenantId, token.userId(), "LOGOUT");
-            }
+            if (repository.revokeIfActive(tenantId, token.id())) repository.audit(tenantId, token.userId(), "LOGOUT");
         });
     }
 

@@ -29,9 +29,7 @@ class ClientIpResolver {
             if (header != null) {
                 for (String part : header.split(",")) {
                     String candidate = part.trim();
-                    if (!candidate.isEmpty()) {
-                        return candidate;
-                    }
+                    if (!candidate.isEmpty()) return candidate;
                 }
             }
         }

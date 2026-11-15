@@ -59,10 +59,8 @@ class SeasonRepository {
         JdbcClient.StatementSpec spec = jdbc.sql(excludeId == null ? sql + ")"
                         : sql + " AND id <> :exclude)")
                 .param("tenant", tenantId).param("name", name);
-        if (excludeId != null) {
-            spec = spec.param("exclude", excludeId);
-        }
-        return spec.query(Boolean.class).single();
+        if (excludeId != null) spec = spec.param("exclude", excludeId);
+        return Db.exists(spec);
     }
 
     void insert(UUID id, UUID tenantId, Data data, UUID actorId) {
@@ -108,14 +106,8 @@ class SeasonRepository {
     }
 
     private static SeasonRow map(java.sql.ResultSet rs, int rowNum) throws java.sql.SQLException {
-        return new SeasonRow(
-                rs.getObject("id", UUID.class),
-                rs.getString("name"),
-                rs.getObject("start_date", LocalDate.class),
-                rs.getObject("end_date", LocalDate.class),
-                rs.getObject("cutoff_date", LocalDate.class),
-                rs.getBoolean("is_active"),
-                Db.instant(rs, "created_at"),
-                Db.instant(rs, "updated_at"));
+        return new SeasonRow(Db.uuid(rs, "id"), rs.getString("name"), Db.date(rs, "start_date"),
+                Db.date(rs, "end_date"), Db.date(rs, "cutoff_date"), rs.getBoolean("is_active"),
+                Db.instant(rs, "created_at"), Db.instant(rs, "updated_at"));
     }
 }

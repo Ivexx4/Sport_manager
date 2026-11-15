@@ -16,18 +16,10 @@ final class PasswordPolicy {
 
     /** Devolve a mensagem do problema, ou null se a password for aceitável. */
     static String check(String password, String email) {
-        if (password == null || password.isBlank()) {
-            return "A password é obrigatória";
-        }
-        if (password.codePointCount(0, password.length()) < MIN_LENGTH) {
-            return "A password tem de ter pelo menos " + MIN_LENGTH + " caracteres";
-        }
-        if (!fitsBcrypt(password)) {
-            return "A password não pode ter mais de " + MAX_BYTES + " bytes";
-        }
-        if (email != null && password.equalsIgnoreCase(email)) {
-            return "A password não pode ser igual ao email";
-        }
+        if (password == null || password.isBlank()) return "A password é obrigatória";
+        if (password.codePointCount(0, password.length()) < MIN_LENGTH) return "A password tem de ter pelo menos " + MIN_LENGTH + " caracteres";
+        if (!fitsBcrypt(password)) return "A password não pode ter mais de " + MAX_BYTES + " bytes";
+        if (email != null && password.equalsIgnoreCase(email)) return "A password não pode ser igual ao email";
         return null;
     }
 

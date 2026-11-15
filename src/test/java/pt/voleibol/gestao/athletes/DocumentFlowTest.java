@@ -3,7 +3,6 @@ package pt.voleibol.gestao.athletes;
 import com.jayway.jsonpath.JsonPath;
 
 import java.sql.Connection;
-import java.sql.Date;
 import java.sql.SQLException;
 import java.time.LocalDate;
 import java.util.UUID;
@@ -85,8 +84,7 @@ class DocumentFlowTest extends FlowTestSupport {
 
         String criado = criarDocumento(HOST_A, admin, ATLETA_1,
                 documento("Cartão de Cidadão", "cc.pdf", "https://files.test/cc.pdf", "2030-01-31"))
-                .andExpect(status().isCreated())
-                .andReturn().getResponse().getContentAsString();
+                .andExpect(status().isCreated()).andReturn().getResponse().getContentAsString();
         UUID id = UUID.fromString(JsonPath.read(criado, "$.id"));
         assertThat((String) JsonPath.read(criado, "$.type")).isEqualTo("Cartão de Cidadão");
         assertThat((String) JsonPath.read(criado, "$.athleteId")).isEqualTo(ATLETA_1.toString());
@@ -94,8 +92,7 @@ class DocumentFlowTest extends FlowTestSupport {
 
         String lista = mvc.perform(get("/api/v1/athletes/" + ATLETA_1 + "/documents")
                         .header("Authorization", "Bearer " + admin).with(host(HOST_A)))
-                .andExpect(status().isOk())
-                .andReturn().getResponse().getContentAsString();
+                .andExpect(status().isOk()).andReturn().getResponse().getContentAsString();
         assertThat(ids(lista)).contains(DOC_A, id);
 
         String atualizado = mvc.perform(put("/api/v1/documents/" + id)
@@ -103,8 +100,7 @@ class DocumentFlowTest extends FlowTestSupport {
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(documento("Cartão de Cidadão Renovado", "cc-novo.pdf",
                                 "https://files.test/cc-novo.pdf", "2031-01-31")))
-                .andExpect(status().isOk())
-                .andReturn().getResponse().getContentAsString();
+                .andExpect(status().isOk()).andReturn().getResponse().getContentAsString();
         assertThat((String) JsonPath.read(atualizado, "$.type")).isEqualTo("Cartão de Cidadão Renovado");
         assertThat((String) JsonPath.read(atualizado, "$.fileName")).isEqualTo("cc-novo.pdf");
 
@@ -116,8 +112,7 @@ class DocumentFlowTest extends FlowTestSupport {
                 .andExpect(status().isNotFound());
         String depois = mvc.perform(get("/api/v1/athletes/" + ATLETA_1 + "/documents")
                         .header("Authorization", "Bearer " + admin).with(host(HOST_A)))
-                .andExpect(status().isOk())
-                .andReturn().getResponse().getContentAsString();
+                .andExpect(status().isOk()).andReturn().getResponse().getContentAsString();
         assertThat(ids(depois)).contains(DOC_A).doesNotContain(id);
 
         assertThat(contarAuditoria("ATHLETE_DOCUMENT_CREATED")).isPositive();
@@ -140,8 +135,7 @@ class DocumentFlowTest extends FlowTestSupport {
                 DOC_A)).isZero();
         String lista = mvc.perform(get("/api/v1/athletes/" + ATLETA_1 + "/documents")
                         .header("Authorization", "Bearer " + admin).with(host(HOST_A)))
-                .andExpect(status().isOk())
-                .andReturn().getResponse().getContentAsString();
+                .andExpect(status().isOk()).andReturn().getResponse().getContentAsString();
         assertThat(ids(lista)).doesNotContain(DOC_A);
     }
 
@@ -217,8 +211,7 @@ class DocumentFlowTest extends FlowTestSupport {
         String atleta = acesso(HOST_A, ATLETA_USER);
         String listaAtleta = mvc.perform(get("/api/v1/athletes/" + ATLETA_1 + "/documents")
                         .header("Authorization", "Bearer " + atleta).with(host(HOST_A)))
-                .andExpect(status().isOk())
-                .andReturn().getResponse().getContentAsString();
+                .andExpect(status().isOk()).andReturn().getResponse().getContentAsString();
         assertThat(ids(listaAtleta)).contains(DOC_A);
         mvc.perform(get("/api/v1/athletes/" + ATLETA_2 + "/documents")
                         .header("Authorization", "Bearer " + atleta).with(host(HOST_A)))
@@ -227,8 +220,7 @@ class DocumentFlowTest extends FlowTestSupport {
                 .andExpect(status().isNotFound());
         String doAtleta = criarDocumento(HOST_A, atleta, ATLETA_1,
                 documento("Atestado do Atleta", null, null, null))
-                .andExpect(status().isCreated())
-                .andReturn().getResponse().getContentAsString();
+                .andExpect(status().isCreated()).andReturn().getResponse().getContentAsString();
         UUID docAtleta = UUID.fromString(JsonPath.read(doAtleta, "$.id"));
         mvc.perform(put("/api/v1/documents/" + docAtleta)
                         .header("Authorization", "Bearer " + atleta).with(host(HOST_A))
@@ -293,8 +285,7 @@ class DocumentFlowTest extends FlowTestSupport {
                 .andExpect(status().isNotFound());
         String listaB = mvc.perform(get("/api/v1/athletes/" + ATLETA_B + "/documents")
                         .header("Authorization", "Bearer " + adminB).with(host(HOST_B)))
-                .andExpect(status().isOk())
-                .andReturn().getResponse().getContentAsString();
+                .andExpect(status().isOk()).andReturn().getResponse().getContentAsString();
         assertThat(ids(listaB)).containsExactly(DOC_B);
     }
 
@@ -412,22 +403,6 @@ class DocumentFlowTest extends FlowTestSupport {
         executar(c, "DELETE FROM email_outbox");
         limpar(c, CLUBE_A, CLUBE_B, "document");
     }
-
-
-    private static void atleta(Connection c, UUID athleteId, UUID tenantId, String nome, String nascimento,
-                               String genero, String licenca, UUID userId, String email)
-            throws SQLException {
-        executar(c, """
-                INSERT INTO athlete (id, tenant_id, full_name, birth_date, gender, license_number, email,
-                                     status, user_id)
-                VALUES (?, ?, ?, ?, ?, ?, ?, 'ACTIVE', ?)
-                ON CONFLICT (id) DO UPDATE SET full_name = EXCLUDED.full_name,
-                    birth_date = EXCLUDED.birth_date, gender = EXCLUDED.gender,
-                    license_number = EXCLUDED.license_number, email = EXCLUDED.email,
-                    status = 'ACTIVE', user_id = EXCLUDED.user_id, anonymized_at = NULL
-                """, athleteId, tenantId, nome, Date.valueOf(nascimento), genero, licenca, email, userId);
-    }
-
 
     private static void documento(Connection c, UUID documentId, UUID tenantId, UUID athleteId,
                                   String type, String validUntilExpression, boolean anonymized)

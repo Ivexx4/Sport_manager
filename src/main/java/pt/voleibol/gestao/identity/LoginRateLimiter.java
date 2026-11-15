@@ -53,28 +53,18 @@ class LoginRateLimiter {
 
     /** Duração até o bloqueio terminar, ou vazio se a chave pode tentar autenticar-se. */
     Optional<Duration> retryAfter(UUID tenantId, String clientIp) {
-        if (!properties.enabled() || tenantId == null) {
-            return Optional.empty();
-        }
+        if (!properties.enabled() || tenantId == null) return Optional.empty();
         Entry entry = attempts.get(new Key(tenantId, clientIp));
-        if (entry == null) {
-            return Optional.empty();
-        }
+        if (entry == null) return Optional.empty();
         Instant now = clock.instant();
-        if (!isBlocked(entry, now)) {
-            return Optional.empty();
-        }
+        if (!isBlocked(entry, now)) return Optional.empty();
         return Optional.of(Duration.between(now, entry.blockedUntil()));
     }
 
     void recordFailure(UUID tenantId, String clientIp) {
-        if (!properties.enabled() || tenantId == null) {
-            return;
-        }
+        if (!properties.enabled() || tenantId == null) return;
         Key key = new Key(tenantId, clientIp);
-        if (!ensureCapacity(key)) {
-            return;
-        }
+        if (!ensureCapacity(key)) return;
         Instant now = clock.instant();
         AtomicBoolean blockedNow = new AtomicBoolean(false);
 
@@ -93,9 +83,7 @@ class LoginRateLimiter {
             Instant blockedUntil = failures >= properties.maxAttempts()
                     ? now.plus(properties.blockDuration())
                     : null;
-            if (blockedUntil != null) {
-                blockedNow.set(true);
-            }
+            if (blockedUntil != null) blockedNow.set(true);
             return new Entry(failures, windowStart, blockedUntil);
         });
 
@@ -106,30 +94,22 @@ class LoginRateLimiter {
     }
 
     void recordSuccess(UUID tenantId, String clientIp) {
-        if (!properties.enabled() || tenantId == null) {
-            return;
-        }
+        if (!properties.enabled() || tenantId == null) return;
         attempts.remove(new Key(tenantId, clientIp));
     }
 
     /** Remove entradas de janelas e bloqueios já terminados. */
     @Scheduled(fixedDelayString = "${app.security.login-rate-limit.cleanup-interval:PT10M}")
     void purgeExpired() {
-        if (!properties.enabled()) {
-            return;
-        }
+        if (!properties.enabled()) return;
         Instant now = clock.instant();
         attempts.entrySet().removeIf(entry -> isExpired(entry.getValue(), now));
     }
 
     private boolean ensureCapacity(Key key) {
-        if (attempts.size() < properties.maxEntries() || attempts.containsKey(key)) {
-            return true;
-        }
+        if (attempts.size() < properties.maxEntries() || attempts.containsKey(key)) return true;
         purgeExpired();
-        if (attempts.size() < properties.maxEntries() || attempts.containsKey(key)) {
-            return true;
-        }
+        if (attempts.size() < properties.maxEntries() || attempts.containsKey(key)) return true;
         // Não deixa o mapa crescer sem controlo; as chaves já registadas continuam a ser contabilizadas.
         log.debug("Limitador de login cheio ({} chaves): tentativa não contabilizada", attempts.size());
         return false;
@@ -140,9 +120,7 @@ class LoginRateLimiter {
     }
 
     private boolean isExpired(Entry entry, Instant now) {
-        if (isBlocked(entry, now)) {
-            return false;
-        }
+        if (isBlocked(entry, now)) return false;
         return !now.isBefore(entry.windowStart().plus(properties.window()));
     }
 }

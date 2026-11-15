@@ -58,9 +58,7 @@ class FeePlanRepository {
                         FROM season
                         WHERE tenant_id = :t AND id = :id AND anonymized_at IS NULL
                         """).param("t", tenantId).param("id", seasonId)
-                .query((rs, n) -> new SeasonWindow(
-                        Db.date(rs, "start_date"),
-                        Db.date(rs, "end_date")))
+                .query((rs, n) -> new SeasonWindow(Db.date(rs, "start_date"), Db.date(rs, "end_date")))
                 .optional();
     }
 
@@ -68,7 +66,7 @@ class FeePlanRepository {
         String sql = "SELECT EXISTS (SELECT 1 FROM fee_plan WHERE tenant_id = :t AND anonymized_at IS NULL AND lower(name)=lower(:n)";
         var spec = jdbc.sql(excludeId == null ? sql + ")" : sql + " AND id <> :e)").param("t", tenantId).param("n", name);
         if (excludeId != null) spec = spec.param("e", excludeId);
-        return spec.query(Boolean.class).single();
+        return Db.exists(spec);
     }
 
     void insert(UUID id, UUID tenantId, String name, UUID seasonId, UUID ageGroupId, long amountCents, String periodicity, UUID actorId) {
@@ -116,8 +114,8 @@ class FeePlanRepository {
                 WHERE tenant_id = :t AND athlete_id = :a
                 ORDER BY is_active DESC, valid_from DESC, id
                 """).param("t", tenantId).param("a", athleteId).query((rs, n) -> new Promotion(
-                rs.getObject("id", UUID.class), rs.getObject("athlete_id", UUID.class),
-                rs.getObject("fee_plan_id", UUID.class), rs.getLong("amount_cents"),
+                Db.uuid(rs, "id"), Db.uuid(rs, "athlete_id"),
+                Db.uuid(rs, "fee_plan_id"), rs.getLong("amount_cents"),
                 Db.date(rs, "valid_from"),
                 Db.date(rs, "valid_to"),
                 rs.getString("reason"), rs.getBoolean("is_active"),
@@ -150,8 +148,8 @@ class FeePlanRepository {
     }
 
     private static Row map(java.sql.ResultSet rs, int n) throws java.sql.SQLException {
-        return new Row(rs.getObject("id", UUID.class), rs.getString("name"),
-                rs.getObject("season_id", UUID.class), rs.getObject("age_group_id", UUID.class),
+        return new Row(Db.uuid(rs, "id"), rs.getString("name"),
+                Db.uuid(rs, "season_id"), Db.uuid(rs, "age_group_id"),
                 rs.getLong("amount_cents"), rs.getString("periodicity"), rs.getBoolean("is_active"),
                 Db.date(rs, "effective_from"),
                 Db.date(rs, "effective_to"),

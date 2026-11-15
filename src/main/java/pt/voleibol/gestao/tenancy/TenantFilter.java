@@ -61,9 +61,7 @@ public class TenantFilter extends OncePerRequestFilter {
     private Optional<String> extractSubdomain(String host) {
         String suffix = "." + baseDomain;
         String normalized = host == null ? "" : host.toLowerCase();
-        if (normalized.length() > suffix.length() && normalized.endsWith(suffix)) {
-            return Optional.of(normalized.substring(0, normalized.length() - suffix.length()));
-        }
+        if (normalized.length() > suffix.length() && normalized.endsWith(suffix)) return Optional.of(normalized.substring(0, normalized.length() - suffix.length()));
         return Optional.empty();
     }
 }

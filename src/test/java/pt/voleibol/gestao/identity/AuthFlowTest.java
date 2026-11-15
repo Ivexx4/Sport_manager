@@ -10,7 +10,6 @@ import com.jayway.jsonpath.JsonPath;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.http.MediaType;
-import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 import org.springframework.test.web.servlet.ResultActions;
@@ -135,8 +134,7 @@ class AuthFlowTest extends FlowTestSupport {
     void refreshRodaOsTokensEReutilizarUmJaUsadoRevogaTudo() throws Exception {
         String refreshInicial = refreshDe(login(HOST_A, "ana@clube-a.test", "segredo-ana"));
 
-        String corpo = refresh(HOST_A, refreshInicial).andExpect(status().isOk())
-                .andReturn().getResponse().getContentAsString();
+        String corpo = refresh(HOST_A, refreshInicial).andExpect(status().isOk()).andReturn().getResponse().getContentAsString();
         String refreshNovo = JsonPath.read(corpo, "$.refreshToken");
         assertThat(refreshNovo).isNotEqualTo(refreshInicial);
 

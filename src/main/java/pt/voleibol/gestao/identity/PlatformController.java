@@ -55,9 +55,7 @@ class PlatformController {
 
     @PostMapping("/bootstrap-key")
     ResponseEntity<BootstrapKeyResponse> generateBootstrapKey(HttpServletRequest request) {
-        if (!isLoopback(request.getRemoteAddr())) {
-            return ResponseEntity.status(HttpStatus.FORBIDDEN).build();
-        }
+        if (!isLoopback(request.getRemoteAddr())) return ResponseEntity.status(HttpStatus.FORBIDDEN).build();
         return ResponseEntity.ok()
                 .header("Cache-Control", "no-store")
                 .body(new BootstrapKeyResponse(provisioningService.generateBootstrapKey()));

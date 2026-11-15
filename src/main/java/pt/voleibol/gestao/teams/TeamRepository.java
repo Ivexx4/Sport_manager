@@ -48,9 +48,7 @@ class TeamRepository {
                         """)
                 + " ORDER BY t.name, t.id";
         JdbcClient.StatementSpec spec = jdbc.sql(sql).param("tenant", tenantId);
-        if (!manager) {
-            spec = spec.param("actor", actorId);
-        }
+        if (!manager) spec = spec.param("actor", actorId);
         return spec.query(TeamRepository::map).list();
     }
 
@@ -62,9 +60,7 @@ class TeamRepository {
                             WHERE s.tenant_id = t.tenant_id AND s.team_id = t.id AND s.user_id = :actor)
                         """);
         JdbcClient.StatementSpec spec = jdbc.sql(sql).param("tenant", tenantId).param("id", teamId);
-        if (!manager) {
-            spec = spec.param("actor", actorId);
-        }
+        if (!manager) spec = spec.param("actor", actorId);
         return spec.query(TeamRepository::map).optional();
     }
 
@@ -81,10 +77,8 @@ class TeamRepository {
         JdbcClient.StatementSpec spec = jdbc.sql(excludeId == null ? sql + ")"
                         : sql + " AND id <> :exclude)")
                 .param("tenant", tenantId).param("name", name);
-        if (excludeId != null) {
-            spec = spec.param("exclude", excludeId);
-        }
-        return spec.query(Boolean.class).single();
+        if (excludeId != null) spec = spec.param("exclude", excludeId);
+        return Db.exists(spec);
     }
 
     void insert(UUID id, UUID tenantId, String name, String status, UUID seasonId, UUID ageGroupId,
@@ -136,23 +130,18 @@ class TeamRepository {
                         ORDER BY u.name, u.id
                         """)
                 .param("tenant", tenantId).param("team", teamId)
-                .query((rs, i) -> new StaffRow(
-                        rs.getObject("user_id", UUID.class),
-                        rs.getString("name"),
-                        rs.getString("email"),
+                .query((rs, i) -> new StaffRow(Db.uuid(rs, "user_id"), rs.getString("name"), rs.getString("email"),
                         rs.getString("role")))
                 .list();
     }
 
     boolean staffExists(UUID tenantId, UUID teamId, UUID userId) {
-        return jdbc.sql("""
+        return Db.exists(jdbc.sql("""
                         SELECT EXISTS (
                             SELECT 1 FROM team_staff
                             WHERE tenant_id = :tenant AND team_id = :team AND user_id = :user)
                         """)
-                .param("tenant", tenantId).param("team", teamId).param("user", userId)
-                .query(Boolean.class)
-                .single();
+                .param("tenant", tenantId).param("team", teamId).param("user", userId));
     }
 
     void insertStaff(UUID tenantId, UUID teamId, UUID userId, String role, UUID actorId) {
@@ -186,22 +175,17 @@ class TeamRepository {
                         ORDER BY a.full_name, a.id
                         """)
                 .param("tenant", tenantId).param("team", teamId)
-                .query((rs, i) -> new RosterRow(
-                        rs.getObject("id", UUID.class),
-                        rs.getString("full_name"),
-                        rs.getString("status")))
+                .query((rs, i) -> new RosterRow(Db.uuid(rs, "id"), rs.getString("full_name"), rs.getString("status")))
                 .list();
     }
 
     boolean rosterExists(UUID tenantId, UUID teamId, UUID athleteId) {
-        return jdbc.sql("""
+        return Db.exists(jdbc.sql("""
                         SELECT EXISTS (
                             SELECT 1 FROM team_athlete
                             WHERE tenant_id = :tenant AND team_id = :team AND athlete_id = :athlete)
                         """)
-                .param("tenant", tenantId).param("team", teamId).param("athlete", athleteId)
-                .query(Boolean.class)
-                .single();
+                .param("tenant", tenantId).param("team", teamId).param("athlete", athleteId));
     }
 
     void insertAthlete(UUID tenantId, UUID teamId, UUID athleteId, UUID actorId) {
@@ -239,47 +223,39 @@ class TeamRepository {
     // --- validações ---
 
     boolean activeMembershipExists(UUID tenantId, UUID userId) {
-        return jdbc.sql("""
+        return Db.exists(jdbc.sql("""
                         SELECT EXISTS (
                             SELECT 1 FROM membership
                             WHERE tenant_id = :tenant AND user_id = :user AND status = 'ACTIVE')
                         """)
-                .param("tenant", tenantId).param("user", userId)
-                .query(Boolean.class)
-                .single();
+                .param("tenant", tenantId).param("user", userId));
     }
 
     boolean athleteExists(UUID tenantId, UUID athleteId) {
-        return jdbc.sql("""
+        return Db.exists(jdbc.sql("""
                         SELECT EXISTS (
                             SELECT 1 FROM athlete
                             WHERE tenant_id = :tenant AND id = :id AND anonymized_at IS NULL)
                         """)
-                .param("tenant", tenantId).param("id", athleteId)
-                .query(Boolean.class)
-                .single();
+                .param("tenant", tenantId).param("id", athleteId));
     }
 
     boolean seasonExists(UUID tenantId, UUID seasonId) {
-        return jdbc.sql("""
+        return Db.exists(jdbc.sql("""
                         SELECT EXISTS (
                             SELECT 1 FROM season
                             WHERE tenant_id = :tenant AND id = :id AND anonymized_at IS NULL)
                         """)
-                .param("tenant", tenantId).param("id", seasonId)
-                .query(Boolean.class)
-                .single();
+                .param("tenant", tenantId).param("id", seasonId));
     }
 
     boolean ageGroupExists(UUID tenantId, UUID ageGroupId) {
-        return jdbc.sql("""
+        return Db.exists(jdbc.sql("""
                         SELECT EXISTS (
                             SELECT 1 FROM age_group
                             WHERE id = :id AND is_active)
                         """)
-                .param("id", ageGroupId)
-                .query(Boolean.class)
-                .single();
+                .param("id", ageGroupId));
     }
 
     LocalDate birthDate(UUID tenantId, UUID athleteId) {
@@ -289,13 +265,13 @@ class TeamRepository {
                         WHERE tenant_id = :tenant AND id = :id AND anonymized_at IS NULL
                         """)
                 .param("tenant", tenantId).param("id", athleteId)
-                .query((rs, i) -> rs.getObject("birth_date", LocalDate.class))
+                .query((rs, i) -> Db.date(rs, "birth_date"))
                 .single();
     }
 
     /** Autorização excepcional de subida de escalão para a época (só `ACTIVE` conta). */
     boolean promotionExists(UUID tenantId, UUID seasonId, UUID ageGroupId, UUID athleteId) {
-        return jdbc.sql("""
+        return Db.exists(jdbc.sql("""
                         SELECT EXISTS (
                             SELECT 1 FROM season_promotion sp
                             WHERE sp.tenant_id = :tenant AND sp.season_id = :season
@@ -303,9 +279,7 @@ class TeamRepository {
                               AND sp.status = 'ACTIVE')
                         """)
                 .param("tenant", tenantId).param("season", seasonId).param("athlete", athleteId)
-                .param("age_group", ageGroupId)
-                .query(Boolean.class)
-                .single();
+                .param("age_group", ageGroupId));
     }
 
     void audit(UUID tenantId, UUID actorId, String action, UUID teamId) {
@@ -313,13 +287,8 @@ class TeamRepository {
     }
 
     private static TeamRow map(java.sql.ResultSet rs, int rowNum) throws java.sql.SQLException {
-        return new TeamRow(
-                rs.getObject("id", UUID.class),
-                rs.getString("name"),
-                rs.getString("status"),
-                rs.getObject("season_id", UUID.class),
-                rs.getObject("age_group_id", UUID.class),
-                Db.instant(rs, "created_at"),
+        return new TeamRow(Db.uuid(rs, "id"), rs.getString("name"), rs.getString("status"), Db.uuid(rs, "season_id"),
+                Db.uuid(rs, "age_group_id"), Db.instant(rs, "created_at"),
                 Db.instant(rs, "updated_at"));
     }
 }

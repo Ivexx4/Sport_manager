@@ -3,7 +3,6 @@ package pt.voleibol.gestao.teams;
 import com.jayway.jsonpath.JsonPath;
 
 import java.sql.Connection;
-import java.sql.Date;
 import java.sql.SQLException;
 import java.util.List;
 import java.util.UUID;
@@ -11,7 +10,6 @@ import java.util.UUID;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.http.MediaType;
-import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 import org.springframework.test.web.servlet.ResultActions;
@@ -65,16 +63,14 @@ class SeasonAgeGroupFlowTest extends FlowTestSupport {
 
         String criada = criarEpoca(HOST_A, admin, """
                 {"name":"Época 2025/2026","startDate":"2025-08-01","endDate":"2026-07-31","isActive":true}
-                """).andExpect(status().isCreated())
-                .andReturn().getResponse().getContentAsString();
+                """).andExpect(status().isCreated()).andReturn().getResponse().getContentAsString();
         UUID id = UUID.fromString(JsonPath.read(criada, "$.id"));
         assertThat((Boolean) JsonPath.read(criada, "$.isActive")).isTrue();
         assertThat((String) JsonPath.read(criada, "$.startDate")).isEqualTo("2025-08-01");
 
         getEpoca(HOST_A, admin, id).andExpect(status().isOk());
 
-        String lista = listarEpocas(HOST_A, admin).andExpect(status().isOk())
-                .andReturn().getResponse().getContentAsString();
+        String lista = listarEpocas(HOST_A, admin).andExpect(status().isOk()).andReturn().getResponse().getContentAsString();
         assertThat(JsonPath.<List<String>>read(lista, "$[*].name"))
                 .contains("Época A", "Época 2025/2026");
 
@@ -92,8 +88,7 @@ class SeasonAgeGroupFlowTest extends FlowTestSupport {
 
         apagarEpoca(HOST_A, admin, id).andExpect(status().isNoContent());
         getEpoca(HOST_A, admin, id).andExpect(status().isNotFound());
-        String depois = listarEpocas(HOST_A, admin).andExpect(status().isOk())
-                .andReturn().getResponse().getContentAsString();
+        String depois = listarEpocas(HOST_A, admin).andExpect(status().isOk()).andReturn().getResponse().getContentAsString();
         assertThat(JsonPath.<List<String>>read(depois, "$[*].name"))
                 .doesNotContain("Época 2025/2026 - atual");
         assertThat(contarAuditoria("SEASON_ANONYMIZED")).isPositive();
@@ -134,13 +129,11 @@ class SeasonAgeGroupFlowTest extends FlowTestSupport {
     void catalogoFederalSoLeitura() throws Exception {
         String admin = acesso(HOST_A, ADMIN);
 
-        String lista = listarEscaloes(HOST_A, admin).andExpect(status().isOk())
-                .andReturn().getResponse().getContentAsString();
+        String lista = listarEscaloes(HOST_A, admin).andExpect(status().isOk()).andReturn().getResponse().getContentAsString();
         assertThat(JsonPath.<List<String>>read(lista, "$[*].name"))
                 .contains("Minis A", "Cadetes", "Seniores", "Veteranos C");
 
-        String cadetes = getEscalao(HOST_A, admin, ESCALAO_A).andExpect(status().isOk())
-                .andReturn().getResponse().getContentAsString();
+        String cadetes = getEscalao(HOST_A, admin, ESCALAO_A).andExpect(status().isOk()).andReturn().getResponse().getContentAsString();
         assertThat((String) JsonPath.read(cadetes, "$.name")).isEqualTo("Cadetes");
         assertThat((Integer) JsonPath.read(cadetes, "$.minAge")).isEqualTo(15);
         assertThat((Integer) JsonPath.read(cadetes, "$.maxAge")).isEqualTo(15);
@@ -168,8 +161,7 @@ class SeasonAgeGroupFlowTest extends FlowTestSupport {
                         .content("""
                                 {"name":"Sub-18 A","seasonId":"%s","ageGroupId":"%s"}
                                 """.formatted(EPOCA_A, ESCALAO_A)))
-                .andExpect(status().isCreated())
-                .andReturn().getResponse().getContentAsString();
+                .andExpect(status().isCreated()).andReturn().getResponse().getContentAsString();
         UUID teamId = UUID.fromString(JsonPath.read(criada, "$.id"));
         assertThat((String) JsonPath.read(criada, "$.seasonId")).isEqualTo(EPOCA_A.toString());
         assertThat((String) JsonPath.read(criada, "$.ageGroupId")).isEqualTo(ESCALAO_A.toString());
@@ -180,8 +172,7 @@ class SeasonAgeGroupFlowTest extends FlowTestSupport {
                         .content("""
                                 {"name":"Sub-18 A","seasonId":"%s","ageGroupId":"%s"}
                                 """.formatted(EPOCA_A, ESCALAO_A)))
-                .andExpect(status().isOk())
-                .andReturn().getResponse().getContentAsString();
+                .andExpect(status().isOk()).andReturn().getResponse().getContentAsString();
         assertThat((String) JsonPath.read(atualizada, "$.seasonId")).isEqualTo(EPOCA_A.toString());
 
         // PUT sem associações limpa os campos.
@@ -191,8 +182,7 @@ class SeasonAgeGroupFlowTest extends FlowTestSupport {
                         .content("""
                                 {"name":"Sub-18 A"}
                                 """))
-                .andExpect(status().isOk())
-                .andReturn().getResponse().getContentAsString();
+                .andExpect(status().isOk()).andReturn().getResponse().getContentAsString();
         assertThat((Object) JsonPath.read(limpa, "$.seasonId")).isNull();
         assertThat((Object) JsonPath.read(limpa, "$.ageGroupId")).isNull();
 
@@ -233,19 +223,15 @@ class SeasonAgeGroupFlowTest extends FlowTestSupport {
                 .andExpect(status().isNotFound());
         apagarEpoca(HOST_A, adminA, EPOCA_B).andExpect(status().isNotFound());
 
-        String listaA = listarEpocas(HOST_A, adminA).andExpect(status().isOk())
-                .andReturn().getResponse().getContentAsString();
+        String listaA = listarEpocas(HOST_A, adminA).andExpect(status().isOk()).andReturn().getResponse().getContentAsString();
         assertThat(JsonPath.<List<String>>read(listaA, "$[*].name")).doesNotContain("Época B");
-        String listaB = listarEpocas(HOST_B, adminB).andExpect(status().isOk())
-                .andReturn().getResponse().getContentAsString();
+        String listaB = listarEpocas(HOST_B, adminB).andExpect(status().isOk()).andReturn().getResponse().getContentAsString();
         assertThat(JsonPath.<List<String>>read(listaB, "$[*].name")).containsExactly("Época B");
 
         // O catálogo de escalões é federal: os dois clubes veem exatamente o mesmo.
         getEscalao(HOST_A, adminA, ESCALAO_B).andExpect(status().isOk());
-        String escaloesA = listarEscaloes(HOST_A, adminA).andExpect(status().isOk())
-                .andReturn().getResponse().getContentAsString();
-        String escaloesB = listarEscaloes(HOST_B, adminB).andExpect(status().isOk())
-                .andReturn().getResponse().getContentAsString();
+        String escaloesA = listarEscaloes(HOST_A, adminA).andExpect(status().isOk()).andReturn().getResponse().getContentAsString();
+        String escaloesB = listarEscaloes(HOST_B, adminB).andExpect(status().isOk()).andReturn().getResponse().getContentAsString();
         assertThat(JsonPath.<List<String>>read(escaloesA, "$[*].name")).contains("Cadetes", "Juvenis");
         assertThat(escaloesB).isEqualTo(escaloesA);
     }
@@ -314,7 +300,5 @@ class SeasonAgeGroupFlowTest extends FlowTestSupport {
             ESCALAO_B = escalao(c, "JUVENIS");
         }
     }
-
-
 
 }

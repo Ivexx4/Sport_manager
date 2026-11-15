@@ -50,10 +50,8 @@ class VenueRepository {
                 + "AND lower(name) = lower(:name)";
         var spec = jdbc.sql(excludeId == null ? sql + ")" : sql + " AND id <> :exclude)")
                 .param("tenant", tenantId).param("name", name);
-        if (excludeId != null) {
-            spec = spec.param("exclude", excludeId);
-        }
-        return spec.query(Boolean.class).single();
+        if (excludeId != null) spec = spec.param("exclude", excludeId);
+        return Db.exists(spec);
     }
 
     void insert(UUID id, UUID tenantId, String name, String address, UUID actorId) {
@@ -91,11 +89,7 @@ class VenueRepository {
     }
 
     private static VenueRow map(java.sql.ResultSet rs, int rowNum) throws java.sql.SQLException {
-        return new VenueRow(
-                rs.getObject("id", UUID.class),
-                rs.getString("name"),
-                rs.getString("address"),
-                Db.instant(rs, "created_at"),
-                Db.instant(rs, "updated_at"));
+        return new VenueRow(Db.uuid(rs, "id"), rs.getString("name"), rs.getString("address"),
+                Db.instant(rs, "created_at"), Db.instant(rs, "updated_at"));
     }
 }

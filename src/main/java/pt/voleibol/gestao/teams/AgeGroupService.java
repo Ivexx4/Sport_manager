@@ -5,7 +5,6 @@ import java.util.List;
 import java.util.Set;
 import java.util.UUID;
 
-import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.server.ResponseStatusException;
@@ -43,7 +42,7 @@ class AgeGroupService {
     // O catálogo é mantido por migrações federativas, não por endpoints do clube.
 
     static ResponseStatusException notFound() {
-        return new ResponseStatusException(HttpStatus.NOT_FOUND, "Escalão não encontrado");
+        return Rules.notFound("Escalão não encontrado");
     }
 
     private static AgeGroupView view(AgeGroupRepository.AgeGroupRow row) {

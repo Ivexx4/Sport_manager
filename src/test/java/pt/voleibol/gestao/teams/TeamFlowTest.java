@@ -3,7 +3,6 @@ package pt.voleibol.gestao.teams;
 import com.jayway.jsonpath.JsonPath;
 
 import java.sql.Connection;
-import java.sql.Date;
 import java.sql.SQLException;
 import java.util.List;
 import java.util.UUID;
@@ -11,7 +10,6 @@ import java.util.UUID;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.http.MediaType;
-import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 import org.springframework.test.web.servlet.ResultActions;
@@ -71,16 +69,14 @@ class TeamFlowTest extends FlowTestSupport {
         String admin = acesso(HOST_A, ADMIN);
 
         String criada = criar(HOST_A, admin, "Sub-18")
-                .andExpect(status().isCreated())
-                .andReturn().getResponse().getContentAsString();
+                .andExpect(status().isCreated()).andReturn().getResponse().getContentAsString();
         UUID id = UUID.fromString(JsonPath.read(criada, "$.id"));
         assertThat((String) JsonPath.read(criada, "$.status")).isEqualTo("ACTIVE");
 
         getEquipa(HOST_A, admin, id).andExpect(status().isOk());
         atualizar(HOST_A, admin, id, "Sub-18 A").andExpect(status().isOk());
 
-        String lista = listar(HOST_A, admin).andExpect(status().isOk())
-                .andReturn().getResponse().getContentAsString();
+        String lista = listar(HOST_A, admin).andExpect(status().isOk()).andReturn().getResponse().getContentAsString();
         assertThat(JsonPath.<List<String>>read(lista, "$[*].name")).contains("Sub-18 A", "Equipa A");
 
         criar(HOST_A, admin, "equipa a").andExpect(status().isConflict());
@@ -104,8 +100,7 @@ class TeamFlowTest extends FlowTestSupport {
         listar(HOST_A, atleta).andExpect(status().isForbidden());
 
         String treinador = acesso(HOST_A, TREINADOR);
-        String lista = listar(HOST_A, treinador).andExpect(status().isOk())
-                .andReturn().getResponse().getContentAsString();
+        String lista = listar(HOST_A, treinador).andExpect(status().isOk()).andReturn().getResponse().getContentAsString();
         assertThat(JsonPath.<List<String>>read(lista, "$[*].name")).containsExactly("Equipa A");
 
         getEquipa(HOST_A, treinador, EQUIPA_A).andExpect(status().isOk());
@@ -240,8 +235,7 @@ class TeamFlowTest extends FlowTestSupport {
         String treinador = acesso(HOST_A, TREINADOR);
 
         String criada = criar(HOST_A, admin, "Equipa Descartavel", EPOCA_A, ESCALAO_A)
-                .andExpect(status().isCreated())
-                .andReturn().getResponse().getContentAsString();
+                .andExpect(status().isCreated()).andReturn().getResponse().getContentAsString();
         UUID id = UUID.fromString(JsonPath.read(criada, "$.id"));
         adicionarStaff(HOST_A, admin, id, id(TREINADOR), "TREINADOR").andExpect(status().isOk());
         adicionarAtleta(HOST_A, admin, id, ATLETA_A).andExpect(status().isOk());
@@ -358,22 +352,13 @@ class TeamFlowTest extends FlowTestSupport {
         }
     }
 
-
     private static void atleta(Connection c, UUID athleteId, UUID tenantId, String nome) throws SQLException {
         atleta(c, athleteId, tenantId, nome, 2010);
     }
 
     private static void atleta(Connection c, UUID athleteId, UUID tenantId, String nome, int birthYear)
             throws SQLException {
-        executar(c, """
-                INSERT INTO athlete (id, tenant_id, full_name, birth_date, gender, status)
-                VALUES (?, ?, ?, ?, 'F', 'ACTIVE')
-                ON CONFLICT (id) DO UPDATE SET full_name = EXCLUDED.full_name,
-                    birth_date = EXCLUDED.birth_date, gender = EXCLUDED.gender,
-                    status = 'ACTIVE', anonymized_at = NULL
-                """, athleteId, tenantId, nome, Date.valueOf(birthYear + "-06-15"));
+        atleta(c, athleteId, tenantId, nome, birthYear + "-06-15", "F", null, null);
     }
-
-
 
 }

@@ -1,7 +1,6 @@
 package pt.voleibol.gestao.tenancy;
 
 import java.sql.Connection;
-import java.sql.PreparedStatement;
 import java.sql.SQLException;
 import java.util.UUID;
 

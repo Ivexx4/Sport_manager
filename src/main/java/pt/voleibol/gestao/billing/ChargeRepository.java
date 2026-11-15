@@ -45,12 +45,8 @@ public class ChargeRepository {
                      )
                     """);
         }
-        if (athleteId != null) {
-            sql.append(" AND athlete_id = :a");
-        }
-        if (status != null) {
-            sql.append(" AND status = :s");
-        }
+        if (athleteId != null) sql.append(" AND athlete_id = :a");
+        if (status != null) sql.append(" AND status = :s");
         sql.append(" ORDER BY due_date, id");
         JdbcClient.StatementSpec spec = jdbc.sql(sql.toString()).param("t", tenantId);
         if (!writer) spec = spec.param("actor", actorId);
@@ -119,9 +115,7 @@ public class ChargeRepository {
         JdbcClient.StatementSpec spec = jdbc.sql(sql.toString()).param("t", tenantId);
         if (seasonId != null) spec = spec.param("season", seasonId);
         if (ageGroupId != null) spec = spec.param("age", ageGroupId);
-        return spec.query((rs, i) -> new Target(
-                rs.getObject("athlete_id", UUID.class),
-                rs.getObject("guardian_id", UUID.class),
+        return spec.query((rs, i) -> new Target(Db.uuid(rs, "athlete_id"), Db.uuid(rs, "guardian_id"),
                 Db.date(rs, "birth_date"))).list();
     }
 
@@ -183,8 +177,8 @@ public class ChargeRepository {
     }
 
     private static Row map(java.sql.ResultSet rs, int n) throws java.sql.SQLException {
-        return new Row(rs.getObject("id", UUID.class), rs.getObject("athlete_id", UUID.class),
-                rs.getObject("guardian_id", UUID.class), rs.getObject("fee_plan_id", UUID.class),
+        return new Row(Db.uuid(rs, "id"), Db.uuid(rs, "athlete_id"),
+                Db.uuid(rs, "guardian_id"), Db.uuid(rs, "fee_plan_id"),
                 rs.getLong("amount_cents"), Db.date(rs, "due_date"),
                 rs.getString("status"), rs.getString("billing_period"),
                 Db.instant(rs, "created_at"),

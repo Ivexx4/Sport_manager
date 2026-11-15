@@ -38,7 +38,7 @@ class AuthRepository {
                         WHERE lower(email) = lower(:email) AND status = 'ACTIVE'
                         """)
                 .param("email", email)
-                .query((rs, i) -> new UserRow(rs.getObject("id", UUID.class), rs.getString("password_hash")))
+                .query((rs, i) -> new UserRow(Db.uuid(rs, "id"), rs.getString("password_hash")))
                 .optional();
     }
 
@@ -69,11 +69,8 @@ class AuthRepository {
                         WHERE token_hash = :hash AND tenant_id = :tenant
                         """)
                 .param("hash", tokenHash).param("tenant", tenantId)
-                .query((rs, i) -> new RefreshRow(
-                        rs.getObject("id", UUID.class),
-                        rs.getObject("user_id", UUID.class),
-                        Db.instant(rs, "created_at"),
-                        Db.instant(rs, "expires_at"),
+                .query((rs, i) -> new RefreshRow(Db.uuid(rs, "id"), Db.uuid(rs, "user_id"),
+                        Db.instant(rs, "created_at"), Db.instant(rs, "expires_at"),
                         rs.getBoolean("revoked")))
                 .optional();
     }

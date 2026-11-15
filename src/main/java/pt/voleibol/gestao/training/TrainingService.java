@@ -5,7 +5,6 @@ import java.util.List;
 import java.util.Set;
 import java.util.UUID;
 
-import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.server.ResponseStatusException;
@@ -59,9 +58,7 @@ class TrainingService {
         UUID tenantId = Rules.tenant();
         Rules.requireManager(roles);
         String normalized = Rules.requiredText(name);
-        if (venues.nameExists(tenantId, normalized, null)) {
-            throw new ResponseStatusException(HttpStatus.CONFLICT, "Já existe um local com este nome");
-        }
+        if (venues.nameExists(tenantId, normalized, null)) throw Rules.conflict("Já existe um local com este nome");
         UUID id = UUID.randomUUID();
         venues.insert(id, tenantId, normalized, address, actorId);
         venues.audit(tenantId, actorId, "VENUE_CREATED", id);
@@ -74,12 +71,8 @@ class TrainingService {
         Rules.requireManager(roles);
         venues.findById(tenantId, id).orElseThrow(TrainingService::venueNotFound);
         String normalized = Rules.requiredText(name);
-        if (venues.nameExists(tenantId, normalized, id)) {
-            throw new ResponseStatusException(HttpStatus.CONFLICT, "Já existe um local com este nome");
-        }
-        if (!venues.update(tenantId, id, normalized, address)) {
-            throw venueNotFound();
-        }
+        if (venues.nameExists(tenantId, normalized, id)) throw Rules.conflict("Já existe um local com este nome");
+        if (!venues.update(tenantId, id, normalized, address)) throw venueNotFound();
         venues.audit(tenantId, actorId, "VENUE_UPDATED", id);
         return venueView(venues.findById(tenantId, id).orElseThrow(TrainingService::venueNotFound));
     }
@@ -88,9 +81,7 @@ class TrainingService {
     void deleteVenue(UUID actorId, Set<String> roles, UUID id) {
         UUID tenantId = Rules.tenant();
         Rules.requireManager(roles);
-        if (!venues.anonymize(tenantId, id)) {
-            throw venueNotFound();
-        }
+        if (!venues.anonymize(tenantId, id)) throw venueNotFound();
         venues.audit(tenantId, actorId, "VENUE_ANONYMIZED", id);
     }
 
@@ -101,12 +92,8 @@ class TrainingService {
         UUID tenantId = Rules.tenant();
         boolean writer = Rules.isManager(roles) || roles.contains("TREINADOR");
         boolean athleteOrGuardian = roles.contains("ATLETA") || roles.contains("ENCARREGADO");
-        if (!writer && !athleteOrGuardian) {
-            throw new ResponseStatusException(HttpStatus.FORBIDDEN);
-        }
-        if (teamId != null) {
-            teamAccess.requireVisible(tenantId, teamId, actorId, roles);
-        }
+        if (!writer && !athleteOrGuardian) throw Rules.forbidden();
+        if (teamId != null) teamAccess.requireVisible(tenantId, teamId, actorId, roles);
         return sessions.list(tenantId, teamId).stream()
                 .filter(s -> teamAccess.visible(tenantId, s.teamId(), actorId, roles))
                 .map(TrainingService::sessionView).toList();
@@ -127,12 +114,8 @@ class TrainingService {
         UUID tenantId = Rules.tenant();
         teamAccess.requireVisible(tenantId, teamId, actorId, roles);
         Rules.requireWritable(roles);
-        if (courtId != null && venues.findById(tenantId, courtId).isEmpty()) {
-            throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Local não encontrado");
-        }
-        if (startTime == null || endTime == null || !endTime.isAfter(startTime)) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Intervalo de tempo inválido");
-        }
+        if (courtId != null && venues.findById(tenantId, courtId).isEmpty()) throw Rules.notFound("Local não encontrado");
+        if (startTime == null || endTime == null || !endTime.isAfter(startTime)) throw Rules.badRequest("Intervalo de tempo inválido");
         UUID id = UUID.randomUUID();
         sessions.insert(id, tenantId, teamId, courtId, startTime, endTime, recurrence, notes,
                 Rules.status(status == null ? "ACTIVE" : status, STATUSES), actorId);
@@ -150,14 +133,10 @@ class TrainingService {
         teamAccess.requireVisible(tenantId, current.teamId(), actorId, roles);
         teamAccess.requireVisible(tenantId, newTeam, actorId, roles);
         Rules.requireWritable(roles);
-        if (courtId != null && venues.findById(tenantId, courtId).isEmpty()) {
-            throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Local não encontrado");
-        }
+        if (courtId != null && venues.findById(tenantId, courtId).isEmpty()) throw Rules.notFound("Local não encontrado");
         Instant s = startTime == null ? current.startTime() : startTime;
         Instant e = endTime == null ? current.endTime() : endTime;
-        if (!e.isAfter(s)) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Intervalo de tempo inválido");
-        }
+        if (!e.isAfter(s)) throw Rules.badRequest("Intervalo de tempo inválido");
         if (!sessions.update(tenantId, id, newTeam, courtId, s, e, recurrence, notes,
                 status == null || status.isBlank() ? current.status() : Rules.status(status, STATUSES))) {
             throw sessionNotFound();
@@ -173,9 +152,7 @@ class TrainingService {
                 .orElseThrow(TrainingService::sessionNotFound);
         teamAccess.requireVisible(tenantId, row.teamId(), actorId, roles);
         Rules.requireWritable(roles);
-        if (!sessions.anonymize(tenantId, id)) {
-            throw sessionNotFound();
-        }
+        if (!sessions.anonymize(tenantId, id)) throw sessionNotFound();
         sessions.audit(tenantId, actorId, "TRAINING_SESSION_ANONYMIZED", id);
     }
 
@@ -200,9 +177,7 @@ class TrainingService {
                 .orElseThrow(TrainingService::sessionNotFound);
         teamAccess.requireVisible(tenantId, row.teamId(), actorId, roles);
         Rules.requireWritable(roles);
-        if (!teamAccess.athleteOnTeam(tenantId, row.teamId(), athleteId)) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Atleta não pertence à equipa");
-        }
+        if (!teamAccess.athleteOnTeam(tenantId, row.teamId(), athleteId)) throw Rules.badRequest("Atleta não pertence à equipa");
         String st = validAttendanceStatus(status == null ? "PRESENT" : status);
         sessions.upsertAttendance(tenantId, sessionId, athleteId, st, justification, actorId);
         sessions.audit(tenantId, actorId, "ATTENDANCE_SET", sessionId);
@@ -215,35 +190,25 @@ class TrainingService {
                 .orElseThrow(TrainingService::sessionNotFound);
         teamAccess.requireVisible(tenantId, row.teamId(), actorId, roles);
         Rules.requireWritable(roles);
-        if (!sessions.deleteAttendance(tenantId, sessionId, athleteId)) {
-            throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Presença não encontrada");
-        }
+        if (!sessions.deleteAttendance(tenantId, sessionId, athleteId)) throw Rules.notFound("Presença não encontrada");
         sessions.audit(tenantId, actorId, "ATTENDANCE_REMOVED", sessionId);
     }
 
     // --- helpers ---
 
-
-
-
     private static String validAttendanceStatus(String status) {
         String normalized = status.trim().toUpperCase(java.util.Locale.ROOT);
-        if (!ATTENDANCE_STATUSES.contains(normalized)) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Estado de presença inválido");
-        }
+        if (!ATTENDANCE_STATUSES.contains(normalized)) throw Rules.badRequest("Estado de presença inválido");
         return normalized;
     }
 
-
-
     private static ResponseStatusException venueNotFound() {
-        return new ResponseStatusException(HttpStatus.NOT_FOUND, "Local não encontrado");
+        return Rules.notFound("Local não encontrado");
     }
 
     private static ResponseStatusException sessionNotFound() {
-        return new ResponseStatusException(HttpStatus.NOT_FOUND, "Sessão de treino não encontrada");
+        return Rules.notFound("Sessão de treino não encontrada");
     }
-
 
     private static VenueView venueView(VenueRepository.VenueRow row) {
         return new VenueView(row.id(), row.name(), row.address(), row.createdAt(), row.updatedAt());

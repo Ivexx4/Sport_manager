@@ -11,7 +11,6 @@ import java.util.UUID;
 import java.util.stream.Collectors;
 
 import org.springframework.beans.factory.annotation.Value;
-import org.springframework.http.HttpStatus;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -31,7 +30,6 @@ class AccountService {
 
     private static final Set<String> ROLES =
             Set.of("ADMIN", "DIRECAO", "FINANCEIRO", "TREINADOR", "ATLETA", "ENCARREGADO");
-    /** Papéis que dão poder de gestão: só um ADMIN os pode atribuir. */
 
     private static final Duration INVITATION_TTL = Duration.ofDays(7);
     private static final Duration RESET_TTL = Duration.ofHours(1);
@@ -58,18 +56,13 @@ class AccountService {
     void invite(UUID inviterId, Set<String> inviterRoles, String email, String name, Set<String> requestedRoles) {
         UUID tenantId = Rules.tenant();
 
-        if (inviterRoles.stream().noneMatch(Rules.MANAGERS::contains)) {
-            throw new ResponseStatusException(HttpStatus.FORBIDDEN);
-        }
+        Rules.requireManager(inviterRoles);
         Set<String> roles = requestedRoles.stream()
                 .map(r -> r.trim().toUpperCase(Locale.ROOT))
                 .collect(Collectors.toCollection(TreeSet::new));
-        if (roles.isEmpty() || !ROLES.containsAll(roles)) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Papel inválido");
-        }
-        if (!inviterRoles.contains("ADMIN") && roles.stream().anyMatch(Rules.MANAGERS::contains)) {
-            throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Só um administrador atribui este papel");
-        }
+        if (roles.isEmpty() || !ROLES.containsAll(roles)) throw Rules.badRequest("Papel inválido");
+        if (!inviterRoles.contains("ADMIN") && roles.stream().anyMatch(Rules.MANAGERS::contains))
+            throw Rules.forbidden("Só um administrador atribui este papel");
 
         String mail = normalizeEmail(email);
         accounts.revokePendingInvitations(tenantId, mail);   // um convite pendente por email
@@ -108,9 +101,7 @@ class AccountService {
         Optional<AccountRepository.UserBasic> existing = accounts.findUserByEmail(invitation.email());
         UUID userId;
         if (existing.isPresent()) {
-            if (!"ACTIVE".equals(existing.get().status())) {
-                throw invalidLink();
-            }
+            if (!"ACTIVE".equals(existing.get().status())) throw invalidLink();
             userId = existing.get().id();
         } else {
             requireValidPassword(password, invitation.email());
@@ -119,9 +110,7 @@ class AccountService {
                     .orElseThrow(AccountService::invalidLink);
         }
 
-        if (!accounts.markInvitationAccepted(tenantId, invitation.id())) {
-            throw invalidLink();
-        }
+        if (!accounts.markInvitationAccepted(tenantId, invitation.id())) throw invalidLink();
         Arrays.stream(invitation.roles().split(","))
                 .forEach(role -> accounts.upsertMembership(tenantId, userId, role, invitation.invitedBy()));
         auth.audit(tenantId, userId, "INVITATION_ACCEPTED");
@@ -139,9 +128,7 @@ class AccountService {
         String mail = normalizeEmail(email);
 
         Optional<AuthRepository.UserRow> user = auth.findActiveUserByEmail(mail);
-        if (user.isEmpty() || auth.findActiveRoles(tenantId, user.get().id()).isEmpty()) {
-            return;
-        }
+        if (user.isEmpty() || auth.findActiveRoles(tenantId, user.get().id()).isEmpty()) return;
         UUID userId = user.get().id();
         if (accounts.countResetTokensSince(tenantId, userId, Instant.now().minus(Duration.ofHours(1)))
                 >= MAX_RESETS_PER_HOUR) {
@@ -195,13 +182,9 @@ class AccountService {
             return false;
         }
         requireValidPassword(newPassword, null);
-        if (newPassword.equals(currentPassword)) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "A nova password tem de ser diferente");
-        }
+        if (newPassword.equals(currentPassword)) throw Rules.badRequest("A nova password tem de ser diferente");
 
-        if (!accounts.setPassword(userId, passwordEncoder.encode(newPassword))) {
-            throw new ResponseStatusException(HttpStatus.FORBIDDEN);
-        }
+        if (!accounts.setPassword(userId, passwordEncoder.encode(newPassword))) throw Rules.forbidden();
         auth.revokeAllForUser(tenantId, userId);
         auth.audit(tenantId, userId, "PASSWORD_CHANGED");
         return true;
@@ -225,19 +208,13 @@ class AccountService {
     void disableMember(UUID actorId, Set<String> actorRoles, UUID targetUserId) {
         UUID tenantId = Rules.tenant();
         Rules.requireManager(actorRoles);
-        if (actorId.equals(targetUserId)) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Não podes desativar a tua própria conta");
-        }
+        if (actorId.equals(targetUserId)) throw Rules.badRequest("Não podes desativar a tua própria conta");
         Set<String> targetRoles = accounts.findRoles(tenantId, targetUserId);
-        if (targetRoles.isEmpty()) {
-            throw new ResponseStatusException(HttpStatus.NOT_FOUND);
-        }
-        if (!actorRoles.contains("ADMIN") && targetRoles.stream().anyMatch(Rules.MANAGERS::contains)) {
-            throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Só um administrador gere membros com este papel");
-        }
-        if (accounts.hasActiveRole(tenantId, targetUserId, "ADMIN") && accounts.countActiveAdmins(tenantId) <= 1) {
-            throw new ResponseStatusException(HttpStatus.CONFLICT, "O clube tem de manter pelo menos um administrador ativo");
-        }
+        if (targetRoles.isEmpty()) throw Rules.notFound();
+        if (!actorRoles.contains("ADMIN") && targetRoles.stream().anyMatch(Rules.MANAGERS::contains))
+            throw Rules.forbidden("Só um administrador gere membros com este papel");
+        if (accounts.hasActiveRole(tenantId, targetUserId, "ADMIN") && accounts.countActiveAdmins(tenantId) <= 1)
+            throw Rules.conflict("O clube tem de manter pelo menos um administrador ativo");
         accounts.disableAllMemberships(tenantId, targetUserId);
         auth.revokeAllForUser(tenantId, targetUserId);
         auth.audit(tenantId, actorId, "MEMBER_DISABLED");
@@ -248,47 +225,30 @@ class AccountService {
         UUID tenantId = Rules.tenant();
         Rules.requireManager(actorRoles);
         String normalized = role == null ? "" : role.trim().toUpperCase(Locale.ROOT);
-        if (!ROLES.contains(normalized)) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Papel inválido");
-        }
-        if (actorId.equals(targetUserId)) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Não podes retirar o teu próprio papel");
-        }
-        if (!actorRoles.contains("ADMIN") && Rules.MANAGERS.contains(normalized)) {
-            throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Só um administrador retira este papel");
-        }
+        if (!ROLES.contains(normalized)) throw Rules.badRequest("Papel inválido");
+        if (actorId.equals(targetUserId)) throw Rules.badRequest("Não podes retirar o teu próprio papel");
+        if (!actorRoles.contains("ADMIN") && Rules.MANAGERS.contains(normalized)) throw Rules.forbidden("Só um administrador retira este papel");
         Set<String> targetRoles = accounts.findRoles(tenantId, targetUserId);
-        if (targetRoles.isEmpty()) {
-            throw new ResponseStatusException(HttpStatus.NOT_FOUND);
-        }
-        if (!actorRoles.contains("ADMIN") && targetRoles.contains("ADMIN")) {
-            throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Só um administrador gere membros com este papel");
-        }
+        if (targetRoles.isEmpty()) throw Rules.notFound();
+        if (!actorRoles.contains("ADMIN") && targetRoles.contains("ADMIN")) throw Rules.forbidden("Só um administrador gere membros com este papel");
         if ("ADMIN".equals(normalized) && accounts.hasActiveRole(tenantId, targetUserId, "ADMIN")
                 && accounts.countActiveAdmins(tenantId) <= 1) {
-            throw new ResponseStatusException(HttpStatus.CONFLICT, "O clube tem de manter pelo menos um administrador ativo");
+            throw Rules.conflict("O clube tem de manter pelo menos um administrador ativo");
         }
-        if (!accounts.removeRole(tenantId, targetUserId, normalized)) {
-            throw new ResponseStatusException(HttpStatus.NOT_FOUND);
-        }
-        if (auth.findActiveRoles(tenantId, targetUserId).isEmpty()) {
-            auth.revokeAllForUser(tenantId, targetUserId);
-        }
+        if (!accounts.removeRole(tenantId, targetUserId, normalized)) throw Rules.notFound();
+        if (auth.findActiveRoles(tenantId, targetUserId).isEmpty()) auth.revokeAllForUser(tenantId, targetUserId);
         auth.audit(tenantId, actorId, "MEMBER_ROLE_REMOVED");
     }
-
 
     // --- auxiliares ---
 
     private static void requireValidPassword(String password, String email) {
         String problem = PasswordPolicy.check(password, email);
-        if (problem != null) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, problem);
-        }
+        if (problem != null) throw Rules.badRequest(problem);
     }
 
     private static ResponseStatusException invalidLink() {
-        return new ResponseStatusException(HttpStatus.BAD_REQUEST, "Link inválido ou expirado");
+        return Rules.badRequest("Link inválido ou expirado");
     }
 
     private static String normalizeEmail(String email) {

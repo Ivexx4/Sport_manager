@@ -3,7 +3,6 @@ package pt.voleibol.gestao.training;
 import com.jayway.jsonpath.JsonPath;
 
 import java.sql.Connection;
-import java.sql.Date;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.SQLException;
@@ -14,7 +13,6 @@ import java.util.UUID;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.http.MediaType;
-import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 import org.springframework.test.web.servlet.ResultActions;
@@ -80,15 +78,13 @@ class TrainingFlowTest extends FlowTestSupport {
         String admin = acesso(HOST_A, ADMIN);
 
         String criado = criarLocal(HOST_A, admin, "{\"name\":\"Pavilhão Novo\",\"address\":\"Rua 1\"}")
-                .andExpect(status().isCreated())
-                .andReturn().getResponse().getContentAsString();
+                .andExpect(status().isCreated()).andReturn().getResponse().getContentAsString();
         UUID id = UUID.fromString(JsonPath.read(criado, "$.id"));
         assertThat((String) JsonPath.read(criado, "$.name")).isEqualTo("Pavilhão Novo");
 
         String detalhe = mvc.perform(get("/api/v1/venues/" + id)
                         .header("Authorization", "Bearer " + admin).with(host(HOST_A)))
-                .andExpect(status().isOk())
-                .andReturn().getResponse().getContentAsString();
+                .andExpect(status().isOk()).andReturn().getResponse().getContentAsString();
         assertThat((String) JsonPath.read(detalhe, "$.address")).isEqualTo("Rua 1");
 
         // O nome é único por clube sem distinguir maiúsculas.
@@ -103,8 +99,7 @@ class TrainingFlowTest extends FlowTestSupport {
 
         String lista = mvc.perform(get("/api/v1/venues")
                         .header("Authorization", "Bearer " + admin).with(host(HOST_A)))
-                .andExpect(status().isOk())
-                .andReturn().getResponse().getContentAsString();
+                .andExpect(status().isOk()).andReturn().getResponse().getContentAsString();
         assertThat(ids(lista)).contains(VENUE_A, id);
 
         mvc.perform(delete("/api/v1/venues/" + id)
@@ -130,14 +125,12 @@ class TrainingFlowTest extends FlowTestSupport {
 
         String criada = criarSessao(HOST_A, admin, EQUIPA_A, VENUE_A,
                 "2027-01-10T10:00:00Z", "2027-01-10T11:00:00Z", "ACTIVE", "Treino de manhã")
-                .andExpect(status().isCreated())
-                .andReturn().getResponse().getContentAsString();
+                .andExpect(status().isCreated()).andReturn().getResponse().getContentAsString();
         UUID id = UUID.fromString(JsonPath.read(criada, "$.id"));
 
         String detalhe = mvc.perform(get("/api/v1/training-sessions/" + id)
                         .header("Authorization", "Bearer " + admin).with(host(HOST_A)))
-                .andExpect(status().isOk())
-                .andReturn().getResponse().getContentAsString();
+                .andExpect(status().isOk()).andReturn().getResponse().getContentAsString();
         assertThat((String) JsonPath.read(detalhe, "$.notes")).isEqualTo("Treino de manhã");
 
         mvc.perform(put("/api/v1/training-sessions/" + id)
@@ -149,8 +142,7 @@ class TrainingFlowTest extends FlowTestSupport {
 
         String porEquipa = mvc.perform(get("/api/v1/training-sessions").param("teamId", EQUIPA_A.toString())
                         .header("Authorization", "Bearer " + admin).with(host(HOST_A)))
-                .andExpect(status().isOk())
-                .andReturn().getResponse().getContentAsString();
+                .andExpect(status().isOk()).andReturn().getResponse().getContentAsString();
         assertThat(ids(porEquipa)).contains(id, SESSAO_A).doesNotContain(SESSAO_OUTRA);
 
         // Presenças: upsert por POST e por PUT, listagem e remoção.
@@ -160,8 +152,7 @@ class TrainingFlowTest extends FlowTestSupport {
                 .andExpect(status().isNoContent());
         String presencas = mvc.perform(get("/api/v1/training-sessions/" + id + "/attendance")
                         .header("Authorization", "Bearer " + admin).with(host(HOST_A)))
-                .andExpect(status().isOk())
-                .andReturn().getResponse().getContentAsString();
+                .andExpect(status().isOk()).andReturn().getResponse().getContentAsString();
         assertThat(JsonPath.<List<String>>read(presencas, "$[*].status")).containsExactly("LATE");
         assertThat(JsonPath.<List<String>>read(presencas, "$[*].justification")).containsExactly("Trânsito");
 
@@ -172,8 +163,7 @@ class TrainingFlowTest extends FlowTestSupport {
                 .andExpect(status().isNoContent());
         String depois = mvc.perform(get("/api/v1/training-sessions/" + id + "/attendance")
                         .header("Authorization", "Bearer " + admin).with(host(HOST_A)))
-                .andExpect(status().isOk())
-                .andReturn().getResponse().getContentAsString();
+                .andExpect(status().isOk()).andReturn().getResponse().getContentAsString();
         assertThat(JsonPath.<List<String>>read(depois, "$[*].status")).containsExactly("ABSENT");
 
         mvc.perform(delete("/api/v1/training-sessions/" + id + "/attendance/" + ATLETA_1)
@@ -225,8 +215,7 @@ class TrainingFlowTest extends FlowTestSupport {
                 .andExpect(status().isNotFound());
         String lista = mvc.perform(get("/api/v1/training-sessions")
                         .header("Authorization", "Bearer " + admin).with(host(HOST_A)))
-                .andExpect(status().isOk())
-                .andReturn().getResponse().getContentAsString();
+                .andExpect(status().isOk()).andReturn().getResponse().getContentAsString();
         assertThat(ids(lista)).doesNotContain(SESSAO_A);
         assertThat(contarAuditoria("TRAINING_SESSION_ANONYMIZED")).isPositive();
     }
@@ -312,8 +301,7 @@ class TrainingFlowTest extends FlowTestSupport {
         String treinador = acesso(HOST_A, TREINADOR);
         String listaTreinador = mvc.perform(get("/api/v1/training-sessions")
                         .header("Authorization", "Bearer " + treinador).with(host(HOST_A)))
-                .andExpect(status().isOk())
-                .andReturn().getResponse().getContentAsString();
+                .andExpect(status().isOk()).andReturn().getResponse().getContentAsString();
         assertThat(ids(listaTreinador)).containsExactly(SESSAO_A);
         mvc.perform(get("/api/v1/training-sessions/" + SESSAO_OUTRA)
                         .header("Authorization", "Bearer " + treinador).with(host(HOST_A)))
@@ -332,8 +320,7 @@ class TrainingFlowTest extends FlowTestSupport {
         for (String utilizador : List.of(acesso(HOST_A, ATLETA_USER), acesso(HOST_A, ENCARREGADO))) {
             String lista = mvc.perform(get("/api/v1/training-sessions")
                             .header("Authorization", "Bearer " + utilizador).with(host(HOST_A)))
-                    .andExpect(status().isOk())
-                    .andReturn().getResponse().getContentAsString();
+                    .andExpect(status().isOk()).andReturn().getResponse().getContentAsString();
             assertThat(ids(lista)).contains(SESSAO_A).doesNotContain(SESSAO_OUTRA);
             mvc.perform(get("/api/v1/training-sessions/" + SESSAO_A)
                             .header("Authorization", "Bearer " + utilizador).with(host(HOST_A)))
@@ -498,21 +485,6 @@ class TrainingFlowTest extends FlowTestSupport {
     private static void limpar(Connection c) throws SQLException {
         limpar(c, CLUBE_A, CLUBE_B, "attendance", "training_session", "venue");
     }
-
-
-    private static void atleta(Connection c, UUID athleteId, UUID tenantId, String nome, String nascimento,
-                               String genero, String licenca, UUID userId) throws SQLException {
-        executar(c, """
-                INSERT INTO athlete (id, tenant_id, full_name, birth_date, gender, license_number, status, user_id)
-                VALUES (?, ?, ?, ?, ?, ?, 'ACTIVE', ?)
-                ON CONFLICT (id) DO UPDATE SET full_name = EXCLUDED.full_name,
-                    birth_date = EXCLUDED.birth_date, gender = EXCLUDED.gender,
-                    license_number = EXCLUDED.license_number, status = 'ACTIVE',
-                    user_id = EXCLUDED.user_id, anonymized_at = NULL
-                """, athleteId, tenantId, nome, Date.valueOf(nascimento), genero, licenca, userId);
-    }
-
-
 
     private static void sessao(Connection c, UUID sessionId, UUID tenantId, UUID teamId, UUID courtId,
                                String inicio) throws SQLException {

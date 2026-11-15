@@ -109,9 +109,7 @@ class MatchRepository {
                         ORDER BY set_number
                         """)
                 .param("tenant", tenantId).param("match", matchId)
-                .query((rs, i) -> new SetScoreRow(
-                        rs.getInt("set_number"),
-                        rs.getInt("our_points"),
+                .query((rs, i) -> new SetScoreRow(rs.getInt("set_number"), rs.getInt("our_points"),
                         rs.getInt("opponent_points")))
                 .list();
     }
@@ -149,25 +147,19 @@ class MatchRepository {
                         ORDER BY a.full_name, a.id
                         """)
                 .param("tenant", tenantId).param("match", matchId)
-                .query((rs, i) -> new CallUpRow(
-                        rs.getObject("athlete_id", UUID.class),
-                        rs.getString("full_name"),
-                        rs.getString("status"),
-                        rs.getString("response"),
-                        rs.getObject("responded_at", OffsetDateTime.class) == null ? null
-                                : Db.instant(rs, "responded_at")))
+                .query((rs, i) -> new CallUpRow(Db.uuid(rs, "athlete_id"), rs.getString("full_name"),
+                        rs.getString("status"), rs.getString("response"),
+                        rs.getObject("responded_at", OffsetDateTime.class) == null ? null : Db.instant(rs, "responded_at")))
                 .list();
     }
 
     boolean callUpExists(UUID tenantId, UUID matchId, UUID athleteId) {
-        return jdbc.sql("""
+        return Db.exists(jdbc.sql("""
                         SELECT EXISTS (
                             SELECT 1 FROM call_up
                             WHERE tenant_id = :tenant AND match_id = :match AND athlete_id = :athlete)
                         """)
-                .param("tenant", tenantId).param("match", matchId).param("athlete", athleteId)
-                .query(Boolean.class)
-                .single();
+                .param("tenant", tenantId).param("match", matchId).param("athlete", athleteId));
     }
 
     void insertCallUp(UUID tenantId, UUID matchId, UUID athleteId, UUID actorId) {
@@ -206,13 +198,10 @@ class MatchRepository {
 
     boolean venueExists(UUID tenantId, UUID venueId) {
         if (venueId == null) return true;
-        Boolean exists = jdbc.sql("""
+        return Db.exists(jdbc.sql("""
                         SELECT EXISTS (SELECT 1 FROM venue WHERE tenant_id = :tenant AND id = :id AND anonymized_at IS NULL)
                         """)
-                .param("tenant", tenantId).param("id", venueId)
-                .query(Boolean.class)
-                .single();
-        return Boolean.TRUE.equals(exists);
+                .param("tenant", tenantId).param("id", venueId));
     }
 
     void audit(UUID tenantId, UUID actorId, String action, UUID entityId) {
@@ -220,17 +209,9 @@ class MatchRepository {
     }
 
     private static MatchRow mapMatch(java.sql.ResultSet rs, int rowNum) throws java.sql.SQLException {
-        return new MatchRow(
-                rs.getObject("id", UUID.class),
-                rs.getObject("team_id", UUID.class),
-                rs.getString("competition"),
-                rs.getString("opponent"),
-                rs.getString("location"),
-                rs.getObject("court_id", UUID.class),
-                Db.instant(rs, "match_date"),
-                rs.getBoolean("is_home"),
-                rs.getString("status"),
-                Db.instant(rs, "created_at"),
-                Db.instant(rs, "updated_at"));
+        return new MatchRow(Db.uuid(rs, "id"), Db.uuid(rs, "team_id"), rs.getString("competition"),
+                rs.getString("opponent"), rs.getString("location"), Db.uuid(rs, "court_id"),
+                Db.instant(rs, "match_date"), rs.getBoolean("is_home"), rs.getString("status"),
+                Db.instant(rs, "created_at"), Db.instant(rs, "updated_at"));
     }
 }

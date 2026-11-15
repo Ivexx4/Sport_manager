@@ -37,7 +37,7 @@ class PaymentRepository {
     }
 
     private static Row map(java.sql.ResultSet rs, int n) throws java.sql.SQLException {
-        return new Row(rs.getObject("id", UUID.class), rs.getObject("charge_id", UUID.class),
+        return new Row(Db.uuid(rs, "id"), Db.uuid(rs, "charge_id"),
                 rs.getString("method"), rs.getLong("amount_cents"), rs.getString("reference"),
                 Db.instant(rs, "paid_at"));
     }

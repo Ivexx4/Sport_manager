@@ -58,20 +58,17 @@ class SeasonService {
         String normalizedName = Rules.requiredText(name);
         requireValidPeriod(startDate, endDate);
         cutoffDate = defaultCutoff(cutoffDate);
-        if (seasons.nameExists(tenantId, normalizedName, null)) {
-            throw new ResponseStatusException(HttpStatus.CONFLICT, "Já existe uma época com este nome");
-        }
+        if (seasons.nameExists(tenantId, normalizedName, null)) throw Rules.conflict("Já existe uma época com este nome");
         UUID id = UUID.randomUUID();
         try {
             seasons.insert(id, tenantId, new SeasonRepository.Data(normalizedName, startDate, endDate, cutoffDate,
                     isActive == null || isActive), actorId);
         } catch (DuplicateKeyException e) {
-            throw new ResponseStatusException(HttpStatus.CONFLICT, "Já existe uma época com este nome");
+            throw Rules.conflict("Já existe uma época com este nome");
         }
         seasons.audit(tenantId, actorId, "SEASON_CREATED", id);
         return view(seasons.findById(tenantId, id).orElseThrow(SeasonService::notFound));
     }
-
 
     @Transactional
     SeasonView update(UUID actorId, Set<String> roles, UUID seasonId, String name,
@@ -89,16 +86,14 @@ class SeasonService {
         String normalizedName = Rules.requiredText(name);
         requireValidPeriod(startDate, endDate);
         cutoffDate = defaultCutoff(cutoffDate);
-        if (seasons.nameExists(tenantId, normalizedName, seasonId)) {
-            throw new ResponseStatusException(HttpStatus.CONFLICT, "Já existe uma época com este nome");
-        }
+        if (seasons.nameExists(tenantId, normalizedName, seasonId)) throw Rules.conflict("Já existe uma época com este nome");
         try {
             if (!seasons.update(tenantId, seasonId, new SeasonRepository.Data(normalizedName, startDate, endDate,
                     cutoffDate, isActive == null ? current.isActive() : isActive))) {
                 throw notFound();
             }
         } catch (DuplicateKeyException e) {
-            throw new ResponseStatusException(HttpStatus.CONFLICT, "Já existe uma época com este nome");
+            throw Rules.conflict("Já existe uma época com este nome");
         }
         seasons.audit(tenantId, actorId, "SEASON_UPDATED", seasonId);
         return view(seasons.findById(tenantId, seasonId).orElseThrow(SeasonService::notFound));
@@ -110,9 +105,7 @@ class SeasonService {
         Rules.requireManager(roles);
         // Remoção não destrutiva: marca a época como não ativa e anonimiza, preservando as equipas
         // associadas para histórico.
-        if (!seasons.anonymize(tenantId, seasonId)) {
-            throw notFound();
-        }
+        if (!seasons.anonymize(tenantId, seasonId)) throw notFound();
         seasons.audit(tenantId, actorId, "SEASON_ANONYMIZED", seasonId);
     }
 
@@ -130,7 +123,7 @@ class SeasonService {
     }
 
     static ResponseStatusException notFound() {
-        return new ResponseStatusException(HttpStatus.NOT_FOUND, "Época não encontrada");
+        return Rules.notFound("Época não encontrada");
     }
 
     private static SeasonView view(SeasonRepository.SeasonRow row) {

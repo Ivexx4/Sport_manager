@@ -3,10 +3,8 @@ package pt.voleibol.gestao.teams;
 import java.util.Set;
 import java.util.UUID;
 
-import org.springframework.http.HttpStatus;
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.stereotype.Component;
-import org.springframework.web.server.ResponseStatusException;
 
 import pt.voleibol.gestao.shared.Db;
 import pt.voleibol.gestao.shared.Rules;
@@ -71,15 +69,9 @@ public class TeamAccess {
 
     /** Gestores veem todas; o treinador as suas; atleta/encarregado as que têm o atleta ligado. */
     public boolean visible(UUID tenantId, UUID teamId, UUID actorId, Set<String> roles) {
-        if (Rules.isManager(roles)) {
-            return exists(tenantId, teamId);
-        }
-        if (roles.contains("TREINADOR")) {
-            return visibleToStaff(tenantId, teamId, actorId);
-        }
-        if (roles.contains("ATLETA") || roles.contains("ENCARREGADO")) {
-            return hasAthleteLinked(tenantId, teamId, actorId);
-        }
+        if (Rules.isManager(roles)) return exists(tenantId, teamId);
+        if (roles.contains("TREINADOR")) return visibleToStaff(tenantId, teamId, actorId);
+        if (roles.contains("ATLETA") || roles.contains("ENCARREGADO")) return hasAthleteLinked(tenantId, teamId, actorId);
         return false;
     }
 
@@ -88,13 +80,11 @@ public class TeamAccess {
      * mas está fora do alcance do ator.
      */
     public void requireVisible(UUID tenantId, UUID teamId, UUID actorId, Set<String> roles) {
-        if (visible(tenantId, teamId, actorId, roles)) {
-            return;
-        }
+        if (visible(tenantId, teamId, actorId, roles)) return;
         if (Rules.isManager(roles) || roles.contains("TREINADOR")
                 || roles.contains("ATLETA") || roles.contains("ENCARREGADO")) {
-            throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Equipa não encontrada");
+            throw Rules.notFound("Equipa não encontrada");
         }
-        throw new ResponseStatusException(HttpStatus.FORBIDDEN);
+        throw Rules.forbidden();
     }
 }

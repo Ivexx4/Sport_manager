@@ -21,9 +21,9 @@ import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
-import org.springframework.web.server.ResponseStatusException;
 
 import pt.voleibol.gestao.shared.Auth;
+import pt.voleibol.gestao.shared.Rules;
 
 @RestController
 @RequestMapping("/api/v1")
@@ -86,9 +86,8 @@ class AccountController {
     @PostMapping("/auth/password/change")
     ResponseEntity<Void> changePassword(@AuthenticationPrincipal Jwt jwt,
                                         @Valid @RequestBody ChangePasswordRequest request) {
-        if (!accountService.changePassword(Auth.actor(jwt), request.currentPassword(), request.newPassword())) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Password atual incorreta");
-        }
+        if (!accountService.changePassword(Auth.actor(jwt), request.currentPassword(), request.newPassword()))
+            throw Rules.badRequest("Password atual incorreta");
         return ResponseEntity.noContent().build();
     }
 

@@ -96,13 +96,9 @@ class DocumentRepository {
                                OR d.expiry_notified_at < (now() - interval '7 days'))
                         """)
                 .param("t", tenantId).param("days", days)
-                .query((rs, i) -> new ExpiringRow(
-                        rs.getObject("id", UUID.class),
-                        rs.getObject("athlete_id", UUID.class),
-                        rs.getString("full_name"),
-                        rs.getString("email"),
-                        rs.getString("type"),
-                        Db.date(rs, "valid_until")))
+                .query((rs, i) -> new ExpiringRow(Db.uuid(rs, "id"), Db.uuid(rs, "athlete_id"),
+                        rs.getString("full_name"), rs.getString("email"),
+                        rs.getString("type"), Db.date(rs, "valid_until")))
                 .list();
     }
 
@@ -117,13 +113,10 @@ class DocumentRepository {
     }
 
     boolean athleteExists(UUID tenantId, UUID athleteId) {
-        Boolean exists = jdbc.sql("""
+        return Db.exists(jdbc.sql("""
                         SELECT EXISTS (SELECT 1 FROM athlete WHERE tenant_id = :tenant AND id = :id AND anonymized_at IS NULL)
                         """)
-                .param("tenant", tenantId).param("id", athleteId)
-                .query(Boolean.class)
-                .single();
-        return Boolean.TRUE.equals(exists);
+                .param("tenant", tenantId).param("id", athleteId));
     }
 
     void audit(UUID tenantId, UUID actorId, String action, UUID entityId) {
@@ -131,14 +124,8 @@ class DocumentRepository {
     }
 
     private static DocumentRow map(java.sql.ResultSet rs, int rowNum) throws java.sql.SQLException {
-        return new DocumentRow(
-                rs.getObject("id", UUID.class),
-                rs.getObject("athlete_id", UUID.class),
-                rs.getString("type"),
-                rs.getString("file_name"),
-                rs.getString("file_url"),
-                Db.date(rs, "valid_until"),
-                Db.instant(rs, "created_at"),
-                Db.instant(rs, "updated_at"));
+        return new DocumentRow(Db.uuid(rs, "id"), Db.uuid(rs, "athlete_id"), rs.getString("type"),
+                rs.getString("file_name"), rs.getString("file_url"), Db.date(rs, "valid_until"),
+                Db.instant(rs, "created_at"), Db.instant(rs, "updated_at"));
     }
 }

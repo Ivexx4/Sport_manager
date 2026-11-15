@@ -90,8 +90,7 @@ class BillingFlowTest extends FlowTestSupport {
 
         String plano = criarPlano(HOST_A, admin,
                 "{\"name\":\"Inscrição\",\"amountCents\":2500,\"periodicity\":\"ONE_TIME\"}")
-                .andExpect(status().isCreated())
-                .andReturn().getResponse().getContentAsString();
+                .andExpect(status().isCreated()).andReturn().getResponse().getContentAsString();
         UUID planoId = UUID.fromString(JsonPath.read(plano, "$.id"));
         assertThat((Integer) JsonPath.read(plano, "$.amountCents")).isEqualTo(2500);
 
@@ -100,14 +99,12 @@ class BillingFlowTest extends FlowTestSupport {
                 .andExpect(status().isConflict());
         String planos = mvc.perform(get("/api/v1/fee-plans")
                         .header("Authorization", "Bearer " + admin).with(host(HOST_A)))
-                .andExpect(status().isOk())
-                .andReturn().getResponse().getContentAsString();
+                .andExpect(status().isOk()).andReturn().getResponse().getContentAsString();
         assertThat(ids(planos)).contains(PLANO_A, planoId);
 
         String cobranca = criarCobranca(HOST_A, admin, ATLETA_1, null, PLANO_A, 7500,
                 "\"2026-03-01\"", null)
-                .andExpect(status().isCreated())
-                .andReturn().getResponse().getContentAsString();
+                .andExpect(status().isCreated()).andReturn().getResponse().getContentAsString();
         UUID cobrancaId = UUID.fromString(JsonPath.read(cobranca, "$.id"));
         assertThat((String) JsonPath.read(cobranca, "$.status")).isEqualTo("PENDING");
         assertThat((Integer) JsonPath.read(cobranca, "$.amountCents")).isEqualTo(7500);
@@ -119,8 +116,7 @@ class BillingFlowTest extends FlowTestSupport {
                 .andExpect(status().isNoContent());
         String pagas = mvc.perform(get("/api/v1/charges").param("status", "PAID")
                         .header("Authorization", "Bearer " + admin).with(host(HOST_A)))
-                .andExpect(status().isOk())
-                .andReturn().getResponse().getContentAsString();
+                .andExpect(status().isOk()).andReturn().getResponse().getContentAsString();
         assertThat(ids(pagas)).contains(cobrancaId).doesNotContain(COBRANCA_A);
 
         String pagamento = mvc.perform(post("/api/v1/payments")
@@ -128,13 +124,11 @@ class BillingFlowTest extends FlowTestSupport {
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("{\"chargeId\":\"" + cobrancaId
                                 + "\",\"amountCents\":7500,\"method\":\"MBWAY\",\"reference\":\"REF-1\"}"))
-                .andExpect(status().isCreated())
-                .andReturn().getResponse().getContentAsString();
+                .andExpect(status().isCreated()).andReturn().getResponse().getContentAsString();
         assertThat((String) JsonPath.read(pagamento, "$.reference")).isEqualTo("REF-1");
         String pagamentos = mvc.perform(get("/api/v1/charges/" + cobrancaId + "/payments")
                         .header("Authorization", "Bearer " + admin).with(host(HOST_A)))
-                .andExpect(status().isOk())
-                .andReturn().getResponse().getContentAsString();
+                .andExpect(status().isOk()).andReturn().getResponse().getContentAsString();
         assertThat(JsonPath.<List<String>>read(pagamentos, "$[*].reference")).containsExactly("REF-1");
 
         String lancamento = mvc.perform(post("/api/v1/ledger-entries")
@@ -142,13 +136,11 @@ class BillingFlowTest extends FlowTestSupport {
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("{\"type\":\"INCOME\",\"category\":\"Quotas\",\"amountCents\":7500,"
                                 + "\"entryDate\":\"2026-03-01\",\"description\":\"Quota de março\"}"))
-                .andExpect(status().isCreated())
-                .andReturn().getResponse().getContentAsString();
+                .andExpect(status().isCreated()).andReturn().getResponse().getContentAsString();
         UUID lancamentoId = UUID.fromString(JsonPath.read(lancamento, "$.id"));
         String lancamentos = mvc.perform(get("/api/v1/ledger-entries")
                         .header("Authorization", "Bearer " + admin).with(host(HOST_A)))
-                .andExpect(status().isOk())
-                .andReturn().getResponse().getContentAsString();
+                .andExpect(status().isOk()).andReturn().getResponse().getContentAsString();
         assertThat(ids(lancamentos)).contains(LANCAMENTO_A, lancamentoId);
 
         mvc.perform(delete("/api/v1/charges/" + cobrancaId)
@@ -159,8 +151,7 @@ class BillingFlowTest extends FlowTestSupport {
                 .andExpect(status().isNotFound());
         String depois = mvc.perform(get("/api/v1/charges")
                         .header("Authorization", "Bearer " + admin).with(host(HOST_A)))
-                .andExpect(status().isOk())
-                .andReturn().getResponse().getContentAsString();
+                .andExpect(status().isOk()).andReturn().getResponse().getContentAsString();
         assertThat(ids(depois)).contains(COBRANCA_A, COBRANCA_OUTRA).doesNotContain(cobrancaId);
         assertThat(contar("SELECT count(*) FROM payment WHERE charge_id = ?", cobrancaId)).isEqualTo(1);
 
@@ -195,13 +186,11 @@ class BillingFlowTest extends FlowTestSupport {
 
         UUID planoMensal = UUID.fromString(JsonPath.read(criarPlano(HOST_A, admin,
                         "{\"name\":\"Quota 2026\",\"amountCents\":3000}")
-                .andExpect(status().isCreated())
-                .andReturn().getResponse().getContentAsString(), "$.id"));
+                .andExpect(status().isCreated()).andReturn().getResponse().getContentAsString(), "$.id"));
 
         String gerado = gerar(HOST_A, admin,
                 "{\"period\":\"2026-03\",\"feePlanId\":\"" + planoMensal + "\"}")
-                .andExpect(status().isOk())
-                .andReturn().getResponse().getContentAsString();
+                .andExpect(status().isOk()).andReturn().getResponse().getContentAsString();
         assertThat((String) JsonPath.read(gerado, "$.period")).isEqualTo("2026-03");
         assertThat((Integer) JsonPath.read(gerado, "$.created")).isEqualTo(2);
         assertThat((Integer) JsonPath.read(gerado, "$.skipped")).isZero();
@@ -220,8 +209,7 @@ class BillingFlowTest extends FlowTestSupport {
         // Repetir o mesmo período não duplica: conta como ignoradas.
         String repetido = gerar(HOST_A, admin,
                 "{\"period\":\"2026-03\",\"feePlanId\":\"" + planoMensal + "\"}")
-                .andExpect(status().isOk())
-                .andReturn().getResponse().getContentAsString();
+                .andExpect(status().isOk()).andReturn().getResponse().getContentAsString();
         assertThat((Integer) JsonPath.read(repetido, "$.created")).isZero();
         assertThat((Integer) JsonPath.read(repetido, "$.skipped")).isEqualTo(2);
         assertThat(contar("SELECT count(*) FROM charge WHERE fee_plan_id = ? AND billing_period = '2026-03'",
@@ -230,8 +218,7 @@ class BillingFlowTest extends FlowTestSupport {
         // dryRun calcula o que faria sem escrever.
         String simulado = gerar(HOST_A, admin,
                 "{\"period\":\"2026-04\",\"feePlanId\":\"" + planoMensal + "\",\"dryRun\":true}")
-                .andExpect(status().isOk())
-                .andReturn().getResponse().getContentAsString();
+                .andExpect(status().isOk()).andReturn().getResponse().getContentAsString();
         assertThat((Integer) JsonPath.read(simulado, "$.created")).isEqualTo(2);
         assertThat(contar("SELECT count(*) FROM charge WHERE fee_plan_id = ? AND billing_period = '2026-04'",
                 planoMensal)).isZero();
@@ -239,12 +226,10 @@ class BillingFlowTest extends FlowTestSupport {
         // O filtro por escalão só abrange os atletas desse escalão.
         UUID planoEscalao = UUID.fromString(JsonPath.read(criarPlano(HOST_A, admin,
                         "{\"name\":\"Quota Sub-16\",\"amountCents\":2500,\"ageGroupId\":\"" + ESCALAO_A + "\"}")
-                .andExpect(status().isCreated())
-                .andReturn().getResponse().getContentAsString(), "$.id"));
+                .andExpect(status().isCreated()).andReturn().getResponse().getContentAsString(), "$.id"));
         String porEscalao = gerar(HOST_A, admin,
                 "{\"period\":\"2026-05\",\"feePlanId\":\"" + planoEscalao + "\"}")
-                .andExpect(status().isOk())
-                .andReturn().getResponse().getContentAsString();
+                .andExpect(status().isOk()).andReturn().getResponse().getContentAsString();
         assertThat((Integer) JsonPath.read(porEscalao, "$.created")).isEqualTo(1);
         assertThat(contar("SELECT count(*) FROM charge WHERE fee_plan_id = ? AND athlete_id = ?",
                 planoEscalao, ATLETA_1)).isEqualTo(1);
@@ -254,28 +239,23 @@ class BillingFlowTest extends FlowTestSupport {
         // Planos de pagamento único não geram cobranças automáticas.
         UUID planoUnico = UUID.fromString(JsonPath.read(criarPlano(HOST_A, admin,
                         "{\"name\":\"Seguro anual\",\"amountCents\":1500,\"periodicity\":\"ONE_TIME\"}")
-                .andExpect(status().isCreated())
-                .andReturn().getResponse().getContentAsString(), "$.id"));
+                .andExpect(status().isCreated()).andReturn().getResponse().getContentAsString(), "$.id"));
         String unico = gerar(HOST_A, admin,
                 "{\"period\":\"2026-06\",\"feePlanId\":\"" + planoUnico + "\"}")
-                .andExpect(status().isOk())
-                .andReturn().getResponse().getContentAsString();
+                .andExpect(status().isOk()).andReturn().getResponse().getContentAsString();
         assertThat((Integer) JsonPath.read(unico, "$.created")).isZero();
 
         // Trimestral: só no mês que abre o trimestre, com período canónico e vencimento a 10.
         UUID planoTrimestral = UUID.fromString(JsonPath.read(criarPlano(HOST_A, admin,
                         "{\"name\":\"Quota trimestral\",\"amountCents\":9000,\"periodicity\":\"QUARTERLY\"}")
-                .andExpect(status().isCreated())
-                .andReturn().getResponse().getContentAsString(), "$.id"));
+                .andExpect(status().isCreated()).andReturn().getResponse().getContentAsString(), "$.id"));
         String foraDoTrimestre = gerar(HOST_A, admin,
                 "{\"period\":\"2026-02\",\"feePlanId\":\"" + planoTrimestral + "\"}")
-                .andExpect(status().isOk())
-                .andReturn().getResponse().getContentAsString();
+                .andExpect(status().isOk()).andReturn().getResponse().getContentAsString();
         assertThat((Integer) JsonPath.read(foraDoTrimestre, "$.created")).isZero();
         String trimestre = gerar(HOST_A, admin,
                 "{\"period\":\"2026-04\",\"feePlanId\":\"" + planoTrimestral + "\"}")
-                .andExpect(status().isOk())
-                .andReturn().getResponse().getContentAsString();
+                .andExpect(status().isOk()).andReturn().getResponse().getContentAsString();
         assertThat((Integer) JsonPath.read(trimestre, "$.created")).isEqualTo(2);
         assertThat(contar("SELECT count(*) FROM charge WHERE fee_plan_id = ? AND billing_period = '2026-Q2'",
                 planoTrimestral)).isEqualTo(2);
@@ -467,13 +447,11 @@ class BillingFlowTest extends FlowTestSupport {
         String atleta = acesso(HOST_A, ATLETA_USER);
         String cobrancasAtleta = mvc.perform(get("/api/v1/charges")
                         .header("Authorization", "Bearer " + atleta).with(host(HOST_A)))
-                .andExpect(status().isOk())
-                .andReturn().getResponse().getContentAsString();
+                .andExpect(status().isOk()).andReturn().getResponse().getContentAsString();
         assertThat(ids(cobrancasAtleta)).containsExactly(COBRANCA_A);
         String outras = mvc.perform(get("/api/v1/charges").param("athleteId", ATLETA_2.toString())
                         .header("Authorization", "Bearer " + atleta).with(host(HOST_A)))
-                .andExpect(status().isOk())
-                .andReturn().getResponse().getContentAsString();
+                .andExpect(status().isOk()).andReturn().getResponse().getContentAsString();
         assertThat(ids(outras)).isEmpty();
         criarPlano(HOST_A, atleta, "{\"name\":\"Plano do Atleta\",\"amountCents\":1000}")
                 .andExpect(status().isForbidden());
@@ -490,8 +468,7 @@ class BillingFlowTest extends FlowTestSupport {
         String encarregado = acesso(HOST_A, ENCARREGADO);
         String cobrancasEncarregado = mvc.perform(get("/api/v1/charges")
                         .header("Authorization", "Bearer " + encarregado).with(host(HOST_A)))
-                .andExpect(status().isOk())
-                .andReturn().getResponse().getContentAsString();
+                .andExpect(status().isOk()).andReturn().getResponse().getContentAsString();
         assertThat(ids(cobrancasEncarregado)).containsExactly(COBRANCA_A);
         criarCobranca(HOST_A, encarregado, ATLETA_1, null, null, 1000, "\"2026-04-01\"", null)
                 .andExpect(status().isForbidden());
@@ -506,18 +483,15 @@ class BillingFlowTest extends FlowTestSupport {
 
         String cobrancasA = mvc.perform(get("/api/v1/charges")
                         .header("Authorization", "Bearer " + adminA).with(host(HOST_A)))
-                .andExpect(status().isOk())
-                .andReturn().getResponse().getContentAsString();
+                .andExpect(status().isOk()).andReturn().getResponse().getContentAsString();
         assertThat(ids(cobrancasA)).contains(COBRANCA_A, COBRANCA_OUTRA).doesNotContain(COBRANCA_B);
         String planosA = mvc.perform(get("/api/v1/fee-plans")
                         .header("Authorization", "Bearer " + adminA).with(host(HOST_A)))
-                .andExpect(status().isOk())
-                .andReturn().getResponse().getContentAsString();
+                .andExpect(status().isOk()).andReturn().getResponse().getContentAsString();
         assertThat(ids(planosA)).contains(PLANO_A).doesNotContain(PLANO_B);
         String lancamentosA = mvc.perform(get("/api/v1/ledger-entries")
                         .header("Authorization", "Bearer " + adminA).with(host(HOST_A)))
-                .andExpect(status().isOk())
-                .andReturn().getResponse().getContentAsString();
+                .andExpect(status().isOk()).andReturn().getResponse().getContentAsString();
         assertThat(ids(lancamentosA)).contains(LANCAMENTO_A).doesNotContain(LANCAMENTO_B);
 
         mvc.perform(patch("/api/v1/charges/" + COBRANCA_B + "/status")
@@ -547,18 +521,15 @@ class BillingFlowTest extends FlowTestSupport {
 
         String cobrancasB = mvc.perform(get("/api/v1/charges")
                         .header("Authorization", "Bearer " + adminB).with(host(HOST_B)))
-                .andExpect(status().isOk())
-                .andReturn().getResponse().getContentAsString();
+                .andExpect(status().isOk()).andReturn().getResponse().getContentAsString();
         assertThat(ids(cobrancasB)).containsExactly(COBRANCA_B);
         String planosB = mvc.perform(get("/api/v1/fee-plans")
                         .header("Authorization", "Bearer " + adminB).with(host(HOST_B)))
-                .andExpect(status().isOk())
-                .andReturn().getResponse().getContentAsString();
+                .andExpect(status().isOk()).andReturn().getResponse().getContentAsString();
         assertThat(ids(planosB)).containsExactly(PLANO_B);
         String lancamentosB = mvc.perform(get("/api/v1/ledger-entries")
                         .header("Authorization", "Bearer " + adminB).with(host(HOST_B)))
-                .andExpect(status().isOk())
-                .andReturn().getResponse().getContentAsString();
+                .andExpect(status().isOk()).andReturn().getResponse().getContentAsString();
         assertThat(ids(lancamentosB)).containsExactly(LANCAMENTO_B);
     }
 
@@ -654,16 +625,9 @@ class BillingFlowTest extends FlowTestSupport {
         limpar(c, CLUBE_A, CLUBE_B, "payment", "charge", "ledger_entry", "fee_plan");
     }
 
-
     private static void atleta(Connection c, UUID athleteId, UUID tenantId, String nome, String licenca,
                                UUID userId) throws SQLException {
-        executar(c, """
-                INSERT INTO athlete (id, tenant_id, full_name, birth_date, gender, license_number, status, user_id)
-                VALUES (?, ?, ?, ?, 'F', ?, 'ACTIVE', ?)
-                ON CONFLICT (id) DO UPDATE SET full_name = EXCLUDED.full_name,
-                    birth_date = EXCLUDED.birth_date, license_number = EXCLUDED.license_number,
-                    status = 'ACTIVE', user_id = EXCLUDED.user_id, anonymized_at = NULL
-                """, athleteId, tenantId, nome, Date.valueOf(LocalDate.now().minusYears(12)), licenca, userId);
+        atleta(c, athleteId, tenantId, nome, LocalDate.now().minusYears(12).toString(), "F", licenca, userId);
     }
 
     private static void epocaSimples(Connection c, UUID seasonId, UUID tenantId, String nome) throws SQLException {
@@ -672,7 +636,6 @@ class BillingFlowTest extends FlowTestSupport {
                 ON CONFLICT (id) DO UPDATE SET name = EXCLUDED.name, anonymized_at = NULL
                 """, seasonId, tenantId, nome);
     }
-
 
     private static void plano(Connection c, UUID planId, UUID tenantId, String nome, long amountCents)
             throws SQLException {

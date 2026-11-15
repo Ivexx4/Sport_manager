@@ -22,9 +22,7 @@ class TenantClaimValidator implements OAuth2TokenValidator<Jwt> {
     public OAuth2TokenValidatorResult validate(Jwt jwt) {
         String claim = jwt.getClaimAsString(CLAIM);
         Optional<UUID> current = TenantContext.current();
-        if (claim != null && current.isPresent() && current.get().toString().equals(claim)) {
-            return OAuth2TokenValidatorResult.success();
-        }
+        if (claim != null && current.isPresent() && current.get().toString().equals(claim)) return OAuth2TokenValidatorResult.success();
         return OAuth2TokenValidatorResult.failure(
                 new OAuth2Error("invalid_token", "O token não pertence a este clube", null));
     }

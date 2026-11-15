@@ -46,13 +46,7 @@ class AgeGroupRepository {
 
     private static AgeGroupRow map(java.sql.ResultSet rs, int rowNum) throws java.sql.SQLException {
         Integer maxAge = (Integer) rs.getObject("max_age");
-        return new AgeGroupRow(
-                rs.getObject("id", UUID.class),
-                rs.getString("name"),
-                rs.getInt("min_age"),
-                maxAge,
-                rs.getBoolean("is_active"),
-                Db.instant(rs, "created_at"),
-                Db.instant(rs, "updated_at"));
+        return new AgeGroupRow(Db.uuid(rs, "id"), rs.getString("name"), rs.getInt("min_age"), maxAge,
+                rs.getBoolean("is_active"), Db.instant(rs, "created_at"), Db.instant(rs, "updated_at"));
     }
 }

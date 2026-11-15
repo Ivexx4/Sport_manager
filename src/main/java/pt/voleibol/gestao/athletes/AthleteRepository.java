@@ -99,12 +99,8 @@ class AthleteRepository {
                                               Set<String> roles, String query, String status, UUID teamId) {
         StringBuilder sql = new StringBuilder(select)
                 .append(" WHERE a.tenant_id = :tenant AND a.anonymized_at IS NULL AND ").append(SCOPE);
-        if (query != null && !query.isBlank()) {
-            sql.append(" AND a.full_name ILIKE '%' || :q || '%'");
-        }
-        if (status != null) {
-            sql.append(" AND a.status = :status");
-        }
+        if (query != null && !query.isBlank()) sql.append(" AND a.full_name ILIKE '%' || :q || '%'");
+        if (status != null) sql.append(" AND a.status = :status");
         if (teamId != null) {
             sql.append("""
                      AND EXISTS (
@@ -115,12 +111,8 @@ class AthleteRepository {
         }
         sql.append(suffix);
         JdbcClient.StatementSpec spec = scoped(jdbc.sql(sql.toString()), tenantId, null, actorId, roles, false);
-        if (query != null && !query.isBlank()) {
-            spec = spec.param("q", query.trim());
-        }
-        if (status != null) {
-            spec = spec.param("status", status);
-        }
+        if (query != null && !query.isBlank()) spec = spec.param("q", query.trim());
+        if (status != null) spec = spec.param("status", status);
         return teamId == null ? spec : spec.param("teamId", teamId);
     }
 
@@ -257,10 +249,7 @@ class AthleteRepository {
                         ORDER BY u.name, u.id
                         """)
                 .param("tenant", tenantId).param("athlete", athleteId)
-                .query((rs, i) -> new GuardianRow(
-                        rs.getObject("user_id", UUID.class),
-                        rs.getString("name"),
-                        rs.getString("email"),
+                .query((rs, i) -> new GuardianRow(Db.uuid(rs, "user_id"), rs.getString("name"), rs.getString("email"),
                         rs.getString("relationship")))
                 .list();
     }
@@ -297,18 +286,9 @@ class AthleteRepository {
     }
 
     private static AthleteRow map(java.sql.ResultSet rs, int rowNum) throws java.sql.SQLException {
-        return new AthleteRow(
-                rs.getObject("id", UUID.class),
-                rs.getString("full_name"),
-                rs.getObject("birth_date", LocalDate.class),
-                rs.getString("gender"),
-                rs.getString("nif"),
-                rs.getString("email"),
-                rs.getString("phone"),
-                rs.getString("license_number"),
-                rs.getString("status"),
-                rs.getObject("user_id", UUID.class),
-                Db.instant(rs, "created_at"),
-                Db.instant(rs, "updated_at"));
+        return new AthleteRow(Db.uuid(rs, "id"), rs.getString("full_name"), Db.date(rs, "birth_date"),
+                rs.getString("gender"), rs.getString("nif"), rs.getString("email"),
+                rs.getString("phone"), rs.getString("license_number"), rs.getString("status"),
+                Db.uuid(rs, "user_id"), Db.instant(rs, "created_at"), Db.instant(rs, "updated_at"));
     }
 }

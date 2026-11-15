@@ -44,7 +44,7 @@ class LedgerRepository {
     }
 
     private static Row map(java.sql.ResultSet rs, int n) throws java.sql.SQLException {
-        return new Row(rs.getObject("id", UUID.class), rs.getString("type"), rs.getString("category"),
+        return new Row(Db.uuid(rs, "id"), rs.getString("type"), rs.getString("category"),
                 rs.getLong("amount_cents"), Db.date(rs, "entry_date"),
                 rs.getString("description"), Db.instant(rs, "created_at"));
     }

@@ -54,9 +54,7 @@ public class ExpiredDataPurger {
 
     @Transactional
     public Purged purge() {
-        if (!properties.enabled()) {
-            return new Purged(0, 0, 0, 0);
-        }
+        if (!properties.enabled()) return new Purged(0, 0, 0, 0);
 
         Instant now = clock.instant();
         Purged purged = jdbc.sql("""
@@ -77,9 +75,7 @@ public class ExpiredDataPurger {
                         rs.getLong("outbox_deleted")))
                 .single();
 
-        if (purged.nothing()) {
-            log.debug("Limpeza periódica sem dados a remover");
-        } else {
+        if (purged.nothing()) log.debug("Limpeza periódica sem dados a remover"); else {
             log.info("Limpeza periódica: {} convites, {} tokens de reposição, {} refresh tokens "
                             + "e {} mensagens da outbox removidos",
                     purged.invitations(), purged.passwordResets(), purged.refreshTokens(), purged.outbox());

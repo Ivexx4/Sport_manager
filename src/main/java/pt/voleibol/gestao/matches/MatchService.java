@@ -10,7 +10,6 @@ import java.util.Locale;
 import java.util.Set;
 import java.util.UUID;
 
-import org.springframework.http.HttpStatus;
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -58,12 +57,8 @@ class MatchService {
         UUID tenantId = Rules.tenant();
         boolean allowed = Rules.isManager(roles) || roles.contains("TREINADOR")
                 || roles.contains("ATLETA") || roles.contains("ENCARREGADO");
-        if (!allowed) {
-            throw new ResponseStatusException(HttpStatus.FORBIDDEN);
-        }
-        if (teamId != null) {
-            teamAccess.requireVisible(tenantId, teamId, actorId, roles);
-        }
+        if (!allowed) throw Rules.forbidden();
+        if (teamId != null) teamAccess.requireVisible(tenantId, teamId, actorId, roles);
         return matches.list(tenantId, teamId).stream()
                 .filter(m -> teamAccess.visible(tenantId, m.teamId(), actorId, roles))
                 .map(MatchService::matchView).toList();
@@ -83,15 +78,9 @@ class MatchService {
         UUID tenantId = Rules.tenant();
         teamAccess.requireVisible(tenantId, teamId, actorId, roles);
         Rules.requireWritable(roles);
-        if (opponent == null || opponent.isBlank()) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Adversário obrigatório");
-        }
-        if (matchDate == null) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Data do jogo obrigatória");
-        }
-        if (courtId != null && !matches.venueExists(tenantId, courtId)) {
-            throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Local não encontrado");
-        }
+        if (opponent == null || opponent.isBlank()) throw Rules.badRequest("Adversário obrigatório");
+        if (matchDate == null) throw Rules.badRequest("Data do jogo obrigatória");
+        if (courtId != null && !matches.venueExists(tenantId, courtId)) throw Rules.notFound("Local não encontrado");
         UUID id = UUID.randomUUID();
         matches.insert(id, tenantId, teamId, competition, opponent.trim(), location, courtId, matchDate,
                 isHome == null ? true : isHome, Rules.status(status == null ? "SCHEDULED" : status, MATCH_STATUSES), actorId);
@@ -108,15 +97,9 @@ class MatchService {
         teamAccess.requireVisible(tenantId, current.teamId(), actorId, roles);
         teamAccess.requireVisible(tenantId, newTeam, actorId, roles);
         Rules.requireWritable(roles);
-        if (opponent == null || opponent.isBlank()) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Adversário obrigatório");
-        }
-        if (matchDate == null) {
-            matchDate = current.matchDate();
-        }
-        if (courtId != null && !matches.venueExists(tenantId, courtId)) {
-            throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Local não encontrado");
-        }
+        if (opponent == null || opponent.isBlank()) throw Rules.badRequest("Adversário obrigatório");
+        if (matchDate == null) matchDate = current.matchDate();
+        if (courtId != null && !matches.venueExists(tenantId, courtId)) throw Rules.notFound("Local não encontrado");
         if (!matches.update(tenantId, id, newTeam, competition, opponent.trim(), location, courtId, matchDate,
                 isHome == null ? current.isHome() : isHome,
                 status == null || status.isBlank() ? current.status() : Rules.status(status, MATCH_STATUSES))) {
@@ -132,9 +115,7 @@ class MatchService {
         MatchRepository.MatchRow row = matches.findById(tenantId, id).orElseThrow(MatchService::matchNotFound);
         teamAccess.requireVisible(tenantId, row.teamId(), actorId, roles);
         Rules.requireWritable(roles);
-        if (!matches.anonymize(tenantId, id)) {
-            throw matchNotFound();
-        }
+        if (!matches.anonymize(tenantId, id)) throw matchNotFound();
         matches.audit(tenantId, actorId, "MATCH_ANONYMIZED", id);
     }
 
@@ -155,9 +136,7 @@ class MatchService {
         MatchRepository.MatchRow row = matches.findById(tenantId, matchId).orElseThrow(MatchService::matchNotFound);
         teamAccess.requireVisible(tenantId, row.teamId(), actorId, roles);
         Rules.requireWritable(roles);
-        if (setNumber <= 0) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Número de set inválido");
-        }
+        if (setNumber <= 0) throw Rules.badRequest("Número de set inválido");
         matches.upsertSetScore(tenantId, matchId, setNumber, ourPoints, opponentPoints, actorId);
         matches.audit(tenantId, actorId, "MATCH_SET_SCORE_SET", matchId);
     }
@@ -168,9 +147,7 @@ class MatchService {
         MatchRepository.MatchRow row = matches.findById(tenantId, matchId).orElseThrow(MatchService::matchNotFound);
         teamAccess.requireVisible(tenantId, row.teamId(), actorId, roles);
         Rules.requireWritable(roles);
-        if (!matches.deleteSetScore(tenantId, matchId, setNumber)) {
-            throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Set não encontrado");
-        }
+        if (!matches.deleteSetScore(tenantId, matchId, setNumber)) throw Rules.notFound("Set não encontrado");
         matches.audit(tenantId, actorId, "MATCH_SET_SCORE_REMOVED", matchId);
     }
 
@@ -192,12 +169,8 @@ class MatchService {
         MatchRepository.MatchRow row = matches.findById(tenantId, matchId).orElseThrow(MatchService::matchNotFound);
         teamAccess.requireVisible(tenantId, row.teamId(), actorId, roles);
         Rules.requireWritable(roles);
-        if (!teamAccess.athleteOnTeam(tenantId, row.teamId(), athleteId)) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Atleta não pertence à equipa");
-        }
-        if (matches.callUpExists(tenantId, matchId, athleteId)) {
-            throw new ResponseStatusException(HttpStatus.CONFLICT, "Atleta já convocado");
-        }
+        if (!teamAccess.athleteOnTeam(tenantId, row.teamId(), athleteId)) throw Rules.badRequest("Atleta não pertence à equipa");
+        if (matches.callUpExists(tenantId, matchId, athleteId)) throw Rules.conflict("Atleta já convocado");
         matches.insertCallUp(tenantId, matchId, athleteId, actorId);
         matches.audit(tenantId, actorId, "MATCH_CALLUP_ADDED", matchId);
         notifyCallUp(tenantId, row, athleteId);
@@ -209,9 +182,7 @@ class MatchService {
         MatchRepository.MatchRow row = matches.findById(tenantId, matchId).orElseThrow(MatchService::matchNotFound);
         teamAccess.requireVisible(tenantId, row.teamId(), actorId, roles);
         Rules.requireWritable(roles);
-        if (!matches.deleteCallUp(tenantId, matchId, athleteId)) {
-            throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Convocatória não encontrada");
-        }
+        if (!matches.deleteCallUp(tenantId, matchId, athleteId)) throw Rules.notFound("Convocatória não encontrada");
         matches.audit(tenantId, actorId, "MATCH_CALLUP_REMOVED", matchId);
     }
 
@@ -219,26 +190,13 @@ class MatchService {
     void respondCallUp(UUID actorId, Set<String> roles, UUID matchId, UUID athleteId, String response) {
         UUID tenantId = Rules.tenant();
         MatchRepository.MatchRow row = matches.findById(tenantId, matchId).orElseThrow(MatchService::matchNotFound);
-        // athlete can respond if on team roster or linked; allow any member? Require visible team or athlete self.
-        // Allow if user is manager/trainer of team OR the athlete's linked user.
-        boolean allowed = Rules.isManager(roles) || roles.contains("TREINADOR");
-        if (!allowed) {
-            // check if actor is the athlete
-            // (best-effort: allow ATLETA role if athlete.user_id == actor)
-            allowed = isAthleteSelf(tenantId, athleteId, actorId);
-        }
-        if (!allowed) {
-            throw new ResponseStatusException(HttpStatus.FORBIDDEN);
-        }
+        // Gestores/treinadores da equipa ou o próprio atleta (ligado ao utilizador) podem responder.
+        if (!Rules.isManager(roles) && !roles.contains("TREINADOR")
+                && !isAthleteSelf(tenantId, athleteId, actorId)) throw Rules.forbidden();
         teamAccess.requireVisible(tenantId, row.teamId(), actorId, roles);
-        // ensure callup exists
-        if (!matches.callUpExists(tenantId, matchId, athleteId)) {
-            throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Convocatória não encontrada");
-        }
+        if (!matches.callUpExists(tenantId, matchId, athleteId)) throw Rules.notFound("Convocatória não encontrada");
         String resp = response == null ? null : response.trim().toUpperCase(java.util.Locale.ROOT);
-        if (resp != null && !CALLUP_RESPONSES.contains(resp)) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Resposta inválida");
-        }
+        if (resp != null && !CALLUP_RESPONSES.contains(resp)) throw Rules.badRequest("Resposta inválida");
         matches.updateCallUpResponse(tenantId, matchId, athleteId, resp, resp == null ? null : Instant.now());
         matches.audit(tenantId, actorId, "MATCH_CALLUP_RESPONDED", matchId);
     }
@@ -255,9 +213,7 @@ class MatchService {
                         WHERE tenant_id = :t AND id = :a AND anonymized_at IS NULL
                         """)
                 .param("t", tenantId).param("a", athleteId).query(String.class).optional().orElse(null);
-        if (athleteName == null) {
-            return;
-        }
+        if (athleteName == null) return;
 
         Set<String> recipients = new LinkedHashSet<>();
         jdbc.sql("""
@@ -273,18 +229,14 @@ class MatchService {
                         """)
                 .param("t", tenantId).param("a", athleteId)
                 .query(String.class).list().forEach(email -> addRecipient(recipients, email));
-        if (recipients.isEmpty()) {
-            return;
-        }
+        if (recipients.isEmpty()) return;
 
         String teamName = jdbc.sql("SELECT name FROM team WHERE tenant_id = :t AND id = :id")
                 .param("t", tenantId).param("id", match.teamId())
                 .query(String.class).optional().orElse("equipa");
         String quando = MATCH_DATE_FORMAT.format(LocalDateTime.ofInstant(match.matchDate(), LISBOA));
         String local = match.isHome() ? "Casa" : "Fora";
-        if (match.location() != null && !match.location().isBlank()) {
-            local += " (" + match.location() + ")";
-        }
+        if (match.location() != null && !match.location().isBlank()) local += " (" + match.location() + ")";
         String competicao = match.competition() == null || match.competition().isBlank()
                 ? "" : "\nCompetição: " + match.competition();
         String subject = "Convocatória: " + teamName + " vs " + match.opponent();
@@ -301,15 +253,10 @@ class MatchService {
     }
 
     private static void addRecipient(Set<String> recipients, String email) {
-        if (email == null) {
-            return;
-        }
+        if (email == null) return;
         String normalized = email.trim().toLowerCase(Locale.ROOT);
-        if (!normalized.isEmpty()) {
-            recipients.add(normalized);
-        }
+        if (!normalized.isEmpty()) recipients.add(normalized);
     }
-
 
     private boolean isAthleteSelf(UUID tenantId, UUID athleteId, UUID actorId) {
         return Db.exists(jdbc.sql("""
@@ -318,13 +265,9 @@ class MatchService {
                 .param("t", tenantId).param("a", athleteId).param("u", actorId));
     }
 
-
-
-
     private static ResponseStatusException matchNotFound() {
-        return new ResponseStatusException(HttpStatus.NOT_FOUND, "Jogo não encontrado");
+        return Rules.notFound("Jogo não encontrado");
     }
-
 
     private static MatchView matchView(MatchRepository.MatchRow row) {
         return new MatchView(row.id(), row.teamId(), row.competition(), row.opponent(), row.location(),

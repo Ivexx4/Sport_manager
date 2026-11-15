@@ -51,9 +51,7 @@ class TeamService {
     @Transactional(readOnly = true)
     List<TeamView> list(UUID actorId, Set<String> roles) {
         UUID tenantId = Rules.tenant();
-        if (!Rules.isManager(roles) && !roles.contains("TREINADOR")) {
-            throw new ResponseStatusException(HttpStatus.FORBIDDEN);
-        }
+        if (!Rules.isManager(roles) && !roles.contains("TREINADOR")) throw Rules.forbidden();
         return teams.list(tenantId, actorId, Rules.isManager(roles)).stream()
                 .map(TeamService::view).toList();
     }
@@ -70,15 +68,13 @@ class TeamService {
         Rules.requireManager(roles);
         String normalizedName = Rules.requiredText(name);
         requireReferences(tenantId, seasonId, ageGroupId);
-        if (teams.nameExists(tenantId, normalizedName, null)) {
-            throw new ResponseStatusException(HttpStatus.CONFLICT, "Já existe uma equipa com este nome");
-        }
+        if (teams.nameExists(tenantId, normalizedName, null)) throw Rules.conflict("Já existe uma equipa com este nome");
         UUID id = UUID.randomUUID();
         try {
             teams.insert(id, tenantId, normalizedName, Rules.status(status == null ? "ACTIVE" : status, STATUSES),
                     seasonId, ageGroupId, actorId);
         } catch (DuplicateKeyException e) {
-            throw new ResponseStatusException(HttpStatus.CONFLICT, "Já existe uma equipa com este nome");
+            throw Rules.conflict("Já existe uma equipa com este nome");
         }
         teams.audit(tenantId, actorId, "TEAM_CREATED", id);
         return view(teams.findById(tenantId, id).orElseThrow(TeamService::notFound));
@@ -92,9 +88,7 @@ class TeamService {
         TeamRepository.TeamRow current = teams.findById(tenantId, teamId).orElseThrow(TeamService::notFound);
         String normalizedName = Rules.requiredText(name);
         requireReferences(tenantId, seasonId, ageGroupId);
-        if (teams.nameExists(tenantId, normalizedName, teamId)) {
-            throw new ResponseStatusException(HttpStatus.CONFLICT, "Já existe uma equipa com este nome");
-        }
+        if (teams.nameExists(tenantId, normalizedName, teamId)) throw Rules.conflict("Já existe uma equipa com este nome");
         try {
             if (!teams.update(tenantId, teamId, normalizedName,
                     status == null || status.isBlank() ? current.status() : Rules.status(status, STATUSES),
@@ -102,7 +96,7 @@ class TeamService {
                 throw notFound();
             }
         } catch (DuplicateKeyException e) {
-            throw new ResponseStatusException(HttpStatus.CONFLICT, "Já existe uma equipa com este nome");
+            throw Rules.conflict("Já existe uma equipa com este nome");
         }
         teams.audit(tenantId, actorId, "TEAM_UPDATED", teamId);
         return view(teams.findById(tenantId, teamId).orElseThrow(TeamService::notFound));
@@ -113,9 +107,7 @@ class TeamService {
         UUID tenantId = Rules.tenant();
         Rules.requireManager(roles);
         // Remoção não destrutiva: desativa e anonimiza, preservando staff e plantel para histórico.
-        if (!teams.anonymize(tenantId, teamId)) {
-            throw notFound();
-        }
+        if (!teams.anonymize(tenantId, teamId)) throw notFound();
         teams.audit(tenantId, actorId, "TEAM_ANONYMIZED", teamId);
     }
 
@@ -135,17 +127,13 @@ class TeamService {
         UUID tenantId = Rules.tenant();
         Rules.requireManager(roles);
         requireVisible(tenantId, teamId, actorId, roles);
-        if (!teams.activeMembershipExists(tenantId, userId)) {
-            throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Utilizador sem papel ativo no clube");
-        }
+        if (!teams.activeMembershipExists(tenantId, userId)) throw Rules.notFound("Utilizador sem papel ativo no clube");
         String normalizedRole = validStaffRole(role);
-        if (teams.staffExists(tenantId, teamId, userId)) {
-            throw new ResponseStatusException(HttpStatus.CONFLICT, "Este utilizador já é staff da equipa");
-        }
+        if (teams.staffExists(tenantId, teamId, userId)) throw Rules.conflict("Este utilizador já é staff da equipa");
         try {
             teams.insertStaff(tenantId, teamId, userId, normalizedRole, actorId);
         } catch (DuplicateKeyException e) {
-            throw new ResponseStatusException(HttpStatus.CONFLICT, "Este utilizador já é staff da equipa");
+            throw Rules.conflict("Este utilizador já é staff da equipa");
         }
         teams.audit(tenantId, actorId, "TEAM_STAFF_ADDED", teamId);
         return listStaff(actorId, roles, teamId);
@@ -156,9 +144,7 @@ class TeamService {
         UUID tenantId = Rules.tenant();
         Rules.requireManager(roles);
         requireVisible(tenantId, teamId, actorId, roles);
-        if (!teams.deleteStaff(tenantId, teamId, userId)) {
-            throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Utilizador não é staff da equipa");
-        }
+        if (!teams.deleteStaff(tenantId, teamId, userId)) throw Rules.notFound("Utilizador não é staff da equipa");
         teams.audit(tenantId, actorId, "TEAM_STAFF_REMOVED", teamId);
     }
 
@@ -179,12 +165,8 @@ class TeamService {
         UUID tenantId = Rules.tenant();
         Rules.requireManager(roles);
         requireVisible(tenantId, teamId, actorId, roles);
-        if (!teams.athleteExists(tenantId, athleteId)) {
-            throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Atleta não encontrado");
-        }
-        if (teams.rosterExists(tenantId, teamId, athleteId)) {
-            throw new ResponseStatusException(HttpStatus.CONFLICT, "Este atleta já pertence à equipa");
-        }
+        if (!teams.athleteExists(tenantId, athleteId)) throw Rules.notFound("Atleta não encontrado");
+        if (teams.rosterExists(tenantId, teamId, athleteId)) throw Rules.conflict("Este atleta já pertence à equipa");
         TeamRepository.TeamRow team = teams.findById(tenantId, teamId).orElseThrow(TeamService::notFound);
         if (team.seasonId() == null) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
@@ -199,9 +181,7 @@ class TeamService {
         AgeGroupRepository.AgeGroupRow ageGroup = ageGroups.findById(tenantId, team.ageGroupId())
                 .orElseThrow(AgeGroupService::notFound);
         LocalDate birthDate = teams.birthDate(tenantId, athleteId);
-        if (birthDate == null) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Atleta sem data de nascimento");
-        }
+        if (birthDate == null) throw Rules.badRequest("Atleta sem data de nascimento");
         AgeGroupRepository.AgeGroupRow registrationGroup =
                 resolveRegistrationGroup(tenantId, season, athleteId, birthDate, registrationAgeGroupId);
         validarRegrasFpV(tenantId, season, ageGroup, athleteId, birthDate);
@@ -209,7 +189,7 @@ class TeamService {
         try {
             teams.insertAthlete(tenantId, teamId, athleteId, actorId);
         } catch (DuplicateKeyException e) {
-            throw new ResponseStatusException(HttpStatus.CONFLICT, "Este atleta já pertence à equipa");
+            throw Rules.conflict("Este atleta já pertence à equipa");
         }
 
         teams.audit(tenantId, actorId, "TEAM_ATHLETE_ADDED", teamId);
@@ -253,9 +233,7 @@ class TeamService {
         UUID tenantId = Rules.tenant();
         Rules.requireManager(roles);
         requireVisible(tenantId, teamId, actorId, roles);
-        if (!teams.deleteAthlete(tenantId, teamId, athleteId)) {
-            throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Atleta não pertence à equipa");
-        }
+        if (!teams.deleteAthlete(tenantId, teamId, athleteId)) throw Rules.notFound("Atleta não pertence à equipa");
         teams.audit(tenantId, actorId, "TEAM_ATHLETE_REMOVED", teamId);
     }
 
@@ -270,9 +248,7 @@ class TeamService {
     private void validarRegrasFpV(UUID tenantId, SeasonRepository.SeasonRow season,
                                  AgeGroupRepository.AgeGroupRow ageGroup, UUID athleteId, LocalDate birthDate) {
         int age = ageAt(birthDate, season);
-        if (isEligibleForSeniors(season, ageGroup, birthDate)) {
-            return;
-        }
+        if (isEligibleForSeniors(season, ageGroup, birthDate)) return;
         if (age < ageGroup.minAge()) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
                     "Proibido atuar em escalão inferior conforme regulamento FPV");
@@ -287,9 +263,7 @@ class TeamService {
 
     static boolean isEligibleForSeniors(SeasonRepository.SeasonRow season,
                                         AgeGroupRepository.AgeGroupRow ageGroup, LocalDate birthDate) {
-        if (!"Seniores".equalsIgnoreCase(ageGroup.name())) {
-            return false;
-        }
+        if (!"Seniores".equalsIgnoreCase(ageGroup.name())) return false;
         return ageAt(birthDate, season) >= 19;
     }
 
@@ -308,46 +282,27 @@ class TeamService {
     }
 
     private TeamRepository.TeamRow requireVisible(UUID tenantId, UUID teamId, UUID actorId, Set<String> roles) {
-        if (Rules.isManager(roles)) {
-            return teams.findById(tenantId, teamId).orElseThrow(TeamService::notFound);
-        }
-        if (roles.contains("TREINADOR")) {
-            return teams.findVisible(tenantId, teamId, actorId, false).orElseThrow(TeamService::notFound);
-        }
-        throw new ResponseStatusException(HttpStatus.FORBIDDEN);
+        if (Rules.isManager(roles)) return teams.findById(tenantId, teamId).orElseThrow(TeamService::notFound);
+        if (roles.contains("TREINADOR")) return teams.findVisible(tenantId, teamId, actorId, false).orElseThrow(TeamService::notFound);
+        throw Rules.forbidden();
     }
-
 
     /** A época e o escalão têm de existir no clube e não podem estar anonimizados. */
     private void requireReferences(UUID tenantId, UUID seasonId, UUID ageGroupId) {
-        if (seasonId != null && !teams.seasonExists(tenantId, seasonId)) {
-            throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Época não encontrada");
-        }
-        if (ageGroupId != null && !teams.ageGroupExists(tenantId, ageGroupId)) {
-            throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Escalão não encontrado");
-        }
-        if (ageGroupId != null) {
-            ageGroups.findById(tenantId, ageGroupId).orElseThrow(AgeGroupService::notFound);
-        }
+        if (seasonId != null && !teams.seasonExists(tenantId, seasonId)) throw Rules.notFound("Época não encontrada");
+        if (ageGroupId != null && !teams.ageGroupExists(tenantId, ageGroupId)) throw Rules.notFound("Escalão não encontrado");
+        if (ageGroupId != null) ageGroups.findById(tenantId, ageGroupId).orElseThrow(AgeGroupService::notFound);
     }
 
-
-
     private static String validStaffRole(String role) {
-        if (role == null || role.isBlank()) {
-            return "TREINADOR";
-        }
+        if (role == null || role.isBlank()) return "TREINADOR";
         String normalized = role.trim().toUpperCase(Locale.ROOT);
-        if (!STAFF_ROLES.contains(normalized)) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Papel de staff inválido");
-        }
+        if (!STAFF_ROLES.contains(normalized)) throw Rules.badRequest("Papel de staff inválido");
         return normalized;
     }
 
-
-
     private static ResponseStatusException notFound() {
-        return new ResponseStatusException(HttpStatus.NOT_FOUND, "Equipa não encontrada");
+        return Rules.notFound("Equipa não encontrada");
     }
 
     private static TeamView view(TeamRepository.TeamRow row) {

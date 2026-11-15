@@ -60,9 +60,7 @@ class EmailOutboxDispatcher {
                 boolean failed = attempts >= mail.maxAttempts();
                 Instant next = Instant.now().plus(backoff(attempts));
                 String error = e.getMessage();
-                if (error != null && error.length() > 500) {
-                    error = error.substring(0, 500);
-                }
+                if (error != null && error.length() > 500) error = error.substring(0, 500);
                 jdbc.sql("""
                                 UPDATE email_outbox
                                 SET attempts = :attempts,

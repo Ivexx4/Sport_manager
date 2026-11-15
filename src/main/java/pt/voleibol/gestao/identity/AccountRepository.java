@@ -55,7 +55,7 @@ class AccountRepository {
     Optional<UserBasic> findUserByEmail(String email) {
         return jdbc.sql("SELECT id, status FROM app_user WHERE lower(email) = lower(:email)")
                 .param("email", email)
-                .query((rs, i) -> new UserBasic(rs.getObject("id", UUID.class), rs.getString("status")))
+                .query((rs, i) -> new UserBasic(Db.uuid(rs, "id"), rs.getString("status")))
                 .optional();
     }
 
@@ -134,14 +134,9 @@ class AccountRepository {
                         WHERE token_hash = :hash AND tenant_id = :tenant
                         """)
                 .param("hash", tokenHash).param("tenant", tenantId)
-                .query((rs, i) -> new Invitation(
-                        rs.getObject("id", UUID.class),
-                        rs.getString("email"),
-                        rs.getString("name"),
-                        rs.getString("roles"),
-                        rs.getObject("invited_by", UUID.class),
-                        Db.instant(rs, "expires_at"),
-                        rs.getBoolean("accepted"),
+                .query((rs, i) -> new Invitation(Db.uuid(rs, "id"), rs.getString("email"), rs.getString("name"),
+                        rs.getString("roles"), Db.uuid(rs, "invited_by"),
+                        Db.instant(rs, "expires_at"), rs.getBoolean("accepted"),
                         rs.getBoolean("revoked")))
                 .optional();
     }
@@ -174,10 +169,7 @@ class AccountRepository {
                         ORDER BY u.name, u.email
                         """)
                 .param("tenant", tenantId)
-                .query((rs, i) -> new ClubMember(
-                        rs.getObject("id", UUID.class),
-                        rs.getString("email"),
-                        rs.getString("name"),
+                .query((rs, i) -> new ClubMember(Db.uuid(rs, "id"), rs.getString("email"), rs.getString("name"),
                         rs.getString("status")))
                 .list();
     }
@@ -232,15 +224,13 @@ class AccountRepository {
     }
 
     boolean hasActiveRole(UUID tenantId, UUID userId, String role) {
-        return jdbc.sql("""
+        return Db.exists(jdbc.sql("""
                         SELECT EXISTS (
                             SELECT 1 FROM membership
                             WHERE tenant_id = :tenant AND user_id = :user AND role = :role AND status = 'ACTIVE'
                         )
                         """)
-                .param("tenant", tenantId).param("user", userId).param("role", role)
-                .query(Boolean.class)
-                .single();
+                .param("tenant", tenantId).param("user", userId).param("role", role));
     }
 
     // --- reposição de password ---
@@ -272,11 +262,8 @@ class AccountRepository {
                         WHERE token_hash = :hash AND tenant_id = :tenant
                         """)
                 .param("hash", tokenHash).param("tenant", tenantId)
-                .query((rs, i) -> new ResetToken(
-                        rs.getObject("id", UUID.class),
-                        rs.getObject("user_id", UUID.class),
-                        Db.instant(rs, "expires_at"),
-                        rs.getBoolean("used")))
+                .query((rs, i) -> new ResetToken(Db.uuid(rs, "id"), Db.uuid(rs, "user_id"),
+                        Db.instant(rs, "expires_at"), rs.getBoolean("used")))
                 .optional();
     }
 
