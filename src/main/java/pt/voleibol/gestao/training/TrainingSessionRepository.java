@@ -9,6 +9,8 @@ import java.util.UUID;
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.stereotype.Repository;
 
+import pt.voleibol.gestao.shared.Db;
+
 @Repository
 class TrainingSessionRepository {
 
@@ -47,8 +49,7 @@ class TrainingSessionRepository {
                         FROM training_session
                         WHERE tenant_id = :tenant AND id = :id AND anonymized_at IS NULL
                         """)
-                .param("tenant", tenantId)
-                .param("id", id)
+                .param("tenant", tenantId).param("id", id)
                 .query(TrainingSessionRepository::mapSession)
                 .optional();
     }
@@ -60,15 +61,10 @@ class TrainingSessionRepository {
                                                       recurrence, notes, status, created_by)
                         VALUES (:id, :tenant, :team, :court, :start, :end, :rec, :notes, :status, :actor)
                         """)
-                .param("id", id)
-                .param("tenant", tenantId)
-                .param("team", teamId)
-                .param("court", courtId)
+                .param("id", id).param("tenant", tenantId).param("team", teamId).param("court", courtId)
                 .param("start", startTime == null ? null : java.time.OffsetDateTime.ofInstant(startTime, java.time.ZoneOffset.UTC))
                 .param("end", endTime == null ? null : java.time.OffsetDateTime.ofInstant(endTime, java.time.ZoneOffset.UTC))
-                .param("rec", recurrence)
-                .param("notes", notes)
-                .param("status", status)
+                .param("rec", recurrence).param("notes", notes).param("status", status)
                 .param("actor", actorId)
                 .update();
     }
@@ -81,15 +77,10 @@ class TrainingSessionRepository {
                             recurrence = :rec, notes = :notes, status = :status, updated_at = now()
                         WHERE tenant_id = :tenant AND id = :id AND anonymized_at IS NULL
                         """)
-                .param("tenant", tenantId)
-                .param("id", id)
-                .param("team", teamId)
-                .param("court", courtId)
+                .param("tenant", tenantId).param("id", id).param("team", teamId).param("court", courtId)
                 .param("start", startTime == null ? null : java.time.OffsetDateTime.ofInstant(startTime, java.time.ZoneOffset.UTC))
                 .param("end", endTime == null ? null : java.time.OffsetDateTime.ofInstant(endTime, java.time.ZoneOffset.UTC))
-                .param("rec", recurrence)
-                .param("notes", notes)
-                .param("status", status)
+                .param("rec", recurrence).param("notes", notes).param("status", status)
                 .update() == 1;
     }
 
@@ -99,8 +90,7 @@ class TrainingSessionRepository {
                         SET anonymized_at = now(), status = 'CANCELLED', updated_at = now()
                         WHERE tenant_id = :tenant AND id = :id AND anonymized_at IS NULL
                         """)
-                .param("tenant", tenantId)
-                .param("id", id)
+                .param("tenant", tenantId).param("id", id)
                 .update() == 1;
     }
 
@@ -114,8 +104,7 @@ class TrainingSessionRepository {
                         WHERE a.tenant_id = :tenant AND a.session_id = :session AND at.anonymized_at IS NULL
                         ORDER BY at.full_name, at.id
                         """)
-                .param("tenant", tenantId)
-                .param("session", sessionId)
+                .param("tenant", tenantId).param("session", sessionId)
                 .query((rs, i) -> new AttendanceRow(
                         rs.getObject("athlete_id", UUID.class),
                         rs.getString("full_name"),
@@ -130,9 +119,7 @@ class TrainingSessionRepository {
                             SELECT 1 FROM attendance
                             WHERE tenant_id = :tenant AND session_id = :session AND athlete_id = :athlete)
                         """)
-                .param("tenant", tenantId)
-                .param("session", sessionId)
-                .param("athlete", athleteId)
+                .param("tenant", tenantId).param("session", sessionId).param("athlete", athleteId)
                 .query(Boolean.class)
                 .single();
     }
@@ -146,12 +133,8 @@ class TrainingSessionRepository {
                         DO UPDATE SET status = EXCLUDED.status, justification = EXCLUDED.justification,
                                       updated_at = now()
                         """)
-                .param("tenant", tenantId)
-                .param("session", sessionId)
-                .param("athlete", athleteId)
-                .param("status", status)
-                .param("just", justification)
-                .param("actor", actorId)
+                .param("tenant", tenantId).param("session", sessionId).param("athlete", athleteId)
+                .param("status", status).param("just", justification).param("actor", actorId)
                 .update();
     }
 
@@ -160,9 +143,7 @@ class TrainingSessionRepository {
                         DELETE FROM attendance
                         WHERE tenant_id = :tenant AND session_id = :session AND athlete_id = :athlete
                         """)
-                .param("tenant", tenantId)
-                .param("session", sessionId)
-                .param("athlete", athleteId)
+                .param("tenant", tenantId).param("session", sessionId).param("athlete", athleteId)
                 .update() == 1;
     }
 
@@ -171,9 +152,7 @@ class TrainingSessionRepository {
                         INSERT INTO audit_log (tenant_id, user_id, action, entity, entity_id)
                         VALUES (:tenant, :actor, :action, 'training_session', :entity)
                         """)
-                .param("tenant", tenantId)
-                .param("actor", actorId)
-                .param("action", action)
+                .param("tenant", tenantId).param("actor", actorId).param("action", action)
                 .param("entity", entityId)
                 .update();
     }
@@ -183,12 +162,12 @@ class TrainingSessionRepository {
                 rs.getObject("id", UUID.class),
                 rs.getObject("team_id", UUID.class),
                 rs.getObject("court_id", UUID.class),
-                rs.getObject("start_time", OffsetDateTime.class).toInstant(),
-                rs.getObject("end_time", OffsetDateTime.class).toInstant(),
+                Db.instant(rs, "start_time"),
+                Db.instant(rs, "end_time"),
                 rs.getString("recurrence"),
                 rs.getString("notes"),
                 rs.getString("status"),
-                rs.getObject("created_at", OffsetDateTime.class).toInstant(),
-                rs.getObject("updated_at", OffsetDateTime.class).toInstant());
+                Db.instant(rs, "created_at"),
+                Db.instant(rs, "updated_at"));
     }
 }

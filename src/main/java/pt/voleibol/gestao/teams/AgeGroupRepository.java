@@ -1,7 +1,6 @@
 package pt.voleibol.gestao.teams;
 
 import java.time.Instant;
-import java.time.OffsetDateTime;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
@@ -9,32 +8,14 @@ import java.util.UUID;
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.stereotype.Repository;
 
+import pt.voleibol.gestao.shared.Db;
+
 /** Catálogo federal FPV, comum a todos os clubes e épocas. */
 @Repository
 class AgeGroupRepository {
 
     record AgeGroupRow(UUID id, String name, int minAge, Integer maxAge, boolean isActive,
                        Instant createdAt, Instant updatedAt) {
-        AgeGroupRow(UUID id, UUID ignoredSeasonId, String name, int minBirthYear, int maxBirthYear,
-                    boolean isActive, Instant createdAt, Instant updatedAt) {
-            this(id, name, 0, null, isActive, createdAt, updatedAt);
-        }
-
-        UUID seasonId() {
-            return null;
-        }
-    }
-
-    /** Compatibilidade binária para testes/integrações antigas; o catálogo já não aceita escritas. */
-    record Data(UUID seasonId, String name, int minBirthYear, int maxBirthYear, boolean isActive) {
-        Data(UUID seasonId, String name, int minBirthYear, int maxBirthYear) {
-            this(seasonId, name, minBirthYear, maxBirthYear, true);
-        }
-
-    }
-
-    void insert(UUID id, UUID tenantId, Data data, UUID actorId) {
-        throw new UnsupportedOperationException("O catálogo federal não aceita escalões personalizados");
     }
 
     private static final String SELECT = """
@@ -71,7 +52,7 @@ class AgeGroupRepository {
                 rs.getInt("min_age"),
                 maxAge,
                 rs.getBoolean("is_active"),
-                rs.getObject("created_at", OffsetDateTime.class).toInstant(),
-                rs.getObject("updated_at", OffsetDateTime.class).toInstant());
+                Db.instant(rs, "created_at"),
+                Db.instant(rs, "updated_at"));
     }
 }

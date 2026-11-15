@@ -18,6 +18,7 @@ import org.springframework.web.server.ResponseStatusException;
 
 import pt.voleibol.gestao.notifications.EmailSender;
 import pt.voleibol.gestao.tenancy.TenantContext;
+import pt.voleibol.gestao.shared.Db;
 
 @Service
 class MatchService {
@@ -338,22 +339,20 @@ class MatchService {
     }
 
     private boolean teamExists(UUID tenantId, UUID teamId) {
-        Boolean exists = jdbc.sql("SELECT EXISTS (SELECT 1 FROM team WHERE tenant_id = :t AND id = :id AND anonymized_at IS NULL)")
-                .param("t", tenantId).param("id", teamId).query(Boolean.class).single();
-        return Boolean.TRUE.equals(exists);
+        return Db.exists(jdbc.sql("SELECT EXISTS (SELECT 1 FROM team WHERE tenant_id = :t AND id = :id AND anonymized_at IS NULL)")
+                .param("t", tenantId).param("id", teamId));
     }
 
     private boolean teamVisibleToStaff(UUID tenantId, UUID teamId, UUID actorId) {
-        Boolean exists = jdbc.sql("""
+        return Db.exists(jdbc.sql("""
                         SELECT EXISTS (SELECT 1 FROM team t WHERE t.tenant_id = :t AND t.id = :id AND t.anonymized_at IS NULL
                           AND EXISTS (SELECT 1 FROM team_staff s WHERE s.tenant_id=t.tenant_id AND s.team_id=t.id AND s.user_id=:a))
                         """)
-                .param("t", tenantId).param("id", teamId).param("a", actorId).query(Boolean.class).single();
-        return Boolean.TRUE.equals(exists);
+                .param("t", tenantId).param("id", teamId).param("a", actorId));
     }
 
     private boolean teamHasAthleteLinked(UUID tenantId, UUID teamId, UUID actorId) {
-        Boolean exists = jdbc.sql("""
+        return Db.exists(jdbc.sql("""
                         SELECT EXISTS (
                           SELECT 1 FROM team_athlete ta JOIN athlete a ON a.tenant_id=ta.tenant_id AND a.id=ta.athlete_id
                           WHERE ta.tenant_id=:t AND ta.team_id=:team AND a.anonymized_at IS NULL
@@ -361,24 +360,21 @@ class MatchService {
                                 SELECT 1 FROM athlete_guardian g
                                 WHERE g.tenant_id=a.tenant_id AND g.athlete_id=a.id AND g.user_id=:a)))
                         """)
-                .param("t", tenantId).param("team", teamId).param("a", actorId).query(Boolean.class).single();
-        return Boolean.TRUE.equals(exists);
+                .param("t", tenantId).param("team", teamId).param("a", actorId));
     }
 
     private boolean athleteOnTeam(UUID tenantId, UUID teamId, UUID athleteId) {
-        Boolean exists = jdbc.sql("""
+        return Db.exists(jdbc.sql("""
                         SELECT EXISTS (SELECT 1 FROM team_athlete WHERE tenant_id=:t AND team_id=:team AND athlete_id=:a)
                         """)
-                .param("t", tenantId).param("team", teamId).param("a", athleteId).query(Boolean.class).single();
-        return Boolean.TRUE.equals(exists);
+                .param("t", tenantId).param("team", teamId).param("a", athleteId));
     }
 
     private boolean isAthleteSelf(UUID tenantId, UUID athleteId, UUID actorId) {
-        Boolean exists = jdbc.sql("""
+        return Db.exists(jdbc.sql("""
                         SELECT EXISTS (SELECT 1 FROM athlete WHERE tenant_id=:t AND id=:a AND user_id=:u AND anonymized_at IS NULL)
                         """)
-                .param("t", tenantId).param("a", athleteId).param("u", actorId).query(Boolean.class).single();
-        return Boolean.TRUE.equals(exists);
+                .param("t", tenantId).param("a", athleteId).param("u", actorId));
     }
 
     private static boolean isManager(Set<String> roles) {

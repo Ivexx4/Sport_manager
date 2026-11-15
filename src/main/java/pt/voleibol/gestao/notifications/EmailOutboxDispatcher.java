@@ -71,11 +71,9 @@ class EmailOutboxDispatcher {
                                     last_error = :error
                                 WHERE id = :id
                                 """)
-                        .param("attempts", attempts)
-                        .param("status", failed ? "FAILED" : "PENDING")
+                        .param("attempts", attempts).param("status", failed ? "FAILED" : "PENDING")
                         .param("next", java.time.OffsetDateTime.ofInstant(next, java.time.ZoneOffset.UTC))
-                        .param("error", error)
-                        .param("id", mail.id())
+                        .param("error", error).param("id", mail.id())
                         .update();
                 if (failed) {
                     log.error("E-mail {} para {} falhou definitivamente após {} tentativas", mail.id(), mail.recipient(), attempts, e);

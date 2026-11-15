@@ -23,9 +23,7 @@ class OutboxEmailSender implements EmailSender {
                         INSERT INTO email_outbox (recipient, subject, body, status, attempts, next_attempt_at)
                         VALUES (:to, :subject, :body, 'PENDING', 0, :now)
                         """)
-                .param("to", to)
-                .param("subject", subject)
-                .param("body", textBody)
+                .param("to", to).param("subject", subject).param("body", textBody)
                 .param("now", java.time.OffsetDateTime.ofInstant(Instant.now(), java.time.ZoneOffset.UTC))
                 .update();
     }

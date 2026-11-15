@@ -1,12 +1,7 @@
 package pt.voleibol.gestao.identity;
 
-import java.nio.charset.StandardCharsets;
 import java.sql.Connection;
-import java.sql.DriverManager;
-import java.sql.PreparedStatement;
-import java.sql.ResultSet;
 import java.sql.SQLException;
-import java.util.Base64;
 import java.util.Locale;
 import java.util.UUID;
 
@@ -14,27 +9,17 @@ import com.jayway.jsonpath.JsonPath;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
-import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.http.MediaType;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
-import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.MvcResult;
 import org.springframework.test.web.servlet.ResultActions;
 import org.springframework.test.web.servlet.request.MockHttpServletRequestBuilder;
-import org.springframework.test.web.servlet.request.RequestPostProcessor;
-import org.springframework.test.web.servlet.setup.MockMvcBuilders;
-import org.springframework.web.context.WebApplicationContext;
-import org.testcontainers.junit.jupiter.Container;
-import org.testcontainers.junit.jupiter.Testcontainers;
-import org.testcontainers.postgresql.PostgreSQLContainer;
-
-import pt.voleibol.gestao.tenancy.TenantFilter;
+import pt.voleibol.gestao.shared.FlowTestSupport;
 
 import static org.assertj.core.api.Assertions.assertThat;
-import static org.springframework.security.test.web.servlet.setup.SecurityMockMvcConfigurers.springSecurity;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
@@ -50,12 +35,12 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
         "app.platform.bootstrap-key=chave-de-teste",
         "app.security.login-rate-limit.enabled=false"
 })
-@Testcontainers
-class ProvisioningFlowTest {
+class ProvisioningFlowTest extends FlowTestSupport {
 
-    @Container
-    static final PostgreSQLContainer POSTGRES = new PostgreSQLContainer("postgres:16-alpine")
-            .withInitScript("db/init/01-roles.sql");
+    @DynamicPropertySource
+    static void propriedades(DynamicPropertyRegistry registry) {
+        registarPropriedades(registry);
+    }
 
     static final String BOOTSTRAP_KEY = "chave-de-teste";
 
@@ -63,32 +48,8 @@ class ProvisioningFlowTest {
     static final String EXISTENTE = "existente@provision.test";
     static final String PASSWORD_EXISTENTE = "password-existente";
 
-    @DynamicPropertySource
-    static void propriedades(DynamicPropertyRegistry registry) {
-        registry.add("spring.datasource.url", POSTGRES::getJdbcUrl);
-        registry.add("spring.datasource.username", () -> "volei_app");
-        registry.add("spring.datasource.password", () -> "dev");
-        registry.add("spring.flyway.user", () -> "volei_migrator");
-        registry.add("spring.flyway.password", () -> "dev");
-        registry.add("app.security.jwt.secret", () -> Base64.getEncoder().encodeToString(
-                "clave-de-teste-com-mais-de-32-bytes-ok!".getBytes(StandardCharsets.UTF_8)));
-    }
-
-    @Autowired
-    WebApplicationContext context;
-    @Autowired
-    TenantFilter tenantFilter;
-    @Autowired
-    PasswordEncoder passwordEncoder;
-
-    MockMvc mvc;
-
     @BeforeEach
     void preparar() throws SQLException {
-        mvc = MockMvcBuilders.webAppContextSetup(context)
-                .addFilters(tenantFilter)
-                .apply(springSecurity())
-                .build();
         semear();
     }
 
@@ -235,24 +196,8 @@ class ProvisioningFlowTest {
                 .with(host(host)));
     }
 
-    private String acesso(String host, String email, String password) throws Exception {
-        return JsonPath.read(login(host, email, password).andExpect(status().isOk())
-                .andReturn().getResponse().getContentAsString(), "$.accessToken");
-    }
-
-    private static RequestPostProcessor host(String serverName) {
-        return request -> {
-            request.setServerName(serverName);
-            return request;
-        };
-    }
-
     private static String slugUnico(String prefixo) {
         return prefixo + "-" + UUID.randomUUID().toString().substring(0, 8);
-    }
-
-    private static UUID id(String email) {
-        return UUID.nameUUIDFromBytes(email.getBytes(StandardCharsets.UTF_8));
     }
 
     /** Clube de origem e conta já existente, para testar a associação por email. */
@@ -268,28 +213,4 @@ class ProvisioningFlowTest {
         }
     }
 
-    private static Connection superuser() throws SQLException {
-        return DriverManager.getConnection(POSTGRES.getJdbcUrl(), POSTGRES.getUsername(), POSTGRES.getPassword());
-    }
-
-    private static int contar(String sql, Object... params) throws SQLException {
-        try (Connection c = superuser(); PreparedStatement ps = c.prepareStatement(sql)) {
-            for (int i = 0; i < params.length; i++) {
-                ps.setObject(i + 1, params[i]);
-            }
-            try (ResultSet rs = ps.executeQuery()) {
-                rs.next();
-                return rs.getInt(1);
-            }
-        }
-    }
-
-    private static void executar(Connection c, String sql, Object... params) throws SQLException {
-        try (PreparedStatement ps = c.prepareStatement(sql)) {
-            for (int i = 0; i < params.length; i++) {
-                ps.setObject(i + 1, params[i]);
-            }
-            ps.executeUpdate();
-        }
-    }
 }

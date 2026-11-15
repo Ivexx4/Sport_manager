@@ -5,6 +5,7 @@ import java.time.YearMonth;
 import java.time.ZoneId;
 import java.time.format.DateTimeParseException;
 import java.util.List;
+import java.util.ArrayList;
 import java.util.Set;
 import java.util.UUID;
 
@@ -26,16 +27,25 @@ class BillingService {
 
     record FeePlanView(UUID id, String name, UUID seasonId, UUID ageGroupId, long amountCents, String periodicity) {
     }
-    record ChargeView(UUID id, UUID athleteId, UUID guardianId, UUID feePlanId, long amountCents, LocalDate dueDate, String status, String billingPeriod) {
+
+    record ChargeView(UUID id, UUID athleteId, UUID guardianId, UUID feePlanId, long amountCents, LocalDate dueDate,
+                      String status, String billingPeriod) {
     }
+
     record GenerateView(String period, int created, int skipped) {
     }
+
     record PromotionView(UUID id, UUID athleteId, UUID feePlanId, long amountCents, LocalDate validFrom,
-                         LocalDate validTo, String reason, boolean active) {
+                         LocalDate validTo, String reason, boolean active, String applicationScope,
+                         String billingPeriod) {
     }
-    record PaymentView(UUID id, UUID chargeId, String method, long amountCents, String reference, java.time.Instant paidAt) {
+
+    record PaymentView(UUID id, UUID chargeId, String method, long amountCents, String reference,
+                       java.time.Instant paidAt) {
     }
-    record LedgerView(UUID id, String type, String category, long amountCents, LocalDate entryDate, String description) {
+
+    record LedgerView(UUID id, String type, String category, long amountCents, LocalDate entryDate,
+                      String description) {
     }
 
     private final FeePlanRepository feePlans;
@@ -56,7 +66,9 @@ class BillingService {
         }
     }
 
-    private UUID tenant() { return TenantContext.current().orElseThrow(() -> new ResponseStatusException(HttpStatus.BAD_REQUEST, "Pedido sem clube")); }
+    private UUID tenant() {
+        return TenantContext.current().orElseThrow(() -> new ResponseStatusException(HttpStatus.BAD_REQUEST, "Pedido sem clube"));
+    }
 
     private static void requireAmount(long amountCents) {
         if (amountCents < 0) throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Valor inválido");
@@ -79,11 +91,13 @@ class BillingService {
     FeePlanView createFeePlan(UUID actorId, Set<String> roles, String name, UUID seasonId, UUID ageGroupId, long amountCents, String periodicity) {
         requireWriter(roles);
         UUID t = tenant();
-        if (name == null || name.isBlank()) throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Nome obrigatório");
+        if (name == null || name.isBlank())
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Nome obrigatório");
         requireAmount(amountCents);
         String period = periodicity == null ? "MONTHLY" : periodicity;
         requireValue(period, PERIODICITIES, "Periodicidade");
-        if (feePlans.nameExists(t, name.trim(), null)) throw new ResponseStatusException(HttpStatus.CONFLICT, "Já existe um plano com este nome");
+        if (feePlans.nameExists(t, name.trim(), null))
+            throw new ResponseStatusException(HttpStatus.CONFLICT, "Já existe um plano com este nome");
         UUID id = UUID.randomUUID();
         feePlans.insert(id, t, name.trim(), seasonId, ageGroupId, amountCents, period, actorId);
         feePlans.audit(t, actorId, "FEE_PLAN_CREATED", id);
@@ -103,17 +117,30 @@ class BillingService {
         requireWriter(roles);
         return feePlans.listPromotions(tenant(), athleteId).stream()
                 .map(p -> new PromotionView(p.id(), p.athleteId(), p.feePlanId(), p.amountCents(),
-                        p.validFrom(), p.validTo(), p.reason(), p.active())).toList();
+                        p.validFrom(), p.validTo(), p.reason(), p.active(), p.applicationScope(), p.billingPeriod())).toList();
     }
 
     @Transactional
     PromotionView createPromotion(UUID actorId, Set<String> roles, UUID athleteId, UUID feePlanId,
-                                  long amountCents, LocalDate validFrom, LocalDate validTo, String reason) {
+                                  long amountCents, LocalDate validFrom, LocalDate validTo, String reason,
+                                  String applicationScope, String billingPeriod) {
         requireWriter(roles);
         UUID t = tenant();
         requireAmount(amountCents);
         if (validFrom == null || (validTo != null && validTo.isBefore(validFrom))) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Período da promoção inválido");
+        }
+        String scope = applicationScope == null ? "ALL" : applicationScope;
+        requireValue(scope, Set.of("ALL", "SINGLE"), "Âmbito da promoção");
+        if ("SINGLE".equals(scope) && (billingPeriod == null || billingPeriod.isBlank())) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Período obrigatório para promoção de pagamento único");
+        }
+        if ("SINGLE".equals(scope)) {
+            try {
+                YearMonth.parse(billingPeriod);
+            } catch (DateTimeParseException ex) {
+                throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Período de pagamento inválido");
+            }
         }
         if (!charges.athleteExists(t, athleteId)) {
             throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Atleta não encontrado");
@@ -123,8 +150,10 @@ class BillingService {
                     .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Plano não encontrado"));
         }
         UUID id = UUID.randomUUID();
-        feePlans.insertPromotion(id, t, athleteId, feePlanId, amountCents, validFrom, validTo, reason, actorId);
-        return new PromotionView(id, athleteId, feePlanId, amountCents, validFrom, validTo, reason, true);
+        feePlans.insertPromotion(id, t, athleteId, feePlanId, amountCents, validFrom, validTo, reason,
+                scope, "SINGLE".equals(scope) ? billingPeriod : null, actorId);
+        return new PromotionView(id, athleteId, feePlanId, amountCents, validFrom, validTo, reason, true,
+                scope, "SINGLE".equals(scope) ? billingPeriod : null);
     }
 
     @Transactional
@@ -152,10 +181,12 @@ class BillingService {
         requireWriter(roles);
         UUID t = tenant();
         requireAmount(amountCents);
-        if (dueDate == null) throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Data de vencimento obrigatória");
+        if (dueDate == null)
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Data de vencimento obrigatória");
         String chargeStatus = status == null ? "PENDING" : status;
         requireValue(chargeStatus, CHARGE_STATUSES, "Estado");
-        if (!charges.athleteExists(t, athleteId)) throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Atleta não encontrado");
+        if (!charges.athleteExists(t, athleteId))
+            throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Atleta não encontrado");
         if (guardianId != null && !charges.guardianExists(t, guardianId)) {
             throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Encarregado não encontrado");
         }
@@ -210,39 +241,66 @@ class BillingService {
         int skipped = 0;
         for (FeePlanRepository.Row plan : plans) {
             LocalDate periodDate = period.atDay(1);
-            if (!plan.active()
-                    || (plan.effectiveFrom() != null && periodDate.isBefore(plan.effectiveFrom()))
-                    || (plan.effectiveTo() != null && periodDate.isAfter(plan.effectiveTo()))) {
+            if (!plan.active()) {
                 continue;
             }
-            String billingPeriod = billingPeriod(plan.periodicity(), period);
-            if (billingPeriod == null) {
-                continue; // plano único ou período fora da cadência (trimestre/ano)
+            if (plan.seasonId() == null
+                    && ((plan.effectiveFrom() != null && periodDate.isBefore(plan.effectiveFrom()))
+                    || (plan.effectiveTo() != null && periodDate.isAfter(plan.effectiveTo())))) {
+                continue;
             }
-            LocalDate dueDate = dueDate(plan.periodicity(), period);
-            for (ChargeRepository.Target target : charges.findTargets(tenantId, plan.seasonId(), plan.ageGroupId())) {
-                UUID guardianId = isMinor(target.birthDate(), today) ? target.guardianId() : null;
-                if (dryRun) {
-                    if (charges.generatedExists(tenantId, plan.id(), target.athleteId(), billingPeriod)) {
-                        skipped++;
-                    } else {
-                        created++;
-                    }
+            for (YearMonth chargePeriod : periodsFor(plan, tenantId, period)) {
+                LocalDate chargePeriodDate = chargePeriod.atDay(1);
+                if ((plan.effectiveFrom() != null && chargePeriodDate.isBefore(plan.effectiveFrom()))
+                        || (plan.effectiveTo() != null && chargePeriodDate.isAfter(plan.effectiveTo()))) {
                     continue;
                 }
-                UUID id = UUID.randomUUID();
-                long amountCents = feePlans.overrideAmount(tenantId, target.athleteId(), plan.id(), dueDate)
-                        .orElse(plan.amountCents());
-                if (charges.insertGenerated(id, tenantId, target.athleteId(), guardianId, plan.id(),
-                        amountCents, dueDate, billingPeriod, actorId)) {
-                    charges.audit(tenantId, actorId, "CHARGE_GENERATED", id);
-                    created++;
-                } else {
-                    skipped++;
+                String billingPeriod = billingPeriod(plan.periodicity(), chargePeriod);
+                if (billingPeriod == null) {
+                    continue;
+                }
+                LocalDate dueDate = dueDate(plan.periodicity(), chargePeriod);
+                for (ChargeRepository.Target target : charges.findTargets(tenantId, plan.seasonId(), plan.ageGroupId())) {
+                    UUID guardianId = isMinor(target.birthDate(), today) ? target.guardianId() : null;
+                    if (dryRun) {
+                        if (charges.generatedExists(tenantId, plan.id(), target.athleteId(), billingPeriod)) {
+                            skipped++;
+                        } else {
+                            created++;
+                        }
+                        continue;
+                    }
+                    UUID id = UUID.randomUUID();
+                    long amountCents = feePlans.overrideAmount(tenantId, target.athleteId(), plan.id(), dueDate, billingPeriod)
+                            .orElse(plan.amountCents());
+                    if (charges.insertGenerated(id, tenantId, target.athleteId(), guardianId, plan.id(),
+                            amountCents, dueDate, billingPeriod, actorId)) {
+                        charges.audit(tenantId, actorId, "CHARGE_GENERATED", id);
+                        created++;
+                    } else {
+                        skipped++;
+                    }
                 }
             }
         }
         return new GenerateView(period.toString(), created, skipped);
+    }
+
+    private List<YearMonth> periodsFor(FeePlanRepository.Row plan, UUID tenantId, YearMonth requested) {
+        if (plan.seasonId() == null) {
+            return List.of(requested);
+        }
+        FeePlanRepository.SeasonWindow window = feePlans.seasonWindow(tenantId, plan.seasonId()).orElse(null);
+        if (window == null || window.startDate() == null || window.endDate() == null) {
+            return List.of(requested);
+        }
+        YearMonth first = YearMonth.from(window.startDate());
+        YearMonth last = YearMonth.from(window.endDate());
+        List<YearMonth> periods = new ArrayList<>();
+        for (YearMonth current = first; !current.isAfter(last); current = current.plusMonths(1)) {
+            periods.add(current);
+        }
+        return periods;
     }
 
     private static YearMonth parsePeriod(String period) {
@@ -256,7 +314,9 @@ class BillingService {
         }
     }
 
-    /** Período canónico para o plano, ou {@code null} se este plano não é cobrado nesse mês. */
+    /**
+     * Período canónico para o plano, ou {@code null} se este plano não é cobrado nesse mês.
+     */
     private static String billingPeriod(String periodicity, YearMonth period) {
         return switch (periodicity) {
             case "MONTHLY" -> period.toString();
@@ -285,7 +345,8 @@ class BillingService {
         requireWriter(roles);
         UUID t = tenant();
         requireValue(status, CHARGE_STATUSES, "Estado");
-        if (!charges.updateStatus(t, id, status)) throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Cobrança não encontrada");
+        if (!charges.updateStatus(t, id, status))
+            throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Cobrança não encontrada");
         charges.audit(t, actorId, "CHARGE_STATUS_UPDATED", id);
     }
 
@@ -293,7 +354,8 @@ class BillingService {
     void deleteCharge(UUID actorId, Set<String> roles, UUID id) {
         requireWriter(roles);
         UUID t = tenant();
-        if (!charges.anonymize(t, id)) throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Cobrança não encontrada");
+        if (!charges.anonymize(t, id))
+            throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Cobrança não encontrada");
         charges.audit(t, actorId, "CHARGE_ANONYMIZED", id);
     }
 
@@ -315,7 +377,8 @@ class BillingService {
         requireAmount(amountCents);
         String paymentMethod = method == null ? "CASH" : method;
         requireValue(paymentMethod, PAYMENT_METHODS, "Método");
-        if (charges.findById(t, chargeId).isEmpty()) throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Cobrança não encontrada");
+        if (charges.findById(t, chargeId).isEmpty())
+            throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Cobrança não encontrada");
         UUID id = UUID.randomUUID();
         payments.insert(id, t, chargeId, paymentMethod, amountCents, reference, actorId);
         payments.audit(t, actorId, "PAYMENT_CREATED", id);
@@ -336,7 +399,8 @@ class BillingService {
         UUID t = tenant();
         requireAmount(amountCents);
         requireValue(type, LEDGER_TYPES, "Tipo");
-        if (category == null || category.isBlank()) throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Categoria obrigatória");
+        if (category == null || category.isBlank())
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Categoria obrigatória");
         if (entryDate == null) throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Data obrigatória");
         UUID id = UUID.randomUUID();
         ledger.insert(id, t, type, category.trim(), amountCents, entryDate, description, actorId);
@@ -348,7 +412,8 @@ class BillingService {
     void deleteLedger(UUID actorId, Set<String> roles, UUID id) {
         requireWriter(roles);
         UUID t = tenant();
-        if (!ledger.anonymize(t, id)) throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Lançamento não encontrado");
+        if (!ledger.anonymize(t, id))
+            throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Lançamento não encontrado");
         ledger.audit(t, actorId, "LEDGER_ENTRY_ANONYMIZED", id);
     }
 }

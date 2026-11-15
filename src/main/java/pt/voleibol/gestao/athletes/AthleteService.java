@@ -13,12 +13,14 @@ import java.util.Set;
 import java.util.UUID;
 
 import org.springframework.dao.DuplicateKeyException;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.server.ResponseStatusException;
 
 import pt.voleibol.gestao.tenancy.TenantContext;
+import pt.voleibol.gestao.billing.ChargeRepository;
 
 /**
  * Atletas e encarregados de educação, com autorização por recurso:
@@ -50,9 +52,16 @@ class AthleteService {
     }
 
     private final AthleteRepository athletes;
+    private final ChargeRepository charges;
+
+    @Autowired
+    AthleteService(AthleteRepository athletes, ChargeRepository charges) {
+        this.athletes = athletes;
+        this.charges = charges;
+    }
 
     AthleteService(AthleteRepository athletes) {
-        this.athletes = athletes;
+        this(athletes, null);
     }
 
     @Transactional(readOnly = true)
@@ -245,7 +254,24 @@ class AthleteService {
         if (!athletes.updateStatus(tenantId, athleteId, validStatus(status))) {
             throw notFound();
         }
+
         athletes.audit(tenantId, actorId, "ATHLETE_STATUS_CHANGED", athleteId);
+        return get(actorId, roles, athleteId);
+    }
+
+    @Transactional
+    AthleteView registerWithdrawal(UUID actorId, Set<String> roles, UUID athleteId, LocalDate withdrawalDate) {
+        UUID tenantId = requireTenant();
+        requireManager(roles);
+        if (withdrawalDate == null) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Data de desistência obrigatória");
+        }
+        requireVisible(tenantId, athleteId, actorId, roles);
+        if (!athletes.registerWithdrawal(tenantId, athleteId, withdrawalDate)) {
+            throw notFound();
+        }
+        charges.cancelFutureRecurring(tenantId, athleteId, withdrawalDate);
+        athletes.audit(tenantId, actorId, "ATHLETE_WITHDRAWN", athleteId);
         return get(actorId, roles, athleteId);
     }
 

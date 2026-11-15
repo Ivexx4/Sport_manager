@@ -2,11 +2,9 @@ package pt.voleibol.gestao.athletes;
 
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.NotBlank;
-import jakarta.validation.constraints.NotNull;
 
 import java.time.LocalDate;
 import java.util.List;
-import java.util.Set;
 import java.util.UUID;
 
 import org.springframework.http.HttpStatus;
@@ -22,19 +20,13 @@ import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
+import pt.voleibol.gestao.shared.Auth;
+
 @RestController
 @RequestMapping("/api/v1")
 class DocumentController {
 
     record DocumentRequest(@NotBlank String type, String fileName, String fileUrl, LocalDate validUntil) {
-    }
-
-    record DocumentResponse(UUID id, UUID athleteId, String type, String fileName, String fileUrl,
-                            LocalDate validUntil, java.time.Instant createdAt, java.time.Instant updatedAt) {
-        static DocumentResponse from(DocumentService.DocumentView v) {
-            return new DocumentResponse(v.id(), v.athleteId(), v.type(), v.fileName(), v.fileUrl(),
-                    v.validUntil(), v.createdAt(), v.updatedAt());
-        }
     }
 
     private final DocumentService service;
@@ -44,38 +36,29 @@ class DocumentController {
     }
 
     @GetMapping("/athletes/{athleteId}/documents")
-    List<DocumentResponse> list(@AuthenticationPrincipal Jwt jwt, @PathVariable UUID athleteId) {
-        return service.list(actor(jwt), roles(jwt), athleteId).stream().map(DocumentResponse::from).toList();
+    List<DocumentService.DocumentView> list(@AuthenticationPrincipal Jwt jwt, @PathVariable UUID athleteId) {
+        return service.list(Auth.actor(jwt), Auth.roles(jwt), athleteId);
     }
 
     @PostMapping("/athletes/{athleteId}/documents")
-    ResponseEntity<DocumentResponse> create(@AuthenticationPrincipal Jwt jwt, @PathVariable UUID athleteId,
-                                           @Valid @RequestBody DocumentRequest request) {
-        DocumentResponse created = DocumentResponse.from(service.create(
-                actor(jwt), roles(jwt), athleteId, request.type(), request.fileName(), request.fileUrl(),
-                request.validUntil()));
+    ResponseEntity<DocumentService.DocumentView> create(@AuthenticationPrincipal Jwt jwt,
+                                                        @PathVariable UUID athleteId,
+                                                        @Valid @RequestBody DocumentRequest request) {
+        DocumentService.DocumentView created = service.create(Auth.actor(jwt), Auth.roles(jwt), athleteId,
+                request.type(), request.fileName(), request.fileUrl(), request.validUntil());
         return ResponseEntity.status(HttpStatus.CREATED).body(created);
     }
 
     @PutMapping("/documents/{documentId}")
-    DocumentResponse update(@AuthenticationPrincipal Jwt jwt, @PathVariable UUID documentId,
-                            @Valid @RequestBody DocumentRequest request) {
-        return DocumentResponse.from(service.update(actor(jwt), roles(jwt), documentId, request.type(),
-                request.fileName(), request.fileUrl(), request.validUntil()));
+    DocumentService.DocumentView update(@AuthenticationPrincipal Jwt jwt, @PathVariable UUID documentId,
+                                        @Valid @RequestBody DocumentRequest request) {
+        return service.update(Auth.actor(jwt), Auth.roles(jwt), documentId, request.type(),
+                request.fileName(), request.fileUrl(), request.validUntil());
     }
 
     @DeleteMapping("/documents/{documentId}")
     ResponseEntity<Void> delete(@AuthenticationPrincipal Jwt jwt, @PathVariable UUID documentId) {
-        service.delete(actor(jwt), roles(jwt), documentId);
+        service.delete(Auth.actor(jwt), Auth.roles(jwt), documentId);
         return ResponseEntity.noContent().build();
-    }
-
-    private static UUID actor(Jwt jwt) {
-        return UUID.fromString(jwt.getSubject());
-    }
-
-    private static Set<String> roles(Jwt jwt) {
-        List<String> roles = jwt.getClaimAsStringList("roles");
-        return roles == null ? Set.of() : Set.copyOf(roles);
     }
 }

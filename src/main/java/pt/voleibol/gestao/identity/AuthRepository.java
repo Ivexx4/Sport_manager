@@ -10,6 +10,8 @@ import java.util.UUID;
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.stereotype.Repository;
 
+import pt.voleibol.gestao.shared.Db;
+
 /**
  * Acesso a dados da autenticação. Corre sempre dentro de uma transação, por isso as tabelas com RLS
  * só mostram o tenant atual; os filtros por tenant_id são uma segunda barreira, não a primeira.
@@ -45,8 +47,7 @@ class AuthRepository {
                         SELECT role FROM membership
                         WHERE tenant_id = :tenant AND user_id = :user AND status = 'ACTIVE'
                         """)
-                .param("tenant", tenantId)
-                .param("user", userId)
+                .param("tenant", tenantId).param("user", userId)
                 .query(String.class)
                 .list());
     }
@@ -56,9 +57,7 @@ class AuthRepository {
                         INSERT INTO refresh_token (tenant_id, user_id, token_hash, expires_at)
                         VALUES (:tenant, :user, :hash, :expires)
                         """)
-                .param("tenant", tenantId)
-                .param("user", userId)
-                .param("hash", tokenHash)
+                .param("tenant", tenantId).param("user", userId).param("hash", tokenHash)
                 .param("expires", OffsetDateTime.ofInstant(expiresAt, ZoneOffset.UTC))
                 .update();
     }
@@ -69,13 +68,12 @@ class AuthRepository {
                         FROM refresh_token
                         WHERE token_hash = :hash AND tenant_id = :tenant
                         """)
-                .param("hash", tokenHash)
-                .param("tenant", tenantId)
+                .param("hash", tokenHash).param("tenant", tenantId)
                 .query((rs, i) -> new RefreshRow(
                         rs.getObject("id", UUID.class),
                         rs.getObject("user_id", UUID.class),
-                        rs.getObject("created_at", OffsetDateTime.class).toInstant(),
-                        rs.getObject("expires_at", OffsetDateTime.class).toInstant(),
+                        Db.instant(rs, "created_at"),
+                        Db.instant(rs, "expires_at"),
                         rs.getBoolean("revoked")))
                 .optional();
     }
@@ -98,8 +96,7 @@ class AuthRepository {
                         UPDATE refresh_token SET revoked_at = now()
                         WHERE id = :id AND tenant_id = :tenant AND revoked_at IS NULL
                         """)
-                .param("id", tokenId)
-                .param("tenant", tenantId)
+                .param("id", tokenId).param("tenant", tenantId)
                 .update() == 1;
     }
 
@@ -108,8 +105,7 @@ class AuthRepository {
                         UPDATE refresh_token SET revoked_at = now()
                         WHERE tenant_id = :tenant AND user_id = :user AND revoked_at IS NULL
                         """)
-                .param("tenant", tenantId)
-                .param("user", userId)
+                .param("tenant", tenantId).param("user", userId)
                 .update();
     }
 
@@ -118,9 +114,7 @@ class AuthRepository {
                         INSERT INTO audit_log (tenant_id, user_id, action, entity, entity_id)
                         VALUES (:tenant, :user, :action, 'session', :user)
                         """)
-                .param("tenant", tenantId)
-                .param("user", userId)
-                .param("action", action)
+                .param("tenant", tenantId).param("user", userId).param("action", action)
                 .update();
     }
 }

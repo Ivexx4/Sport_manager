@@ -28,12 +28,9 @@ class SeasonService {
     }
 
     private final SeasonRepository seasons;
+
     SeasonService(SeasonRepository seasons) {
         this.seasons = seasons;
-    }
-
-    SeasonService(SeasonRepository seasons, AgeGroupRepository ignoredAgeGroups) {
-        this(seasons);
     }
 
     @Transactional(readOnly = true)

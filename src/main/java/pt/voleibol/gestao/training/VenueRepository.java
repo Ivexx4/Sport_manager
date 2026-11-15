@@ -1,13 +1,14 @@
 package pt.voleibol.gestao.training;
 
 import java.time.Instant;
-import java.time.OffsetDateTime;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.stereotype.Repository;
+
+import pt.voleibol.gestao.shared.Db;
 
 @Repository
 class VenueRepository {
@@ -39,8 +40,7 @@ class VenueRepository {
                         FROM venue
                         WHERE tenant_id = :tenant AND id = :id AND anonymized_at IS NULL
                         """)
-                .param("tenant", tenantId)
-                .param("id", id)
+                .param("tenant", tenantId).param("id", id)
                 .query(VenueRepository::map)
                 .optional();
     }
@@ -49,8 +49,7 @@ class VenueRepository {
         String sql = "SELECT EXISTS (SELECT 1 FROM venue WHERE tenant_id = :tenant AND anonymized_at IS NULL "
                 + "AND lower(name) = lower(:name)";
         var spec = jdbc.sql(excludeId == null ? sql + ")" : sql + " AND id <> :exclude)")
-                .param("tenant", tenantId)
-                .param("name", name);
+                .param("tenant", tenantId).param("name", name);
         if (excludeId != null) {
             spec = spec.param("exclude", excludeId);
         }
@@ -62,10 +61,7 @@ class VenueRepository {
                         INSERT INTO venue (id, tenant_id, name, address, created_by)
                         VALUES (:id, :tenant, :name, :address, :actor)
                         """)
-                .param("id", id)
-                .param("tenant", tenantId)
-                .param("name", name)
-                .param("address", address)
+                .param("id", id).param("tenant", tenantId).param("name", name).param("address", address)
                 .param("actor", actorId)
                 .update();
     }
@@ -76,10 +72,7 @@ class VenueRepository {
                         SET name = :name, address = :address, updated_at = now()
                         WHERE tenant_id = :tenant AND id = :id AND anonymized_at IS NULL
                         """)
-                .param("tenant", tenantId)
-                .param("id", id)
-                .param("name", name)
-                .param("address", address)
+                .param("tenant", tenantId).param("id", id).param("name", name).param("address", address)
                 .update() == 1;
     }
 
@@ -89,8 +82,7 @@ class VenueRepository {
                         SET anonymized_at = now(), name = 'Local anonimizado', updated_at = now()
                         WHERE tenant_id = :tenant AND id = :id AND anonymized_at IS NULL
                         """)
-                .param("tenant", tenantId)
-                .param("id", id)
+                .param("tenant", tenantId).param("id", id)
                 .update() == 1;
     }
 
@@ -99,9 +91,7 @@ class VenueRepository {
                         INSERT INTO audit_log (tenant_id, user_id, action, entity, entity_id)
                         VALUES (:tenant, :actor, :action, 'venue', :entity)
                         """)
-                .param("tenant", tenantId)
-                .param("actor", actorId)
-                .param("action", action)
+                .param("tenant", tenantId).param("actor", actorId).param("action", action)
                 .param("entity", entityId)
                 .update();
     }
@@ -111,7 +101,7 @@ class VenueRepository {
                 rs.getObject("id", UUID.class),
                 rs.getString("name"),
                 rs.getString("address"),
-                rs.getObject("created_at", OffsetDateTime.class).toInstant(),
-                rs.getObject("updated_at", OffsetDateTime.class).toInstant());
+                Db.instant(rs, "created_at"),
+                Db.instant(rs, "updated_at"));
     }
 }

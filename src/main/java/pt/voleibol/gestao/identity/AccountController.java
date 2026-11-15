@@ -23,6 +23,8 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.server.ResponseStatusException;
 
+import pt.voleibol.gestao.shared.Auth;
+
 @RestController
 @RequestMapping("/api/v1")
 class AccountController {
@@ -48,16 +50,6 @@ class AccountController {
                                  @NotBlank @Size(max = 200) String newPassword) {
     }
 
-    record RoleResponse(String role, String status) {
-    }
-
-    record MemberResponse(UUID userId, String email, String name, String status, List<RoleResponse> roles) {
-        static MemberResponse from(AccountService.MemberView m) {
-            return new MemberResponse(m.userId(), m.email(), m.name(), m.status(),
-                    m.roles().stream().map(r -> new RoleResponse(r.role(), r.status())).toList());
-        }
-    }
-
     private final AccountService accountService;
 
     AccountController(AccountService accountService) {
@@ -67,9 +59,8 @@ class AccountController {
     /** Só ADMIN e DIRECAO (regra também na cadeia de segurança); DIRECAO não atribui ADMIN nem DIRECAO. */
     @PostMapping("/users/invitations")
     ResponseEntity<Void> invite(@AuthenticationPrincipal Jwt jwt, @Valid @RequestBody InviteRequest request) {
-        List<String> roles = jwt.getClaimAsStringList("roles");
-        accountService.invite(UUID.fromString(jwt.getSubject()), roles == null ? Set.of() : Set.copyOf(roles),
-                request.email(), request.name(), request.roles());
+        accountService.invite(Auth.actor(jwt), Auth.roles(jwt), request.email(), request.name(),
+                request.roles());
         return ResponseEntity.status(HttpStatus.ACCEPTED).build();
     }
 
@@ -95,33 +86,27 @@ class AccountController {
     @PostMapping("/auth/password/change")
     ResponseEntity<Void> changePassword(@AuthenticationPrincipal Jwt jwt,
                                         @Valid @RequestBody ChangePasswordRequest request) {
-        boolean changed = accountService.changePassword(UUID.fromString(jwt.getSubject()),
-                request.currentPassword(), request.newPassword());
-        if (!changed) {
+        if (!accountService.changePassword(Auth.actor(jwt), request.currentPassword(), request.newPassword())) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Password atual incorreta");
         }
         return ResponseEntity.noContent().build();
     }
 
     @GetMapping("/users")
-    List<MemberResponse> listMembers() {
-        return accountService.listMembers().stream().map(MemberResponse::from).toList();
+    List<AccountService.MemberView> listMembers() {
+        return accountService.listMembers();
     }
 
     @PostMapping("/users/{userId}/disable")
     ResponseEntity<Void> disableMember(@AuthenticationPrincipal Jwt jwt, @PathVariable UUID userId) {
-        List<String> roles = jwt.getClaimAsStringList("roles");
-        accountService.disableMember(UUID.fromString(jwt.getSubject()),
-                roles == null ? Set.of() : Set.copyOf(roles), userId);
+        accountService.disableMember(Auth.actor(jwt), Auth.roles(jwt), userId);
         return ResponseEntity.noContent().build();
     }
 
     @DeleteMapping("/users/{userId}/roles/{role}")
-    ResponseEntity<Void> removeRole(@AuthenticationPrincipal Jwt jwt,
-                                    @PathVariable UUID userId, @PathVariable String role) {
-        List<String> roles = jwt.getClaimAsStringList("roles");
-        accountService.removeRole(UUID.fromString(jwt.getSubject()),
-                roles == null ? Set.of() : Set.copyOf(roles), userId, role);
+    ResponseEntity<Void> removeRole(@AuthenticationPrincipal Jwt jwt, @PathVariable UUID userId,
+                                    @PathVariable String role) {
+        accountService.removeRole(Auth.actor(jwt), Auth.roles(jwt), userId, role);
         return ResponseEntity.noContent().build();
     }
 }

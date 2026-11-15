@@ -2,13 +2,14 @@ package pt.voleibol.gestao.teams;
 
 import java.time.Instant;
 import java.time.LocalDate;
-import java.time.OffsetDateTime;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.stereotype.Repository;
+
+import pt.voleibol.gestao.shared.Db;
 
 /**
  * Acesso a dados das equipas, do staff e do plantel. As equipas podem ser associadas a uma época
@@ -69,8 +70,7 @@ class TeamRepository {
 
     Optional<TeamRow> findById(UUID tenantId, UUID teamId) {
         return jdbc.sql(SELECT + " WHERE t.tenant_id = :tenant AND t.id = :id AND t.anonymized_at IS NULL")
-                .param("tenant", tenantId)
-                .param("id", teamId)
+                .param("tenant", tenantId).param("id", teamId)
                 .query(TeamRepository::map)
                 .optional();
     }
@@ -80,8 +80,7 @@ class TeamRepository {
                 + "AND anonymized_at IS NULL AND lower(name) = lower(:name)";
         JdbcClient.StatementSpec spec = jdbc.sql(excludeId == null ? sql + ")"
                         : sql + " AND id <> :exclude)")
-                .param("tenant", tenantId)
-                .param("name", name);
+                .param("tenant", tenantId).param("name", name);
         if (excludeId != null) {
             spec = spec.param("exclude", excludeId);
         }
@@ -94,13 +93,8 @@ class TeamRepository {
                         INSERT INTO team (id, tenant_id, name, status, season_id, age_group_id, created_by)
                         VALUES (:id, :tenant, :name, :status, :season, :age_group, :actor)
                         """)
-                .param("id", id)
-                .param("tenant", tenantId)
-                .param("name", name)
-                .param("status", status)
-                .param("season", seasonId)
-                .param("age_group", ageGroupId)
-                .param("actor", actorId)
+                .param("id", id).param("tenant", tenantId).param("name", name).param("status", status)
+                .param("season", seasonId).param("age_group", ageGroupId).param("actor", actorId)
                 .update();
     }
 
@@ -111,12 +105,8 @@ class TeamRepository {
                             updated_at = now()
                         WHERE tenant_id = :tenant AND id = :id AND anonymized_at IS NULL
                         """)
-                .param("tenant", tenantId)
-                .param("id", teamId)
-                .param("name", name)
-                .param("status", status)
-                .param("season", seasonId)
-                .param("age_group", ageGroupId)
+                .param("tenant", tenantId).param("id", teamId).param("name", name).param("status", status)
+                .param("season", seasonId).param("age_group", ageGroupId)
                 .update() == 1;
     }
 
@@ -131,8 +121,7 @@ class TeamRepository {
                             updated_at = now()
                         WHERE tenant_id = :tenant AND id = :id AND anonymized_at IS NULL
                         """)
-                .param("tenant", tenantId)
-                .param("id", teamId)
+                .param("tenant", tenantId).param("id", teamId)
                 .update() == 1;
     }
 
@@ -146,8 +135,7 @@ class TeamRepository {
                         WHERE s.tenant_id = :tenant AND s.team_id = :team
                         ORDER BY u.name, u.id
                         """)
-                .param("tenant", tenantId)
-                .param("team", teamId)
+                .param("tenant", tenantId).param("team", teamId)
                 .query((rs, i) -> new StaffRow(
                         rs.getObject("user_id", UUID.class),
                         rs.getString("name"),
@@ -162,9 +150,7 @@ class TeamRepository {
                             SELECT 1 FROM team_staff
                             WHERE tenant_id = :tenant AND team_id = :team AND user_id = :user)
                         """)
-                .param("tenant", tenantId)
-                .param("team", teamId)
-                .param("user", userId)
+                .param("tenant", tenantId).param("team", teamId).param("user", userId)
                 .query(Boolean.class)
                 .single();
     }
@@ -174,10 +160,7 @@ class TeamRepository {
                         INSERT INTO team_staff (tenant_id, team_id, user_id, role, created_by)
                         VALUES (:tenant, :team, :user, :role, :actor)
                         """)
-                .param("tenant", tenantId)
-                .param("team", teamId)
-                .param("user", userId)
-                .param("role", role)
+                .param("tenant", tenantId).param("team", teamId).param("user", userId).param("role", role)
                 .param("actor", actorId)
                 .update();
     }
@@ -187,9 +170,7 @@ class TeamRepository {
                         DELETE FROM team_staff
                         WHERE tenant_id = :tenant AND team_id = :team AND user_id = :user
                         """)
-                .param("tenant", tenantId)
-                .param("team", teamId)
-                .param("user", userId)
+                .param("tenant", tenantId).param("team", teamId).param("user", userId)
                 .update() == 1;
     }
 
@@ -204,8 +185,7 @@ class TeamRepository {
                           AND a.anonymized_at IS NULL
                         ORDER BY a.full_name, a.id
                         """)
-                .param("tenant", tenantId)
-                .param("team", teamId)
+                .param("tenant", tenantId).param("team", teamId)
                 .query((rs, i) -> new RosterRow(
                         rs.getObject("id", UUID.class),
                         rs.getString("full_name"),
@@ -219,9 +199,7 @@ class TeamRepository {
                             SELECT 1 FROM team_athlete
                             WHERE tenant_id = :tenant AND team_id = :team AND athlete_id = :athlete)
                         """)
-                .param("tenant", tenantId)
-                .param("team", teamId)
-                .param("athlete", athleteId)
+                .param("tenant", tenantId).param("team", teamId).param("athlete", athleteId)
                 .query(Boolean.class)
                 .single();
     }
@@ -231,9 +209,7 @@ class TeamRepository {
                         INSERT INTO team_athlete (tenant_id, team_id, athlete_id, created_by)
                         VALUES (:tenant, :team, :athlete, :actor)
                         """)
-                .param("tenant", tenantId)
-                .param("team", teamId)
-                .param("athlete", athleteId)
+                .param("tenant", tenantId).param("team", teamId).param("athlete", athleteId)
                 .param("actor", actorId)
                 .update();
     }
@@ -246,11 +222,8 @@ class TeamRepository {
                 ON CONFLICT (tenant_id, season_id, athlete_id)
                 DO UPDATE SET age_group_id = EXCLUDED.age_group_id, updated_at = now()
                 """)
-                .param("tenant", tenantId)
-                .param("season", seasonId)
-                .param("athlete", athleteId)
-                .param("group", ageGroupId)
-                .param("actor", actorId)
+                .param("tenant", tenantId).param("season", seasonId).param("athlete", athleteId)
+                .param("group", ageGroupId).param("actor", actorId)
                 .update();
     }
 
@@ -259,9 +232,7 @@ class TeamRepository {
                         DELETE FROM team_athlete
                         WHERE tenant_id = :tenant AND team_id = :team AND athlete_id = :athlete
                         """)
-                .param("tenant", tenantId)
-                .param("team", teamId)
-                .param("athlete", athleteId)
+                .param("tenant", tenantId).param("team", teamId).param("athlete", athleteId)
                 .update() == 1;
     }
 
@@ -273,8 +244,7 @@ class TeamRepository {
                             SELECT 1 FROM membership
                             WHERE tenant_id = :tenant AND user_id = :user AND status = 'ACTIVE')
                         """)
-                .param("tenant", tenantId)
-                .param("user", userId)
+                .param("tenant", tenantId).param("user", userId)
                 .query(Boolean.class)
                 .single();
     }
@@ -285,8 +255,7 @@ class TeamRepository {
                             SELECT 1 FROM athlete
                             WHERE tenant_id = :tenant AND id = :id AND anonymized_at IS NULL)
                         """)
-                .param("tenant", tenantId)
-                .param("id", athleteId)
+                .param("tenant", tenantId).param("id", athleteId)
                 .query(Boolean.class)
                 .single();
     }
@@ -297,8 +266,7 @@ class TeamRepository {
                             SELECT 1 FROM season
                             WHERE tenant_id = :tenant AND id = :id AND anonymized_at IS NULL)
                         """)
-                .param("tenant", tenantId)
-                .param("id", seasonId)
+                .param("tenant", tenantId).param("id", seasonId)
                 .query(Boolean.class)
                 .single();
     }
@@ -320,8 +288,7 @@ class TeamRepository {
                         FROM athlete
                         WHERE tenant_id = :tenant AND id = :id AND anonymized_at IS NULL
                         """)
-                .param("tenant", tenantId)
-                .param("id", athleteId)
+                .param("tenant", tenantId).param("id", athleteId)
                 .query((rs, i) -> rs.getObject("birth_date", LocalDate.class))
                 .single();
     }
@@ -335,9 +302,7 @@ class TeamRepository {
                               AND sp.athlete_id = :athlete AND sp.age_group_id = :age_group
                               AND sp.status = 'ACTIVE')
                         """)
-                .param("tenant", tenantId)
-                .param("season", seasonId)
-                .param("athlete", athleteId)
+                .param("tenant", tenantId).param("season", seasonId).param("athlete", athleteId)
                 .param("age_group", ageGroupId)
                 .query(Boolean.class)
                 .single();
@@ -348,9 +313,7 @@ class TeamRepository {
                         INSERT INTO audit_log (tenant_id, user_id, action, entity, entity_id)
                         VALUES (:tenant, :actor, :action, 'team', :entity)
                         """)
-                .param("tenant", tenantId)
-                .param("actor", actorId)
-                .param("action", action)
+                .param("tenant", tenantId).param("actor", actorId).param("action", action)
                 .param("entity", teamId)
                 .update();
     }
@@ -362,7 +325,7 @@ class TeamRepository {
                 rs.getString("status"),
                 rs.getObject("season_id", UUID.class),
                 rs.getObject("age_group_id", UUID.class),
-                rs.getObject("created_at", OffsetDateTime.class).toInstant(),
-                rs.getObject("updated_at", OffsetDateTime.class).toInstant());
+                Db.instant(rs, "created_at"),
+                Db.instant(rs, "updated_at"));
     }
 }

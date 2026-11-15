@@ -5,37 +5,24 @@ import com.jayway.jsonpath.JsonPath;
 import java.nio.charset.StandardCharsets;
 import java.sql.Connection;
 import java.sql.Date;
-import java.sql.DriverManager;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.time.LocalDate;
-import java.util.Base64;
 import java.util.List;
 import java.util.UUID;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
-import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.http.MediaType;
 import org.springframework.mock.web.MockMultipartFile;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
-import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.ResultActions;
-import org.springframework.test.web.servlet.request.RequestPostProcessor;
-import org.springframework.test.web.servlet.setup.MockMvcBuilders;
-import org.springframework.web.context.WebApplicationContext;
-import org.testcontainers.junit.jupiter.Container;
-import org.testcontainers.junit.jupiter.Testcontainers;
-import org.testcontainers.postgresql.PostgreSQLContainer;
-
-import pt.voleibol.gestao.tenancy.TenantFilter;
+import pt.voleibol.gestao.shared.FlowTestSupport;
 
 import static org.assertj.core.api.Assertions.assertThat;
-import static org.springframework.security.test.web.servlet.setup.SecurityMockMvcConfigurers.springSecurity;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.multipart;
@@ -50,21 +37,18 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
  * educandos e FINANCEIRO apenas leitura. Cobre também CRUD, validação, isolamento entre clubes,
  * encarregados, filtros/paginação e auditoria.
  */
-@SpringBootTest(properties = "app.security.login-rate-limit.enabled=false")
-@Testcontainers
-class AthleteFlowTest {
+class AthleteFlowTest extends FlowTestSupport {
 
-    @Container
-    static final PostgreSQLContainer POSTGRES = new PostgreSQLContainer("postgres:16-alpine")
-            .withInitScript("db/init/01-roles.sql");
+    @DynamicPropertySource
+    static void propriedades(DynamicPropertyRegistry registry) {
+        registarPropriedades(registry);
+    }
 
     static final UUID CLUBE_A = UUID.fromString("00000000-0000-0000-0000-00000000a101");
     static final UUID CLUBE_B = UUID.fromString("00000000-0000-0000-0000-00000000a102");
 
     static final String HOST_A = "clube-atletas.localhost";
     static final String HOST_B = "clube-atletas-b.localhost";
-
-    static final String PASS = "palavra-passe-teste";
 
     static final String ADMIN = "admin@atletas.test";
     static final String DIRECAO = "direcao@atletas.test";
@@ -85,7 +69,6 @@ class AthleteFlowTest {
     static final UUID EQUIPA_OUTRA = UUID.fromString("00000000-0000-0000-0000-00000000c102");
 
     static final UUID EPOCA = UUID.fromString("00000000-0000-0000-0000-00000000c201");
-    static final UUID ESCALAO = UUID.fromString("00000000-0000-0000-0000-00000000c211");
 
     static final UUID JOGO_DISPUTADO = UUID.fromString("00000000-0000-0000-0000-00000000d101");
     static final UUID JOGO_AGENDADO = UUID.fromString("00000000-0000-0000-0000-00000000d102");
@@ -95,32 +78,8 @@ class AthleteFlowTest {
     /** O mesmo hash para todos os utilizadores de teste: evita calcular bcrypt dezenas de vezes. */
     private static String passwordHash;
 
-    @DynamicPropertySource
-    static void propriedades(DynamicPropertyRegistry registry) {
-        registry.add("spring.datasource.url", POSTGRES::getJdbcUrl);
-        registry.add("spring.datasource.username", () -> "volei_app");
-        registry.add("spring.datasource.password", () -> "dev");
-        registry.add("spring.flyway.user", () -> "volei_migrator");
-        registry.add("spring.flyway.password", () -> "dev");
-        registry.add("app.security.jwt.secret", () -> Base64.getEncoder().encodeToString(
-                "clave-de-teste-com-mais-de-32-bytes-ok!".getBytes(StandardCharsets.UTF_8)));
-    }
-
-    @Autowired
-    WebApplicationContext context;
-    @Autowired
-    TenantFilter tenantFilter;
-    @Autowired
-    PasswordEncoder passwordEncoder;
-
-    MockMvc mvc;
-
     @BeforeEach
     void preparar() throws SQLException {
-        mvc = MockMvcBuilders.webAppContextSetup(context)
-                .addFilters(tenantFilter)
-                .apply(springSecurity())
-                .build();
         semear();
     }
 
@@ -215,11 +174,11 @@ class AthleteFlowTest {
         // Deixa de aparecer em leituras e listagens, mesmo filtrando por INACTIVE.
         getAtleta(HOST_A, admin, id).andExpect(status().isNotFound());
         String lista = listar(HOST_A, admin).andReturn().getResponse().getContentAsString();
-        assertThat(ids(lista)).doesNotContain(id);
+        assertThat(atletaIds(lista)).doesNotContain(id);
         String inativos = mvc.perform(get("/api/v1/athletes").param("status", "INACTIVE")
                         .header("Authorization", "Bearer " + admin).with(host(HOST_A)))
                 .andExpect(status().isOk()).andReturn().getResponse().getContentAsString();
-        assertThat(ids(inativos)).doesNotContain(id);
+        assertThat(atletaIds(inativos)).doesNotContain(id);
 
         // A licença e a conta ficam livres para reutilização.
         String novo = criar(HOST_A, admin, corpo("Atleta Novo", "2011-02-03", "M", "123456789",
@@ -287,7 +246,7 @@ class AthleteFlowTest {
 
         String lista = listar(HOST_A, financeiro).andExpect(status().isOk())
                 .andReturn().getResponse().getContentAsString();
-        assertThat(ids(lista)).contains(ATLETA_1, ATLETA_2, ATLETA_3, ATLETA_4);
+        assertThat(atletaIds(lista)).contains(ATLETA_1, ATLETA_2, ATLETA_3, ATLETA_4);
 
         getAtleta(HOST_A, financeiro, ATLETA_1).andExpect(status().isOk());
         criar(HOST_A, financeiro, corpo("Sem Permissao", "2010-01-01", "F", null, null, null,
@@ -306,7 +265,7 @@ class AthleteFlowTest {
 
         String lista = listar(HOST_A, treinador).andExpect(status().isOk())
                 .andReturn().getResponse().getContentAsString();
-        assertThat(ids(lista)).containsExactly(ATLETA_2);
+        assertThat(atletaIds(lista)).containsExactly(ATLETA_2);
 
         getAtleta(HOST_A, treinador, ATLETA_2).andExpect(status().isOk());
         getAtleta(HOST_A, treinador, ATLETA_1).andExpect(status().isNotFound());
@@ -357,7 +316,7 @@ class AthleteFlowTest {
 
         String lista = listar(HOST_A, atleta).andExpect(status().isOk())
                 .andReturn().getResponse().getContentAsString();
-        assertThat(ids(lista)).containsExactly(ATLETA_1);
+        assertThat(atletaIds(lista)).containsExactly(ATLETA_1);
 
         getAtleta(HOST_A, atleta, ATLETA_1).andExpect(status().isOk());
         getAtleta(HOST_A, atleta, ATLETA_2).andExpect(status().isNotFound());
@@ -385,7 +344,7 @@ class AthleteFlowTest {
 
         String lista = listar(HOST_A, encarregado).andExpect(status().isOk())
                 .andReturn().getResponse().getContentAsString();
-        assertThat(ids(lista)).containsExactly(ATLETA_3);
+        assertThat(atletaIds(lista)).containsExactly(ATLETA_3);
 
         getAtleta(HOST_A, encarregado, ATLETA_3).andExpect(status().isOk());
         getAtleta(HOST_A, encarregado, ATLETA_1).andExpect(status().isNotFound());
@@ -483,9 +442,9 @@ class AthleteFlowTest {
         apagar(HOST_A, adminA, ATLETA_B).andExpect(status().isNotFound());
 
         String listaA = listar(HOST_A, adminA).andReturn().getResponse().getContentAsString();
-        assertThat(ids(listaA)).doesNotContain(ATLETA_B);
+        assertThat(atletaIds(listaA)).doesNotContain(ATLETA_B);
         String listaB = listar(HOST_B, adminB).andReturn().getResponse().getContentAsString();
-        assertThat(ids(listaB)).containsExactly(ATLETA_B);
+        assertThat(atletaIds(listaB)).containsExactly(ATLETA_B);
 
         getAtleta(HOST_B, adminB, ATLETA_1).andExpect(status().isNotFound());
     }
@@ -507,7 +466,7 @@ class AthleteFlowTest {
         String inativos = mvc.perform(get("/api/v1/athletes").param("status", "INACTIVE")
                         .header("Authorization", "Bearer " + admin).with(host(HOST_A)))
                 .andExpect(status().isOk()).andReturn().getResponse().getContentAsString();
-        assertThat(ids(inativos)).doesNotContain(ATLETA_2);
+        assertThat(atletaIds(inativos)).doesNotContain(ATLETA_2);
 
         mvc.perform(get("/api/v1/athletes").param("size", "101")
                         .header("Authorization", "Bearer " + admin).with(host(HOST_A)))
@@ -661,16 +620,6 @@ class AthleteFlowTest {
                 .content("{\"userId\":\"" + userId + "\",\"relationship\":\"" + relationship + "\"}"));
     }
 
-    private String acesso(String host, String email) throws Exception {
-        String resposta = mvc.perform(post("/api/v1/auth/login")
-                        .contentType(MediaType.APPLICATION_JSON)
-                        .content("{\"email\":\"" + email + "\",\"password\":\"" + PASS + "\"}")
-                        .with(host(host)))
-                .andExpect(status().isOk())
-                .andReturn().getResponse().getContentAsString();
-        return JsonPath.read(resposta, "$.accessToken");
-    }
-
     private static String corpo(String nome, String nascimento, String genero, String nif, String email,
                                 String telefone, String licenca, String userId, String status) {
         StringBuilder body = new StringBuilder("{")
@@ -690,24 +639,9 @@ class AthleteFlowTest {
         return body.append('}').toString();
     }
 
-    private static String json(String value) {
-        return value == null ? "null" : "\"" + value.replace("\\", "\\\\").replace("\"", "\\\"") + "\"";
-    }
-
-    private static List<UUID> ids(String json) {
-        List<String> valores = JsonPath.read(json, "$.items[*].id");
-        return valores.stream().map(UUID::fromString).toList();
-    }
-
-    private static RequestPostProcessor host(String serverName) {
-        return request -> {
-            request.setServerName(serverName);
-            return request;
-        };
-    }
-
-    private static UUID id(String email) {
-        return UUID.nameUUIDFromBytes(email.getBytes(StandardCharsets.UTF_8));
+    /** A listagem de atletas é paginada: os ids vivem em {@code $.items}. */
+    private static List<UUID> atletaIds(String json) {
+        return JsonPath.<List<String>>read(json, "$.items[*].id").stream().map(UUID::fromString).toList();
     }
 
     // --- semeadura ---
@@ -737,9 +671,7 @@ class AthleteFlowTest {
             atleta(c, ATLETA_B, CLUBE_B, "Atleta de Outro Clube", "2010-05-05", "F", "B1-LIC", null);
 
             epoca(c, EPOCA, CLUBE_A, "Época A");
-            escalao(c, ESCALAO, CLUBE_A, "Sub-14", 2010, 2014);
-
-            equipa(c, EQUIPA_A, CLUBE_A, "Equipa A", EPOCA, ESCALAO);
+            equipa(c, EQUIPA_A, CLUBE_A, "Equipa A", EPOCA, escalao(c, "CADETES"));
             equipa(c, EQUIPA_OUTRA, CLUBE_A, "Equipa B");
             executar(c, """
                     INSERT INTO team_staff (tenant_id, team_id, user_id, role)
@@ -802,13 +734,6 @@ class AthleteFlowTest {
         }
     }
 
-    private static void clube(Connection c, UUID tenantId, String nome, String slug) throws SQLException {
-        executar(c, """
-                INSERT INTO tenant (id, name, slug) VALUES (?, ?, ?)
-                ON CONFLICT (id) DO UPDATE SET name = EXCLUDED.name, slug = EXCLUDED.slug
-                """, tenantId, nome, slug);
-    }
-
     private void membro(Connection c, String email, UUID tenant, String... roles) throws SQLException {
         executar(c, """
                 INSERT INTO app_user (id, email, name, password_hash) VALUES (?, ?, 'Teste', ?)
@@ -861,42 +786,4 @@ class AthleteFlowTest {
                 """, seasonId, tenantId, nome, Date.valueOf("2025-08-01"), Date.valueOf("2026-07-31"));
     }
 
-    private static void escalao(Connection c, UUID ageGroupId, UUID tenantId, String nome, int minBirthYear, int maxBirthYear) throws SQLException {
-        executar(c, """
-                INSERT INTO age_group (id, tenant_id, season_id, name, min_birth_year, max_birth_year)
-                VALUES (?, ?, ?, ?, ?, ?)
-                ON CONFLICT (id) DO UPDATE SET name = EXCLUDED.name, season_id = EXCLUDED.season_id,
-                    min_birth_year = EXCLUDED.min_birth_year, max_birth_year = EXCLUDED.max_birth_year,
-                    anonymized_at = NULL
-                """, ageGroupId, tenantId, EPOCA, nome, minBirthYear, maxBirthYear);
-    }
-
-    private static int contarAuditoria(String action) throws SQLException {
-        return contar("SELECT count(*) FROM audit_log WHERE action = ?", action);
-    }
-
-    private static int contar(String sql, Object... params) throws SQLException {
-        try (Connection c = superuser(); PreparedStatement ps = c.prepareStatement(sql)) {
-            for (int i = 0; i < params.length; i++) {
-                ps.setObject(i + 1, params[i]);
-            }
-            try (ResultSet rs = ps.executeQuery()) {
-                rs.next();
-                return rs.getInt(1);
-            }
-        }
-    }
-
-    private static Connection superuser() throws SQLException {
-        return DriverManager.getConnection(POSTGRES.getJdbcUrl(), POSTGRES.getUsername(), POSTGRES.getPassword());
-    }
-
-    private static void executar(Connection c, String sql, Object... params) throws SQLException {
-        try (PreparedStatement ps = c.prepareStatement(sql)) {
-            for (int i = 0; i < params.length; i++) {
-                ps.setObject(i + 1, params[i]);
-            }
-            ps.executeUpdate();
-        }
-    }
 }

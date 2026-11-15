@@ -2,12 +2,13 @@ package pt.voleibol.gestao.billing;
 
 import java.time.Instant;
 import java.time.LocalDate;
-import java.time.OffsetDateTime;
 import java.util.List;
 import java.util.UUID;
 
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.stereotype.Repository;
+
+import pt.voleibol.gestao.shared.Db;
 
 @Repository
 class LedgerRepository {
@@ -45,7 +46,7 @@ class LedgerRepository {
 
     private static Row map(java.sql.ResultSet rs, int n) throws java.sql.SQLException {
         return new Row(rs.getObject("id", UUID.class), rs.getString("type"), rs.getString("category"),
-                rs.getLong("amount_cents"), rs.getObject("entry_date", java.sql.Date.class).toLocalDate(),
-                rs.getString("description"), rs.getObject("created_at", OffsetDateTime.class).toInstant());
+                rs.getLong("amount_cents"), Db.date(rs, "entry_date"),
+                rs.getString("description"), Db.instant(rs, "created_at"));
     }
 }

@@ -9,6 +9,8 @@ import java.util.UUID;
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.stereotype.Repository;
 
+import pt.voleibol.gestao.shared.Db;
+
 /**
  * Convites, tokens de reposição de password e dados de conta. As tabelas com RLS (incluindo app_user,
  * por membership/relação ao tenant) só mostram dados acessíveis no tenant atual; os filtros por tenant_id
@@ -65,9 +67,7 @@ class AccountRepository {
                         ON CONFLICT ((lower(email))) DO NOTHING
                         RETURNING id
                         """)
-                .param("email", email)
-                .param("name", name)
-                .param("hash", passwordHash)
+                .param("email", email).param("name", name).param("hash", passwordHash)
                 .query(UUID.class)
                 .optional();
     }
@@ -88,8 +88,7 @@ class AccountRepository {
                         SET password_hash = :hash, password_changed_at = now(), updated_at = now()
                         WHERE id = :id AND status = 'ACTIVE'
                         """)
-                .param("hash", passwordHash)
-                .param("id", userId)
+                .param("hash", passwordHash).param("id", userId)
                 .update() == 1;
     }
 
@@ -100,10 +99,7 @@ class AccountRepository {
                         ON CONFLICT (tenant_id, user_id, role)
                         DO UPDATE SET status = 'ACTIVE', updated_at = now()
                         """)
-                .param("tenant", tenantId)
-                .param("user", userId)
-                .param("role", role)
-                .param("by", createdBy)
+                .param("tenant", tenantId).param("user", userId).param("role", role).param("by", createdBy)
                 .update();
     }
 
@@ -115,8 +111,7 @@ class AccountRepository {
                         WHERE tenant_id = :tenant AND lower(email) = lower(:email)
                           AND accepted_at IS NULL AND revoked_at IS NULL
                         """)
-                .param("tenant", tenantId)
-                .param("email", email)
+                .param("tenant", tenantId).param("email", email)
                 .update();
     }
 
@@ -126,13 +121,8 @@ class AccountRepository {
                         INSERT INTO invitation (tenant_id, email, name, roles, token_hash, invited_by, expires_at)
                         VALUES (:tenant, :email, :name, :roles, :hash, :by, :expires)
                         """)
-                .param("tenant", tenantId)
-                .param("email", email)
-                .param("name", name)
-                .param("roles", roles)
-                .param("hash", tokenHash)
-                .param("by", invitedBy)
-                .param("expires", utc(expiresAt))
+                .param("tenant", tenantId).param("email", email).param("name", name).param("roles", roles)
+                .param("hash", tokenHash).param("by", invitedBy).param("expires", utc(expiresAt))
                 .update();
     }
 
@@ -143,15 +133,14 @@ class AccountRepository {
                         FROM invitation
                         WHERE token_hash = :hash AND tenant_id = :tenant
                         """)
-                .param("hash", tokenHash)
-                .param("tenant", tenantId)
+                .param("hash", tokenHash).param("tenant", tenantId)
                 .query((rs, i) -> new Invitation(
                         rs.getObject("id", UUID.class),
                         rs.getString("email"),
                         rs.getString("name"),
                         rs.getString("roles"),
                         rs.getObject("invited_by", UUID.class),
-                        rs.getObject("expires_at", OffsetDateTime.class).toInstant(),
+                        Db.instant(rs, "expires_at"),
                         rs.getBoolean("accepted"),
                         rs.getBoolean("revoked")))
                 .optional();
@@ -164,8 +153,7 @@ class AccountRepository {
                         WHERE id = :id AND tenant_id = :tenant
                           AND accepted_at IS NULL AND revoked_at IS NULL
                         """)
-                .param("id", invitationId)
-                .param("tenant", tenantId)
+                .param("id", invitationId).param("tenant", tenantId)
                 .update() == 1;
     }
 
@@ -200,8 +188,7 @@ class AccountRepository {
                         WHERE tenant_id = :tenant AND user_id = :user
                         ORDER BY role
                         """)
-                .param("tenant", tenantId)
-                .param("user", userId)
+                .param("tenant", tenantId).param("user", userId)
                 .query((rs, i) -> new MemberRole(rs.getString("role"), rs.getString("status")))
                 .list();
     }
@@ -211,8 +198,7 @@ class AccountRepository {
                         SELECT role FROM membership
                         WHERE tenant_id = :tenant AND user_id = :user
                         """)
-                .param("tenant", tenantId)
-                .param("user", userId)
+                .param("tenant", tenantId).param("user", userId)
                 .query(String.class)
                 .list());
     }
@@ -222,8 +208,7 @@ class AccountRepository {
                         UPDATE membership SET status = 'DISABLED', updated_at = now()
                         WHERE tenant_id = :tenant AND user_id = :user AND status = 'ACTIVE'
                         """)
-                .param("tenant", tenantId)
-                .param("user", userId)
+                .param("tenant", tenantId).param("user", userId)
                 .update();
     }
 
@@ -232,9 +217,7 @@ class AccountRepository {
                         DELETE FROM membership
                         WHERE tenant_id = :tenant AND user_id = :user AND role = :role
                         """)
-                .param("tenant", tenantId)
-                .param("user", userId)
-                .param("role", role)
+                .param("tenant", tenantId).param("user", userId).param("role", role)
                 .update() == 1;
     }
 
@@ -255,9 +238,7 @@ class AccountRepository {
                             WHERE tenant_id = :tenant AND user_id = :user AND role = :role AND status = 'ACTIVE'
                         )
                         """)
-                .param("tenant", tenantId)
-                .param("user", userId)
-                .param("role", role)
+                .param("tenant", tenantId).param("user", userId).param("role", role)
                 .query(Boolean.class)
                 .single();
     }
@@ -269,9 +250,7 @@ class AccountRepository {
                         SELECT count(*) FROM password_reset_token
                         WHERE tenant_id = :tenant AND user_id = :user AND created_at >= :since
                         """)
-                .param("tenant", tenantId)
-                .param("user", userId)
-                .param("since", utc(since))
+                .param("tenant", tenantId).param("user", userId).param("since", utc(since))
                 .query(Integer.class)
                 .single();
     }
@@ -281,9 +260,7 @@ class AccountRepository {
                         INSERT INTO password_reset_token (tenant_id, user_id, token_hash, expires_at)
                         VALUES (:tenant, :user, :hash, :expires)
                         """)
-                .param("tenant", tenantId)
-                .param("user", userId)
-                .param("hash", tokenHash)
+                .param("tenant", tenantId).param("user", userId).param("hash", tokenHash)
                 .param("expires", utc(expiresAt))
                 .update();
     }
@@ -294,12 +271,11 @@ class AccountRepository {
                         FROM password_reset_token
                         WHERE token_hash = :hash AND tenant_id = :tenant
                         """)
-                .param("hash", tokenHash)
-                .param("tenant", tenantId)
+                .param("hash", tokenHash).param("tenant", tenantId)
                 .query((rs, i) -> new ResetToken(
                         rs.getObject("id", UUID.class),
                         rs.getObject("user_id", UUID.class),
-                        rs.getObject("expires_at", OffsetDateTime.class).toInstant(),
+                        Db.instant(rs, "expires_at"),
                         rs.getBoolean("used")))
                 .optional();
     }
@@ -309,8 +285,7 @@ class AccountRepository {
                         UPDATE password_reset_token SET used_at = now()
                         WHERE id = :id AND tenant_id = :tenant AND used_at IS NULL
                         """)
-                .param("id", tokenId)
-                .param("tenant", tenantId)
+                .param("id", tokenId).param("tenant", tenantId)
                 .update() == 1;
     }
 
@@ -320,8 +295,7 @@ class AccountRepository {
                         UPDATE password_reset_token SET used_at = now()
                         WHERE tenant_id = :tenant AND user_id = :user AND used_at IS NULL
                         """)
-                .param("tenant", tenantId)
-                .param("user", userId)
+                .param("tenant", tenantId).param("user", userId)
                 .update();
     }
 }

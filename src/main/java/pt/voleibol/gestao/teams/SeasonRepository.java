@@ -2,13 +2,14 @@ package pt.voleibol.gestao.teams;
 
 import java.time.Instant;
 import java.time.LocalDate;
-import java.time.OffsetDateTime;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.stereotype.Repository;
+
+import pt.voleibol.gestao.shared.Db;
 
 /**
  * Acesso a dados das épocas. Todas as operações são filtradas pelo tenant recebido e as leituras
@@ -47,8 +48,7 @@ class SeasonRepository {
 
     Optional<SeasonRow> findById(UUID tenantId, UUID seasonId) {
         return jdbc.sql(SELECT + " WHERE s.tenant_id = :tenant AND s.id = :id AND s.anonymized_at IS NULL")
-                .param("tenant", tenantId)
-                .param("id", seasonId)
+                .param("tenant", tenantId).param("id", seasonId)
                 .query(SeasonRepository::map)
                 .optional();
     }
@@ -58,8 +58,7 @@ class SeasonRepository {
                 + "AND anonymized_at IS NULL AND lower(name) = lower(:name)";
         JdbcClient.StatementSpec spec = jdbc.sql(excludeId == null ? sql + ")"
                         : sql + " AND id <> :exclude)")
-                .param("tenant", tenantId)
-                .param("name", name);
+                .param("tenant", tenantId).param("name", name);
         if (excludeId != null) {
             spec = spec.param("exclude", excludeId);
         }
@@ -71,14 +70,9 @@ class SeasonRepository {
                         INSERT INTO season (id, tenant_id, name, start_date, end_date, cutoff_date, is_active, created_by)
                         VALUES (:id, :tenant, :name, :start, :end, :cutoff, :active, :actor)
                         """)
-                .param("id", id)
-                .param("tenant", tenantId)
-                .param("name", data.name())
-                .param("start", data.startDate())
-                .param("end", data.endDate())
-                .param("cutoff", data.cutoffDate())
-                .param("active", data.isActive())
-                .param("actor", actorId)
+                .param("id", id).param("tenant", tenantId).param("name", data.name())
+                .param("start", data.startDate()).param("end", data.endDate())
+                .param("cutoff", data.cutoffDate()).param("active", data.isActive()).param("actor", actorId)
                 .update();
     }
 
@@ -89,13 +83,9 @@ class SeasonRepository {
                             updated_at = now()
                         WHERE tenant_id = :tenant AND id = :id AND anonymized_at IS NULL
                         """)
-                .param("tenant", tenantId)
-                .param("id", seasonId)
-                .param("name", data.name())
-                .param("start", data.startDate())
-                .param("end", data.endDate())
-                .param("cutoff", data.cutoffDate())
-                .param("active", data.isActive())
+                .param("tenant", tenantId).param("id", seasonId).param("name", data.name())
+                .param("start", data.startDate()).param("end", data.endDate())
+                .param("cutoff", data.cutoffDate()).param("active", data.isActive())
                 .update() == 1;
     }
 
@@ -109,8 +99,7 @@ class SeasonRepository {
                         SET is_active = false, anonymized_at = now(), updated_at = now()
                         WHERE tenant_id = :tenant AND id = :id AND anonymized_at IS NULL
                         """)
-                .param("tenant", tenantId)
-                .param("id", seasonId)
+                .param("tenant", tenantId).param("id", seasonId)
                 .update() == 1;
     }
 
@@ -119,9 +108,7 @@ class SeasonRepository {
                         INSERT INTO audit_log (tenant_id, user_id, action, entity, entity_id)
                         VALUES (:tenant, :actor, :action, 'season', :entity)
                         """)
-                .param("tenant", tenantId)
-                .param("actor", actorId)
-                .param("action", action)
+                .param("tenant", tenantId).param("actor", actorId).param("action", action)
                 .param("entity", seasonId)
                 .update();
     }
@@ -134,7 +121,7 @@ class SeasonRepository {
                 rs.getObject("end_date", LocalDate.class),
                 rs.getObject("cutoff_date", LocalDate.class),
                 rs.getBoolean("is_active"),
-                rs.getObject("created_at", OffsetDateTime.class).toInstant(),
-                rs.getObject("updated_at", OffsetDateTime.class).toInstant());
+                Db.instant(rs, "created_at"),
+                Db.instant(rs, "updated_at"));
     }
 }

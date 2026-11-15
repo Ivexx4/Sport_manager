@@ -27,6 +27,14 @@ function Login({ onLogin, message }: { onLogin: () => void; message?: string }) 
   const [password, setPassword] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
+  const [bootstrapKey, setBootstrapKey] = useState("");
+  useEffect(() => {
+    if (mode === "create") {
+      api.generateBootstrapKey().then(result => setBootstrapKey(result.bootstrapKey)).catch(() => setError("O backend não conseguiu gerar o token de criação do clube."));
+    } else {
+      setBootstrapKey("");
+    }
+  }, [mode]);
   async function submit(event: React.FormEvent) {
     event.preventDefault(); setLoading(true); setError("");
     try {
@@ -35,7 +43,7 @@ function Login({ onLogin, message }: { onLogin: () => void; message?: string }) 
       } else {
         const form = event.currentTarget as HTMLFormElement;
         const values = new FormData(form);
-        const result = await api.provisionTenant(String(values.get("bootstrapKey") ?? ""), {
+        const result = await api.provisionTenant(bootstrapKey, {
           name: String(values.get("clubName") ?? ""),
           slug: String(values.get("slug") ?? ""),
           adminEmail: email,
@@ -60,7 +68,7 @@ function Login({ onLogin, message }: { onLogin: () => void; message?: string }) 
         <div className="brand"><span className="brand-mark">V</span><span>Clube<span className="brand-dot">.</span></span></div>
         <div className="login-heading"><p className="eyebrow">{mode === "login" ? "BEM-VINDO DE VOLTA" : "NOVO CLUBE"}</p><h2>{mode === "login" ? "Entrar na tua conta" : "Criar um clube"}</h2><p>{mode === "login" ? "Acede ao espaço de gestão do teu clube." : "O administrador da plataforma deve fornecer a chave de bootstrap."}</p></div>
         <form onSubmit={submit} className="stack">
-          {mode === "create" && <><label>Chave de bootstrap<input name="bootstrapKey" required type="password" placeholder="Chave criada pelo administrador do sistema" /></label><label>Nome do clube<input name="clubName" required maxLength={120} placeholder="Clube de Voleibol" /></label><label>Slug do clube<input name="slug" required maxLength={63} pattern="[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?" placeholder="clube-novo" /><small className="field-help">Será usado no endereço clube-novo.localhost.</small></label><label>Nome do administrador<input name="adminName" required maxLength={120} placeholder="Nome completo" /></label></>}
+          {mode === "create" && <><p className="field-help">O backend gerou um token de utilização única para esta criação.</p><label>Nome do clube<input name="clubName" required maxLength={120} placeholder="Clube de Voleibol" /></label><label>Slug do clube<input name="slug" required maxLength={63} pattern="[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?" placeholder="clube-novo" /><small className="field-help">Será usado no endereço clube-novo.localhost.</small></label><label>Nome do administrador<input name="adminName" required maxLength={120} placeholder="Nome completo" /></label></>}
           <label>Email<input type="email" value={email} onChange={e => setEmail(e.target.value)} placeholder="nome@clube.pt" required /></label>
           <label>Password<input type="password" value={password} onChange={e => setPassword(e.target.value)} placeholder="••••••••" required /></label>
           {(error || message) && <p className="error-text">{error || message}</p>}

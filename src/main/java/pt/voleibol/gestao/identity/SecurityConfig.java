@@ -50,7 +50,10 @@ class SecurityConfig {
         try {
             bytes = Base64.getDecoder().decode(properties.secret());
         } catch (IllegalArgumentException e) {
-            throw new IllegalStateException("app.security.jwt.secret tem de estar em Base64", e);
+            throw new IllegalStateException(
+                    "app.security.jwt.secret tem de ser Base64 válido. "
+                            + "Em desenvolvimento inicia com SPRING_PROFILES_ACTIVE=dev; "
+                            + "fora de dev define JWT_SECRET (por exemplo: openssl rand -base64 48).", e);
         }
         if (bytes.length < MIN_SECRET_BYTES) {
             throw new IllegalStateException(

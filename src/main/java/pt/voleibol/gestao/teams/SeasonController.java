@@ -1,9 +1,7 @@
 package pt.voleibol.gestao.teams;
 
-import java.time.Instant;
 import java.time.LocalDate;
 import java.util.List;
-import java.util.Set;
 import java.util.UUID;
 
 import org.springframework.http.HttpStatus;
@@ -23,6 +21,8 @@ import jakarta.validation.Valid;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.Size;
 
+import pt.voleibol.gestao.shared.Auth;
+
 /**
  * Épocas do clube: CRUD. A leitura é aberta a qualquer membro autenticado; a escrita é exclusiva
  * de ADMIN/DIRECAO, validada no serviço.
@@ -32,18 +32,10 @@ import jakarta.validation.constraints.Size;
 class SeasonController {
 
     record SeasonRequest(@NotBlank @Size(max = 120) String name,
-                          LocalDate startDate,
-                          LocalDate endDate,
-                          LocalDate cutoffDate,
-                          Boolean isActive) {
-    }
-
-    record SeasonResponse(UUID id, String name, LocalDate startDate, LocalDate endDate, LocalDate cutoffDate, boolean isActive,
-                           Instant createdAt, Instant updatedAt) {
-        static SeasonResponse from(SeasonService.SeasonView s) {
-            return new SeasonResponse(s.id(), s.name(), s.startDate(), s.endDate(), s.cutoffDate(), s.isActive(),
-                    s.createdAt(), s.updatedAt());
-        }
+                         LocalDate startDate,
+                         LocalDate endDate,
+                         LocalDate cutoffDate,
+                         Boolean isActive) {
     }
 
     private final SeasonService seasonService;
@@ -53,42 +45,34 @@ class SeasonController {
     }
 
     @GetMapping
-    List<SeasonResponse> list(@AuthenticationPrincipal Jwt jwt) {
-        return seasonService.list(actor(jwt), roles(jwt)).stream().map(SeasonResponse::from).toList();
+    List<SeasonService.SeasonView> list(@AuthenticationPrincipal Jwt jwt) {
+        return seasonService.list(Auth.actor(jwt), Auth.roles(jwt));
     }
 
     @GetMapping("/{seasonId}")
-    SeasonResponse get(@AuthenticationPrincipal Jwt jwt, @PathVariable UUID seasonId) {
-        return SeasonResponse.from(seasonService.get(actor(jwt), roles(jwt), seasonId));
+    SeasonService.SeasonView get(@AuthenticationPrincipal Jwt jwt, @PathVariable UUID seasonId) {
+        return seasonService.get(Auth.actor(jwt), Auth.roles(jwt), seasonId);
     }
 
     @PostMapping
-    ResponseEntity<SeasonResponse> create(@AuthenticationPrincipal Jwt jwt,
-                                          @Valid @RequestBody SeasonRequest request) {
-        SeasonResponse created = SeasonResponse.from(seasonService.create(actor(jwt), roles(jwt),
-                request.name(), request.startDate(), request.endDate(), request.cutoffDate(), request.isActive()));
+    ResponseEntity<SeasonService.SeasonView> create(@AuthenticationPrincipal Jwt jwt,
+                                                    @Valid @RequestBody SeasonRequest request) {
+        SeasonService.SeasonView created = seasonService.create(Auth.actor(jwt), Auth.roles(jwt),
+                request.name(), request.startDate(), request.endDate(), request.cutoffDate(),
+                request.isActive());
         return ResponseEntity.status(HttpStatus.CREATED).body(created);
     }
 
     @PutMapping("/{seasonId}")
-    SeasonResponse update(@AuthenticationPrincipal Jwt jwt, @PathVariable UUID seasonId,
-                          @Valid @RequestBody SeasonRequest request) {
-        return SeasonResponse.from(seasonService.update(actor(jwt), roles(jwt), seasonId,
-                request.name(), request.startDate(), request.endDate(), request.cutoffDate(), request.isActive()));
+    SeasonService.SeasonView update(@AuthenticationPrincipal Jwt jwt, @PathVariable UUID seasonId,
+                                    @Valid @RequestBody SeasonRequest request) {
+        return seasonService.update(Auth.actor(jwt), Auth.roles(jwt), seasonId, request.name(),
+                request.startDate(), request.endDate(), request.cutoffDate(), request.isActive());
     }
 
     @DeleteMapping("/{seasonId}")
     ResponseEntity<Void> delete(@AuthenticationPrincipal Jwt jwt, @PathVariable UUID seasonId) {
-        seasonService.delete(actor(jwt), roles(jwt), seasonId);
+        seasonService.delete(Auth.actor(jwt), Auth.roles(jwt), seasonId);
         return ResponseEntity.noContent().build();
-    }
-
-    private static UUID actor(Jwt jwt) {
-        return UUID.fromString(jwt.getSubject());
-    }
-
-    private static Set<String> roles(Jwt jwt) {
-        List<String> roles = jwt.getClaimAsStringList("roles");
-        return roles == null ? Set.of() : Set.copyOf(roles);
     }
 }

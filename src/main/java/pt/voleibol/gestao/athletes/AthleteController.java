@@ -8,10 +8,9 @@ import jakarta.validation.constraints.Past;
 import jakarta.validation.constraints.Pattern;
 import jakarta.validation.constraints.Size;
 
-import java.time.Instant;
 import java.time.LocalDate;
 import java.util.List;
-import java.util.Set;
+import java.util.Map;
 import java.util.UUID;
 
 import org.springframework.http.HttpStatus;
@@ -30,6 +29,8 @@ import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.multipart.MultipartFile;
 
+import pt.voleibol.gestao.shared.Auth;
+
 /**
  * Atletas e encarregados de educação. A autorização fina é feita no serviço, porque depende da
  * relação do utilizador autenticado com cada atleta e não apenas do papel no clube.
@@ -40,12 +41,13 @@ class AthleteController {
 
     private static final String STATUS_PATTERN = "(?i)ACTIVE|INACTIVE";
     private static final String GENDER_PATTERN = "(?i)F|M";
+    private static final String NIF_PATTERN = "^$|\\d{9}";
 
     record CreateAthleteRequest(
             @NotBlank @Size(max = 200) String fullName,
             @NotNull @Past LocalDate birthDate,
             @NotBlank @Pattern(regexp = GENDER_PATTERN) String gender,
-            @Pattern(regexp = "^$|\\d{9}") String nif,
+            @Pattern(regexp = NIF_PATTERN) String nif,
             @Email @Size(max = 254) String email,
             @Size(max = 30) String phone,
             @Size(max = 50) String licenseNumber,
@@ -57,7 +59,7 @@ class AthleteController {
             @NotBlank @Size(max = 200) String fullName,
             @NotNull @Past LocalDate birthDate,
             @NotBlank @Pattern(regexp = GENDER_PATTERN) String gender,
-            @Pattern(regexp = "^$|\\d{9}") String nif,
+            @Pattern(regexp = NIF_PATTERN) String nif,
             @Email @Size(max = 254) String email,
             @Size(max = 30) String phone,
             @Size(max = 50) String licenseNumber) {
@@ -66,33 +68,13 @@ class AthleteController {
     record StatusRequest(@NotBlank @Pattern(regexp = STATUS_PATTERN) String status) {
     }
 
+    record WithdrawalRequest(@NotNull LocalDate withdrawalDate) {
+    }
+
     record LinkAccountRequest(@NotNull UUID userId) {
     }
 
     record GuardianRequest(@NotNull UUID userId, @Size(max = 40) String relationship) {
-    }
-
-    record AthleteResponse(UUID id, String fullName, LocalDate birthDate, String gender, String nif,
-                           String email, String phone, String licenseNumber, String status, UUID userId,
-                           Instant createdAt, Instant updatedAt) {
-        static AthleteResponse from(AthleteService.AthleteView v) {
-            return new AthleteResponse(v.id(), v.fullName(), v.birthDate(), v.gender(), v.nif(),
-                    v.email(), v.phone(), v.licenseNumber(), v.status(), v.userId(),
-                    v.createdAt(), v.updatedAt());
-        }
-    }
-
-    record PageResponse(List<AthleteResponse> items, int page, int size, long total) {
-        static PageResponse from(AthleteService.Page page) {
-            return new PageResponse(page.items().stream().map(AthleteResponse::from).toList(),
-                    page.page(), page.size(), page.total());
-        }
-    }
-
-    record GuardianResponse(UUID userId, String name, String email, String relationship) {
-        static GuardianResponse from(AthleteService.GuardianView g) {
-            return new GuardianResponse(g.userId(), g.name(), g.email(), g.relationship());
-        }
     }
 
     private final AthleteService athleteService;
@@ -104,116 +86,105 @@ class AthleteController {
     }
 
     @GetMapping
-    PageResponse list(@AuthenticationPrincipal Jwt jwt,
-                      @RequestParam(required = false) String q,
-                      @RequestParam(required = false) String status,
-                      @RequestParam(required = false) UUID teamId,
-                      @RequestParam(defaultValue = "0") int page,
-                      @RequestParam(defaultValue = "20") int size) {
-        return PageResponse.from(athleteService.list(actor(jwt), roles(jwt), q, status, teamId, page, size));
+    AthleteService.Page list(@AuthenticationPrincipal Jwt jwt,
+                             @RequestParam(required = false) String q,
+                             @RequestParam(required = false) String status,
+                             @RequestParam(required = false) UUID teamId,
+                             @RequestParam(defaultValue = "0") int page,
+                             @RequestParam(defaultValue = "20") int size) {
+        return athleteService.list(Auth.actor(jwt), Auth.roles(jwt), q, status, teamId, page, size);
     }
 
     @GetMapping("/{athleteId}")
-    AthleteResponse get(@AuthenticationPrincipal Jwt jwt, @PathVariable UUID athleteId) {
-        return AthleteResponse.from(athleteService.get(actor(jwt), roles(jwt), athleteId));
-    }
-
-    record AthleteStatsResponse(long matchesCalledUp, long matchesPlayed, long callUpsConfirmed,
-                                long callUpsDeclined, long trainingsRegistered, long trainingsPresent) {
-        static AthleteStatsResponse from(AthleteStatsService.Stats s) {
-            return new AthleteStatsResponse(s.matchesCalledUp(), s.matchesPlayed(), s.callUpsConfirmed(),
-                    s.callUpsDeclined(), s.trainingsRegistered(), s.trainingsPresent());
-        }
+    AthleteService.AthleteView get(@AuthenticationPrincipal Jwt jwt, @PathVariable UUID athleteId) {
+        return athleteService.get(Auth.actor(jwt), Auth.roles(jwt), athleteId);
     }
 
     @GetMapping("/{athleteId}/stats")
-    AthleteStatsResponse stats(@AuthenticationPrincipal Jwt jwt, @PathVariable UUID athleteId) {
-        return AthleteStatsResponse.from(statsService.get(actor(jwt), roles(jwt), athleteId));
+    AthleteStatsService.Stats stats(@AuthenticationPrincipal Jwt jwt, @PathVariable UUID athleteId) {
+        return statsService.get(Auth.actor(jwt), Auth.roles(jwt), athleteId);
     }
 
     @PostMapping
-    ResponseEntity<AthleteResponse> create(@AuthenticationPrincipal Jwt jwt,
-                                           @Valid @RequestBody CreateAthleteRequest request) {
-        AthleteService.AthleteView created = athleteService.create(actor(jwt), roles(jwt),
+    ResponseEntity<AthleteService.AthleteView> create(@AuthenticationPrincipal Jwt jwt,
+                                                      @Valid @RequestBody CreateAthleteRequest request) {
+        AthleteService.AthleteView created = athleteService.create(Auth.actor(jwt), Auth.roles(jwt),
                 AthleteService.data(request.fullName(), request.birthDate(), request.gender(), request.nif(),
                         request.email(), request.phone(), request.licenseNumber(), request.status(),
                         request.userId()));
-        return ResponseEntity.status(HttpStatus.CREATED).body(AthleteResponse.from(created));
+        return ResponseEntity.status(HttpStatus.CREATED).body(created);
     }
 
     @PutMapping("/{athleteId}")
-    AthleteResponse update(@AuthenticationPrincipal Jwt jwt, @PathVariable UUID athleteId,
-                           @Valid @RequestBody UpdateAthleteRequest request) {
-        return AthleteResponse.from(athleteService.update(actor(jwt), roles(jwt), athleteId,
+    AthleteService.AthleteView update(@AuthenticationPrincipal Jwt jwt, @PathVariable UUID athleteId,
+                                      @Valid @RequestBody UpdateAthleteRequest request) {
+        return athleteService.update(Auth.actor(jwt), Auth.roles(jwt), athleteId,
                 AthleteService.data(request.fullName(), request.birthDate(), request.gender(), request.nif(),
-                        request.email(), request.phone(), request.licenseNumber(), null, null)));
+                        request.email(), request.phone(), request.licenseNumber(), null, null));
     }
 
     @DeleteMapping("/{athleteId}")
     ResponseEntity<Void> delete(@AuthenticationPrincipal Jwt jwt, @PathVariable UUID athleteId) {
-        athleteService.delete(actor(jwt), roles(jwt), athleteId);
+        athleteService.delete(Auth.actor(jwt), Auth.roles(jwt), athleteId);
         return ResponseEntity.noContent().build();
     }
 
     // --- conta e estado (só ADMIN/DIRECAO) ---
 
     @PostMapping("/{athleteId}/account")
-    AthleteResponse linkAccount(@AuthenticationPrincipal Jwt jwt, @PathVariable UUID athleteId,
-                                @Valid @RequestBody LinkAccountRequest request) {
-        return AthleteResponse.from(
-                athleteService.linkAccount(actor(jwt), roles(jwt), athleteId, request.userId()));
+    AthleteService.AthleteView linkAccount(@AuthenticationPrincipal Jwt jwt, @PathVariable UUID athleteId,
+                                           @Valid @RequestBody LinkAccountRequest request) {
+        return athleteService.linkAccount(Auth.actor(jwt), Auth.roles(jwt), athleteId, request.userId());
     }
 
     @DeleteMapping("/{athleteId}/account")
-    AthleteResponse unlinkAccount(@AuthenticationPrincipal Jwt jwt, @PathVariable UUID athleteId) {
-        return AthleteResponse.from(athleteService.unlinkAccount(actor(jwt), roles(jwt), athleteId));
+    AthleteService.AthleteView unlinkAccount(@AuthenticationPrincipal Jwt jwt, @PathVariable UUID athleteId) {
+        return athleteService.unlinkAccount(Auth.actor(jwt), Auth.roles(jwt), athleteId);
     }
 
     @PatchMapping("/{athleteId}/status")
-    AthleteResponse changeStatus(@AuthenticationPrincipal Jwt jwt, @PathVariable UUID athleteId,
-                                 @Valid @RequestBody StatusRequest request) {
-        return AthleteResponse.from(
-                athleteService.changeStatus(actor(jwt), roles(jwt), athleteId, request.status()));
+    AthleteService.AthleteView changeStatus(@AuthenticationPrincipal Jwt jwt, @PathVariable UUID athleteId,
+                                            @Valid @RequestBody StatusRequest request) {
+        return athleteService.changeStatus(Auth.actor(jwt), Auth.roles(jwt), athleteId, request.status());
+    }
+
+    @PostMapping("/{athleteId}/withdrawal")
+    AthleteService.AthleteView registerWithdrawal(@AuthenticationPrincipal Jwt jwt,
+                                                  @PathVariable UUID athleteId,
+                                                  @Valid @RequestBody WithdrawalRequest request) {
+        return athleteService.registerWithdrawal(Auth.actor(jwt), Auth.roles(jwt), athleteId,
+                request.withdrawalDate());
     }
 
     // --- encarregados de educação ---
 
     @GetMapping("/{athleteId}/guardians")
-    List<GuardianResponse> listGuardians(@AuthenticationPrincipal Jwt jwt, @PathVariable UUID athleteId) {
-        return athleteService.listGuardians(actor(jwt), roles(jwt), athleteId).stream()
-                .map(GuardianResponse::from).toList();
+    List<AthleteService.GuardianView> listGuardians(@AuthenticationPrincipal Jwt jwt,
+                                                    @PathVariable UUID athleteId) {
+        return athleteService.listGuardians(Auth.actor(jwt), Auth.roles(jwt), athleteId);
     }
 
     @PostMapping("/{athleteId}/guardians")
-    List<GuardianResponse> addGuardian(@AuthenticationPrincipal Jwt jwt, @PathVariable UUID athleteId,
-                                       @Valid @RequestBody GuardianRequest request) {
-        return athleteService.addGuardian(actor(jwt), roles(jwt), athleteId, request.userId(),
-                        request.relationship()).stream()
-                .map(GuardianResponse::from).toList();
+    List<AthleteService.GuardianView> addGuardian(@AuthenticationPrincipal Jwt jwt,
+                                                  @PathVariable UUID athleteId,
+                                                  @Valid @RequestBody GuardianRequest request) {
+        return athleteService.addGuardian(Auth.actor(jwt), Auth.roles(jwt), athleteId, request.userId(),
+                request.relationship());
     }
 
     @DeleteMapping("/{athleteId}/guardians/{userId}")
     ResponseEntity<Void> removeGuardian(@AuthenticationPrincipal Jwt jwt, @PathVariable UUID athleteId,
                                         @PathVariable UUID userId) {
-        athleteService.removeGuardian(actor(jwt), roles(jwt), athleteId, userId);
+        athleteService.removeGuardian(Auth.actor(jwt), Auth.roles(jwt), athleteId, userId);
         return ResponseEntity.noContent().build();
     }
 
     // --- importação CSV ---
     @PostMapping(value = "/import", consumes = "multipart/form-data")
-    ResponseEntity<java.util.Map<String, Object>> importCsv(@AuthenticationPrincipal Jwt jwt,
-                                                            @RequestParam("file") MultipartFile file) throws java.io.IOException {
-        int count = athleteService.importCsv(actor(jwt), roles(jwt), new java.io.InputStreamReader(file.getInputStream(),
-                java.nio.charset.StandardCharsets.UTF_8));
-        return ResponseEntity.ok(java.util.Map.of("imported", count));
-    }
-
-    private static UUID actor(Jwt jwt) {
-        return UUID.fromString(jwt.getSubject());
-    }
-
-    private static Set<String> roles(Jwt jwt) {
-        List<String> roles = jwt.getClaimAsStringList("roles");
-        return roles == null ? Set.of() : Set.copyOf(roles);
+    ResponseEntity<Map<String, Object>> importCsv(@AuthenticationPrincipal Jwt jwt,
+                                                  @RequestParam("file") MultipartFile file) throws java.io.IOException {
+        int count = athleteService.importCsv(Auth.actor(jwt), Auth.roles(jwt),
+                new java.io.InputStreamReader(file.getInputStream(), java.nio.charset.StandardCharsets.UTF_8));
+        return ResponseEntity.ok(Map.of("imported", count));
     }
 }

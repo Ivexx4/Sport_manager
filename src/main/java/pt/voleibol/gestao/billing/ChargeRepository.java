@@ -2,7 +2,6 @@ package pt.voleibol.gestao.billing;
 
 import java.time.Instant;
 import java.time.LocalDate;
-import java.time.OffsetDateTime;
 import java.util.List;
 import java.util.Optional;
 import java.util.Set;
@@ -11,8 +10,10 @@ import java.util.UUID;
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.stereotype.Repository;
 
+import pt.voleibol.gestao.shared.Db;
+
 @Repository
-class ChargeRepository {
+public class ChargeRepository {
     record Row(UUID id, UUID athleteId, UUID guardianId, UUID feePlanId, long amountCents, LocalDate dueDate,
                String status, String billingPeriod, Instant createdAt, Instant updatedAt) {
     }
@@ -21,7 +22,10 @@ class ChargeRepository {
     }
 
     private final JdbcClient jdbc;
-    ChargeRepository(JdbcClient jdbc) { this.jdbc = jdbc; }
+
+    ChargeRepository(JdbcClient jdbc) {
+        this.jdbc = jdbc;
+    }
 
     List<Row> list(UUID tenantId, UUID actorId, Set<String> roles, UUID athleteId, String status) {
         boolean writer = roles.contains("ADMIN") || roles.contains("DIRECAO") || roles.contains("FINANCEIRO");
@@ -64,28 +68,26 @@ class ChargeRepository {
     }
 
     boolean athleteExists(UUID tenantId, UUID athleteId) {
-        Boolean exists = jdbc.sql("""
+        return Db.exists(jdbc.sql("""
                 SELECT EXISTS (SELECT 1 FROM athlete
                                WHERE tenant_id = :t AND id = :a AND anonymized_at IS NULL)
-                """).param("t", tenantId).param("a", athleteId).query(Boolean.class).single();
-        return Boolean.TRUE.equals(exists);
+                """).param("t", tenantId).param("a", athleteId));
     }
 
     boolean guardianExists(UUID tenantId, UUID userId) {
-        Boolean exists = jdbc.sql("""
+        return Db.exists(jdbc.sql("""
                 SELECT EXISTS (SELECT 1 FROM membership
                                WHERE tenant_id = :t AND user_id = :u AND status = 'ACTIVE')
-                """).param("t", tenantId).param("u", userId).query(Boolean.class).single();
-        return Boolean.TRUE.equals(exists);
+                """).param("t", tenantId).param("u", userId));
     }
 
     void insert(UUID id, UUID tenantId, UUID athleteId, UUID guardianId, UUID feePlanId, long amountCents,
                 LocalDate dueDate, String status, String billingPeriod, UUID actorId) {
         jdbc.sql("""
-                INSERT INTO charge (id, tenant_id, athlete_id, guardian_id, fee_plan_id, amount_cents, due_date,
-                                    status, billing_period, created_by)
-                VALUES (:id,:t,:a,:g,:f,:amount,:due,:status,:period,:actor)
-                """).param("id", id).param("t", tenantId).param("a", athleteId).param("g", guardianId)
+                        INSERT INTO charge (id, tenant_id, athlete_id, guardian_id, fee_plan_id, amount_cents, due_date,
+                                            status, billing_period, created_by)
+                        VALUES (:id,:t,:a,:g,:f,:amount,:due,:status,:period,:actor)
+                        """).param("id", id).param("t", tenantId).param("a", athleteId).param("g", guardianId)
                 .param("f", feePlanId).param("amount", amountCents).param("due", dueDate).param("status", status)
                 .param("period", billingPeriod).param("actor", actorId).update();
     }
@@ -120,38 +122,55 @@ class ChargeRepository {
         return spec.query((rs, i) -> new Target(
                 rs.getObject("athlete_id", UUID.class),
                 rs.getObject("guardian_id", UUID.class),
-                rs.getObject("birth_date", java.sql.Date.class) == null ? null
-                        : rs.getObject("birth_date", java.sql.Date.class).toLocalDate())).list();
+                Db.date(rs, "birth_date"))).list();
     }
 
-    /** Insere uma cobrança gerada; devolve {@code false} se o período já tinha sido faturado. */
+    /**
+     * Insere uma cobrança gerada; devolve {@code false} se o período já tinha sido faturado.
+     */
     boolean insertGenerated(UUID id, UUID tenantId, UUID athleteId, UUID guardianId, UUID feePlanId,
                             long amountCents, LocalDate dueDate, String billingPeriod, UUID actorId) {
         return jdbc.sql("""
-                INSERT INTO charge (id, tenant_id, athlete_id, guardian_id, fee_plan_id, amount_cents, due_date,
-                                    status, billing_period, created_by)
-                VALUES (:id,:t,:a,:g,:f,:amount,:due,'PENDING',:period,:actor)
-                ON CONFLICT (tenant_id, fee_plan_id, athlete_id, billing_period)
-                    WHERE fee_plan_id IS NOT NULL AND billing_period IS NOT NULL AND anonymized_at IS NULL
-                DO NOTHING
-                """).param("id", id).param("t", tenantId).param("a", athleteId).param("g", guardianId)
+                        INSERT INTO charge (id, tenant_id, athlete_id, guardian_id, fee_plan_id, amount_cents, due_date,
+                                            status, billing_period, created_by)
+                        VALUES (:id,:t,:a,:g,:f,:amount,:due,'PENDING',:period,:actor)
+                        ON CONFLICT (tenant_id, fee_plan_id, athlete_id, billing_period)
+                            WHERE fee_plan_id IS NOT NULL AND billing_period IS NOT NULL AND anonymized_at IS NULL
+                        DO NOTHING
+                        """).param("id", id).param("t", tenantId).param("a", athleteId).param("g", guardianId)
                 .param("f", feePlanId).param("amount", amountCents).param("due", dueDate)
                 .param("period", billingPeriod).param("actor", actorId).update() == 1;
     }
 
     boolean generatedExists(UUID tenantId, UUID feePlanId, UUID athleteId, String billingPeriod) {
-        Boolean exists = jdbc.sql("""
-                SELECT EXISTS (SELECT 1 FROM charge
-                               WHERE tenant_id = :t AND fee_plan_id = :f AND athlete_id = :a
-                                 AND billing_period = :period AND anonymized_at IS NULL)
-                """).param("t", tenantId).param("f", feePlanId).param("a", athleteId)
-                .param("period", billingPeriod).query(Boolean.class).single();
-        return Boolean.TRUE.equals(exists);
+        return Db.exists(jdbc.sql("""
+                        SELECT EXISTS (SELECT 1 FROM charge
+                                       WHERE tenant_id = :t AND fee_plan_id = :f AND athlete_id = :a
+                                         AND billing_period = :period AND anonymized_at IS NULL)
+                        """).param("t", tenantId).param("f", feePlanId).param("a", athleteId)
+                .param("period", billingPeriod));
     }
 
     boolean updateStatus(UUID tenantId, UUID id, String status) {
         return jdbc.sql("UPDATE charge SET status=:s, updated_at=now() WHERE tenant_id=:t AND id=:id AND anonymized_at IS NULL")
                 .param("t", tenantId).param("id", id).param("s", status).update() == 1;
+    }
+
+    public int cancelFutureRecurring(UUID tenantId, UUID athleteId, LocalDate withdrawalDate) {
+        return jdbc.sql("""
+                        UPDATE charge c
+                        SET status = 'CANCELLED', updated_at = now()
+                        FROM fee_plan p
+                        WHERE c.tenant_id = :t AND c.athlete_id = :a
+                          AND c.fee_plan_id = p.id AND p.tenant_id = c.tenant_id
+                          AND p.periodicity <> 'ONE_TIME'
+                          AND c.billing_period IS NOT NULL
+                          AND c.due_date >= :nextMonth
+                          AND c.status = 'PENDING'
+                          AND c.anonymized_at IS NULL
+                        """).param("t", tenantId).param("a", athleteId)
+                .param("nextMonth", withdrawalDate.withDayOfMonth(1).plusMonths(1))
+                .update();
     }
 
     boolean anonymize(UUID tenantId, UUID id) {
@@ -167,9 +186,9 @@ class ChargeRepository {
     private static Row map(java.sql.ResultSet rs, int n) throws java.sql.SQLException {
         return new Row(rs.getObject("id", UUID.class), rs.getObject("athlete_id", UUID.class),
                 rs.getObject("guardian_id", UUID.class), rs.getObject("fee_plan_id", UUID.class),
-                rs.getLong("amount_cents"), rs.getObject("due_date", java.sql.Date.class).toLocalDate(),
+                rs.getLong("amount_cents"), Db.date(rs, "due_date"),
                 rs.getString("status"), rs.getString("billing_period"),
-                rs.getObject("created_at", OffsetDateTime.class).toInstant(),
-                rs.getObject("updated_at", OffsetDateTime.class).toInstant());
+                Db.instant(rs, "created_at"),
+                Db.instant(rs, "updated_at"));
     }
 }

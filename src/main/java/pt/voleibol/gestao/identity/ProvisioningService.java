@@ -16,7 +16,9 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.server.ResponseStatusException;
 
-/** Provisionamento de novos clubes e do primeiro administrador (protegido por chave de bootstrap). */
+/**
+ * Provisionamento de novos clubes e do primeiro administrador (protegido por chave de bootstrap).
+ */
 @Service
 public class ProvisioningService {
 
@@ -29,6 +31,7 @@ public class ProvisioningService {
     private final JdbcClient jdbc;
     private final PasswordEncoder passwordEncoder;
     private volatile String bootstrapKey;
+    private volatile boolean generatedKey;
 
     public ProvisioningService(JdbcClient jdbc, PasswordEncoder passwordEncoder,
                                @Value("${app.platform.bootstrap-key:}") String bootstrapKey) {
@@ -41,18 +44,19 @@ public class ProvisioningService {
         byte[] bytes = new byte[32];
         RANDOM.nextBytes(bytes);
         bootstrapKey = Base64.getUrlEncoder().withoutPadding().encodeToString(bytes);
+        generatedKey = true;
         return bootstrapKey;
     }
 
     @Transactional
-    public ProvisionResult provisionTenant(String providedKey, String name, String slug,
-                                           String adminEmail, String adminName, String adminPassword) {
+    public synchronized ProvisionResult provisionTenant(String providedKey, String name, String slug,
+                                                        String adminEmail, String adminName, String adminPassword) {
         if (bootstrapKey.isEmpty()) {
             throw new ResponseStatusException(HttpStatus.SERVICE_UNAVAILABLE, "Provisionamento desativado");
         }
         if (providedKey == null || providedKey.isBlank()
                 || !MessageDigest.isEqual(bootstrapKey.getBytes(java.nio.charset.StandardCharsets.UTF_8),
-                        providedKey.getBytes(java.nio.charset.StandardCharsets.UTF_8))) {
+                providedKey.getBytes(java.nio.charset.StandardCharsets.UTF_8))) {
             throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Chave de bootstrap inválida");
         }
 
@@ -78,20 +82,23 @@ public class ProvisioningService {
             throw new ResponseStatusException(HttpStatus.CONFLICT, "Já existe um clube com este slug");
         }
 
-        record Ids(UUID tenantId, UUID adminUserId) {}
+        record Ids(UUID tenantId, UUID adminUserId) {
+        }
         Ids ids = jdbc.sql("""
                         SELECT tenant_id, admin_user_id
                         FROM provision_tenant(:slug, :name, :email, :adminName, :hash)
                         """)
-                .param("slug", normalizedSlug)
-                .param("name", clubName)
-                .param("email", email)
-                .param("adminName", aName)
-                .param("hash", passwordEncoder.encode(adminPassword))
+                .param("slug", normalizedSlug).param("name", clubName).param("email", email)
+                .param("adminName", aName).param("hash", passwordEncoder.encode(adminPassword))
                 .query((rs, i) -> new Ids(rs.getObject("tenant_id", UUID.class), rs.getObject("admin_user_id", UUID.class)))
                 .single();
 
-        return new ProvisionResult(ids.tenantId(), normalizedSlug, clubName, ids.adminUserId(), email);
+        ProvisionResult result = new ProvisionResult(ids.tenantId(), normalizedSlug, clubName, ids.adminUserId(), email);
+        if (generatedKey) {
+            bootstrapKey = "";
+            generatedKey = false;
+        }
+        return result;
     }
 
     private boolean tenantSlugExists(String slug) {

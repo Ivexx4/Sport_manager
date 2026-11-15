@@ -26,6 +26,15 @@ docker compose up -d                              # PostgreSQL 16 (volei_migrato
 SPRING_PROFILES_ACTIVE=dev mvn spring-boot:run    # perfil dev: segredo JWT, SMTP local e bootstrap key
 ```
 
+Em WSL/Linux, executa exatamente o segundo comando com o prefixo
+`SPRING_PROFILES_ACTIVE=dev`. Se executares apenas `mvn spring-boot:run`, a aplicação usa o
+perfil `default` e exige `JWT_SECRET` no ambiente:
+
+```bash
+export JWT_SECRET="$(openssl rand -base64 48)"
+mvn spring-boot:run
+```
+
 ### Lançamento completo (ambiente local)
 
 Na primeira execução, instalar **JDK 25**, **Maven 3.6.3 ou superior**, **Node.js 20 ou
@@ -78,10 +87,10 @@ superior** e **Docker Desktop** com o motor Docker em execução. A aplicação 
    # Opção A: seed completo, incluindo clube-piloto e administrador
    docker compose exec -T db psql -U postgres -d volei < docker/dev-seed.sql
 
-   # Opção B: provisionar um clube através da API
+   # Opção B: gerar um token e provisionar um clube através da API
+   TOKEN=$(curl -s -X POST http://127.0.0.1:8080/api/v1/platform/bootstrap-key | jq -r .bootstrapKey)
    curl -s -X POST http://localhost:8080/api/v1/platform/tenants \
-     -H "Content-Type: application/json" \
-     -H "X-Bootstrap-Key: dev-bootstrap-key" \
+     -H "Content-Type: application/json" -H "X-Bootstrap-Key: $TOKEN" \
      -d '{"name":"Clube Piloto 2","slug":"clube-piloto-2","adminEmail":"admin@clube-piloto-2.local","adminName":"Admin","adminPassword":"admin12345!"}'
    ```
 
@@ -165,11 +174,20 @@ Os módulos de treinos, jogos e quotas permitem criar sessões, jogos e planos q
 utilizador tem permissões de gestão. O módulo financeiro inclui quotas recorrentes e taxas
 únicas por atleta, geração automática de cobranças periódicas (com modo de simulação),
 atualização do estado das cobranças, registo de pagamentos por método, mapa de pendentes,
-saldo contabilístico e lançamentos de receitas/despesas. O papel `FINANCEIRO` tem acesso de
+saldo contabilístico e lançamentos de receitas/despesas. As promoções podem abranger todas
+as cobranças de um plano (`applicationScope: ALL`) ou apenas uma cobrança (`SINGLE`),
+identificada por `billingPeriod` no formato `AAAA-MM`. O papel `FINANCEIRO` tem acesso de
+gestão financeira. Uma desistência de atleta é registada em
+`POST /api/v1/athletes/{athleteId}/withdrawal` com `withdrawalDate`; as cobranças recorrentes
+pendentes a partir do mês seguinte são automaticamente anuladas, mantendo-se o histórico.
 gestão a este módulo.
 Os pagamentos reais por webhook de Multibanco/MB WAY continuam dependentes da integração
 com o agregador. A interface adapta-se a ecrãs pequenos com menu lateral colapsável.
 As áreas ainda não implementadas no backend aparecem desativadas no menu.
+
+Ao gerar cobranças para um plano recorrente associado a uma época com datas de início e fim,
+o sistema cria antecipadamente todas as mensalidades/trimestres/anuidades dessa época como
+`PENDING`, cada uma com a sua data de vencimento. Repetir a geração não duplica cobranças.
 
 Em desenvolvimento, arranca-o em paralelo com a API:
 
@@ -198,9 +216,12 @@ docker compose exec -T db psql -U postgres -d volei < docker/dev-seed.sql
 - **Se a base de dados local não arrancar** com `database files are incompatible with server`, o volume `pgdata` foi criado por outra versão principal do PostgreSQL: usa `docker compose down -v` (apaga os dados locais) ou alinha a imagem `postgres` no compose com a versão do volume.
 
 Fora do perfil `dev`, a variável `JWT_SECRET` é obrigatória (Base64, 32 bytes ou mais): `openssl rand -base64 48`.
-O provisionamento de novos clubes requer `APP_PLATFORM_BOOTSTRAP_KEY` (no perfil `dev` existe uma chave por omissão: `dev-bootstrap-key`).
-Também é possível gerar/rodar a chave através de `POST /api/v1/platform/bootstrap-key`;
-este endpoint só aceita ligações locais (`127.0.0.1`/`::1`) e devolve a nova chave uma única vez na resposta.
+O provisionamento de novos clubes requer um token de utilização única gerado pelo backend através
+de `POST /api/v1/platform/bootstrap-key`; este endpoint só aceita ligações locais
+(`127.0.0.1`/`::1`) e devolve o token uma única vez na resposta. A interface obtém o token
+automaticamente ao abrir o formulário de criação e nunca o pede ao utilizador. A variável
+`APP_PLATFORM_BOOTSTRAP_KEY` continua disponível como fallback de operação local/dev, mas deve
+ser removida em produção.
 
 ### Provisionamento de um clube
 
@@ -211,13 +232,14 @@ curl -s -X POST http://localhost:8080/api/v1/platform/tenants \
   -d '{"name":"Clube Piloto 2","slug":"clube-piloto-2","adminEmail":"admin@clube-piloto-2.local","adminName":"Admin","adminPassword":"admin12345!"}'
 ```
 
-Para gerar uma chave localmente, sem a guardar no código:
+Para gerar um token localmente, sem o guardar no código:
 
 ```bash
 curl -s -X POST http://127.0.0.1:8080/api/v1/platform/bootstrap-key
 ```
 
-Usa o valor `bootstrapKey` devolvido no cabeçalho `X-Bootstrap-Key` ao criar clubes.
+Usa o valor `bootstrapKey` devolvido no cabeçalho `X-Bootstrap-Key` ao criar um único clube.
+Depois de uma criação bem-sucedida, o token deixa de ser válido e é necessário gerar outro.
 
 Cria o clube e o primeiro administrador (`ADMIN`) com a password indicada (se o e-mail já existir, a conta é associada ao novo clube e a password existente mantém-se). Respostas: `201` com `tenantId`/`adminUserId`; `400` para validação; `403` para chave inválida; `409` se o slug já existir; `503` se o provisionamento estiver desativado (chave vazia).
 
@@ -297,7 +319,7 @@ Monólito modular com PostgreSQL e multitenancy por `tenant_id` + Row Level Secu
 
 | Endpoint                                     | Quem                    | Descrição                                                                            |
 |----------------------------------------------|-------------------------|--------------------------------------------------------------------------------------|
-| `POST /api/v1/platform/tenants`              | chave `X-Bootstrap-Key` | `{name, slug, adminEmail, adminName, adminPassword}` → 201; cria clube e 1.º `ADMIN` |
+| `POST /api/v1/platform/tenants`              | token único `X-Bootstrap-Key` | `{name, slug, adminEmail, adminName, adminPassword}` → 201; cria clube e 1.º `ADMIN` |
 | `POST /api/v1/users/invitations`             | `ADMIN`, `DIRECAO`      | `{email, name, roles[]}` → 202; enfileira o convite por e-mail                       |
 | `GET /api/v1/users`                          | `ADMIN`, `DIRECAO`      | 200; lista `{userId, email, name, status, roles:[{role, status}]}` do clube          |
 | `POST /api/v1/users/{userId}/disable`        | `ADMIN`, `DIRECAO`      | 204; desativa todos os papéis do membro no clube e revoga as sessões                 |

@@ -16,11 +16,9 @@ class TeamServiceUnitTest {
                 UUID.randomUUID(), "2025/26", LocalDate.of(2025, 9, 1),
                 LocalDate.of(2026, 6, 30), null, true, Instant.EPOCH, Instant.EPOCH);
         AgeGroupRepository.AgeGroupRow seniors = new AgeGroupRepository.AgeGroupRow(
-                UUID.randomUUID(), season.id(), "Seniores", 1900, 2007, true,
-                Instant.EPOCH, Instant.EPOCH);
+                UUID.randomUUID(), "Seniores", 19, null, true, Instant.EPOCH, Instant.EPOCH);
         AgeGroupRepository.AgeGroupRow juniors = new AgeGroupRepository.AgeGroupRow(
-                UUID.randomUUID(), season.id(), "Juniores", 2008, 2009, true,
-                Instant.EPOCH, Instant.EPOCH);
+                UUID.randomUUID(), "Juniores", 17, 17, true, Instant.EPOCH, Instant.EPOCH);
 
         assertThat(TeamService.isEligibleForSeniors(season, seniors, 2007)).isTrue();
         assertThat(TeamService.isEligibleForSeniors(season, seniors, 2008)).isFalse();

@@ -2,7 +2,6 @@ package pt.voleibol.gestao.athletes;
 
 import java.time.Instant;
 import java.time.LocalDate;
-import java.time.OffsetDateTime;
 import java.util.List;
 import java.util.Optional;
 import java.util.Set;
@@ -10,6 +9,8 @@ import java.util.UUID;
 
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.stereotype.Repository;
+
+import pt.voleibol.gestao.shared.Db;
 
 /**
  * Acesso a dados dos atletas. Todas as leituras passam pela política de visibilidade do ator
@@ -149,10 +150,8 @@ class AthleteRepository {
         boolean manager = roles.contains("ADMIN") || roles.contains("DIRECAO");
         boolean all = writable ? manager : manager || roles.contains("FINANCEIRO");
         JdbcClient.StatementSpec result = spec.param("tenant", tenantId)
-                .param("all", all)
-                .param("trainer", roles.contains("TREINADOR"))
-                .param("self", roles.contains("ATLETA"))
-                .param("guardian", roles.contains("ENCARREGADO"))
+                .param("all", all).param("trainer", roles.contains("TREINADOR"))
+                .param("self", roles.contains("ATLETA")).param("guardian", roles.contains("ENCARREGADO"))
                 .param("actor", actorId);
         return athleteId == null ? result : result.param("id", athleteId);
     }
@@ -166,18 +165,11 @@ class AthleteRepository {
                         VALUES (:id, :tenant, :name, :birth, :gender, :nif, :email, :phone,
                                 :license, :status, :user, :actor)
                         """)
-                .param("id", id)
-                .param("tenant", tenantId)
-                .param("name", data.fullName())
-                .param("birth", data.birthDate())
-                .param("gender", data.gender())
-                .param("nif", data.nif())
-                .param("email", data.email())
-                .param("phone", data.phone())
-                .param("license", data.licenseNumber())
-                .param("status", data.status())
-                .param("user", data.userId())
-                .param("actor", actorId)
+                .param("id", id).param("tenant", tenantId).param("name", data.fullName())
+                .param("birth", data.birthDate()).param("gender", data.gender()).param("nif", data.nif())
+                .param("email", data.email()).param("phone", data.phone())
+                .param("license", data.licenseNumber()).param("status", data.status())
+                .param("user", data.userId()).param("actor", actorId)
                 .update();
     }
 
@@ -188,14 +180,9 @@ class AthleteRepository {
                             email = :email, phone = :phone, license_number = :license, updated_at = now()
                         WHERE tenant_id = :tenant AND id = :id AND anonymized_at IS NULL
                         """)
-                .param("tenant", tenantId)
-                .param("id", athleteId)
-                .param("name", data.fullName())
-                .param("birth", data.birthDate())
-                .param("gender", data.gender())
-                .param("nif", data.nif())
-                .param("email", data.email())
-                .param("phone", data.phone())
+                .param("tenant", tenantId).param("id", athleteId).param("name", data.fullName())
+                .param("birth", data.birthDate()).param("gender", data.gender()).param("nif", data.nif())
+                .param("email", data.email()).param("phone", data.phone())
                 .param("license", data.licenseNumber())
                 .update() == 1;
     }
@@ -205,9 +192,7 @@ class AthleteRepository {
                         UPDATE athlete SET user_id = :user, updated_at = now()
                         WHERE tenant_id = :tenant AND id = :id AND anonymized_at IS NULL
                         """)
-                .param("tenant", tenantId)
-                .param("id", athleteId)
-                .param("user", userId)
+                .param("tenant", tenantId).param("id", athleteId).param("user", userId)
                 .update() == 1;
     }
 
@@ -216,8 +201,7 @@ class AthleteRepository {
                         UPDATE athlete SET user_id = NULL, updated_at = now()
                         WHERE tenant_id = :tenant AND id = :id AND anonymized_at IS NULL
                         """)
-                .param("tenant", tenantId)
-                .param("id", athleteId)
+                .param("tenant", tenantId).param("id", athleteId)
                 .update() == 1;
     }
 
@@ -226,9 +210,15 @@ class AthleteRepository {
                         UPDATE athlete SET status = :status, updated_at = now()
                         WHERE tenant_id = :tenant AND id = :id AND anonymized_at IS NULL
                         """)
-                .param("tenant", tenantId)
-                .param("id", athleteId)
-                .param("status", status)
+                .param("tenant", tenantId).param("id", athleteId).param("status", status)
+                .update() == 1;
+    }
+
+    boolean registerWithdrawal(UUID tenantId, UUID athleteId, LocalDate withdrawalDate) {
+        return jdbc.sql("""
+                        UPDATE athlete SET status = 'INACTIVE', withdrawal_date = :date, updated_at = now()
+                        WHERE tenant_id = :tenant AND id = :athlete AND anonymized_at IS NULL
+                        """).param("tenant", tenantId).param("athlete", athleteId).param("date", withdrawalDate)
                 .update() == 1;
     }
 
@@ -244,8 +234,7 @@ class AthleteRepository {
                             license_number = NULL, user_id = NULL, updated_at = now()
                         WHERE tenant_id = :tenant AND id = :id AND anonymized_at IS NULL
                         """)
-                .param("tenant", tenantId)
-                .param("id", athleteId)
+                .param("tenant", tenantId).param("id", athleteId)
                 .update() == 1;
     }
 
@@ -256,8 +245,7 @@ class AthleteRepository {
                 + "AND anonymized_at IS NULL AND lower(license_number) = lower(:license)";
         JdbcClient.StatementSpec spec = jdbc.sql(excludeId == null ? sql + ")"
                         : sql + " AND id <> :exclude)")
-                .param("tenant", tenantId)
-                .param("license", licenseNumber);
+                .param("tenant", tenantId).param("license", licenseNumber);
         if (excludeId != null) {
             spec = spec.param("exclude", excludeId);
         }
@@ -269,8 +257,7 @@ class AthleteRepository {
                 + "AND anonymized_at IS NULL AND user_id = :user";
         JdbcClient.StatementSpec spec = jdbc.sql(excludeId == null ? sql + ")"
                         : sql + " AND id <> :exclude)")
-                .param("tenant", tenantId)
-                .param("user", userId);
+                .param("tenant", tenantId).param("user", userId);
         if (excludeId != null) {
             spec = spec.param("exclude", excludeId);
         }
@@ -283,8 +270,7 @@ class AthleteRepository {
                             SELECT 1 FROM membership
                             WHERE tenant_id = :tenant AND user_id = :user AND status = 'ACTIVE')
                         """)
-                .param("tenant", tenantId)
-                .param("user", userId)
+                .param("tenant", tenantId).param("user", userId)
                 .query(Boolean.class)
                 .single();
     }
@@ -299,8 +285,7 @@ class AthleteRepository {
                         WHERE g.tenant_id = :tenant AND g.athlete_id = :athlete
                         ORDER BY u.name, u.id
                         """)
-                .param("tenant", tenantId)
-                .param("athlete", athleteId)
+                .param("tenant", tenantId).param("athlete", athleteId)
                 .query((rs, i) -> new GuardianRow(
                         rs.getObject("user_id", UUID.class),
                         rs.getString("name"),
@@ -315,9 +300,7 @@ class AthleteRepository {
                             SELECT 1 FROM athlete_guardian
                             WHERE tenant_id = :tenant AND athlete_id = :athlete AND user_id = :user)
                         """)
-                .param("tenant", tenantId)
-                .param("athlete", athleteId)
-                .param("user", userId)
+                .param("tenant", tenantId).param("athlete", athleteId).param("user", userId)
                 .query(Boolean.class)
                 .single();
     }
@@ -327,11 +310,8 @@ class AthleteRepository {
                         INSERT INTO athlete_guardian (tenant_id, athlete_id, user_id, relationship, created_by)
                         VALUES (:tenant, :athlete, :user, :relationship, :actor)
                         """)
-                .param("tenant", tenantId)
-                .param("athlete", athleteId)
-                .param("user", userId)
-                .param("relationship", relationship)
-                .param("actor", actorId)
+                .param("tenant", tenantId).param("athlete", athleteId).param("user", userId)
+                .param("relationship", relationship).param("actor", actorId)
                 .update();
     }
 
@@ -340,20 +320,19 @@ class AthleteRepository {
                         DELETE FROM athlete_guardian
                         WHERE tenant_id = :tenant AND athlete_id = :athlete AND user_id = :user
                         """)
-                .param("tenant", tenantId)
-                .param("athlete", athleteId)
-                .param("user", userId)
+                .param("tenant", tenantId).param("athlete", athleteId).param("user", userId)
                 .update() == 1;
     }
 
-    /** Remove as associações de encarregados aquando da anonimização (são dados pessoais). */
+    /**
+     * Remove as associações de encarregados aquando da anonimização (são dados pessoais).
+     */
     void deleteGuardians(UUID tenantId, UUID athleteId) {
         jdbc.sql("""
                         DELETE FROM athlete_guardian
                         WHERE tenant_id = :tenant AND athlete_id = :athlete
                         """)
-                .param("tenant", tenantId)
-                .param("athlete", athleteId)
+                .param("tenant", tenantId).param("athlete", athleteId)
                 .update();
     }
 
@@ -362,9 +341,7 @@ class AthleteRepository {
                         INSERT INTO audit_log (tenant_id, user_id, action, entity, entity_id)
                         VALUES (:tenant, :actor, :action, 'athlete', :entity)
                         """)
-                .param("tenant", tenantId)
-                .param("actor", actorId)
-                .param("action", action)
+                .param("tenant", tenantId).param("actor", actorId).param("action", action)
                 .param("entity", athleteId)
                 .update();
     }
@@ -381,7 +358,7 @@ class AthleteRepository {
                 rs.getString("license_number"),
                 rs.getString("status"),
                 rs.getObject("user_id", UUID.class),
-                rs.getObject("created_at", OffsetDateTime.class).toInstant(),
-                rs.getObject("updated_at", OffsetDateTime.class).toInstant());
+                Db.instant(rs, "created_at"),
+                Db.instant(rs, "updated_at"));
     }
 }

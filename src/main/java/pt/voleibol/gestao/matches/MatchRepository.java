@@ -9,6 +9,8 @@ import java.util.UUID;
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.stereotype.Repository;
 
+import pt.voleibol.gestao.shared.Db;
+
 @Repository
 class MatchRepository {
 
@@ -52,8 +54,7 @@ class MatchRepository {
                         FROM match
                         WHERE tenant_id = :tenant AND id = :id AND anonymized_at IS NULL
                         """)
-                .param("tenant", tenantId)
-                .param("id", id)
+                .param("tenant", tenantId).param("id", id)
                 .query(MatchRepository::mapMatch)
                 .optional();
     }
@@ -65,17 +66,10 @@ class MatchRepository {
                                            match_date, is_home, status, created_by)
                         VALUES (:id, :tenant, :team, :comp, :opp, :loc, :court, :date, :home, :status, :actor)
                         """)
-                .param("id", id)
-                .param("tenant", tenantId)
-                .param("team", teamId)
-                .param("comp", competition)
-                .param("opp", opponent)
-                .param("loc", location)
-                .param("court", courtId)
+                .param("id", id).param("tenant", tenantId).param("team", teamId).param("comp", competition)
+                .param("opp", opponent).param("loc", location).param("court", courtId)
                 .param("date", matchDate == null ? null : java.time.OffsetDateTime.ofInstant(matchDate, java.time.ZoneOffset.UTC))
-                .param("home", isHome)
-                .param("status", status)
-                .param("actor", actorId)
+                .param("home", isHome).param("status", status).param("actor", actorId)
                 .update();
     }
 
@@ -88,16 +82,10 @@ class MatchRepository {
                             updated_at = now()
                         WHERE tenant_id = :tenant AND id = :id AND anonymized_at IS NULL
                         """)
-                .param("tenant", tenantId)
-                .param("id", id)
-                .param("team", teamId)
-                .param("comp", competition)
-                .param("opp", opponent)
-                .param("loc", location)
-                .param("court", courtId)
+                .param("tenant", tenantId).param("id", id).param("team", teamId).param("comp", competition)
+                .param("opp", opponent).param("loc", location).param("court", courtId)
                 .param("date", matchDate == null ? null : java.time.OffsetDateTime.ofInstant(matchDate, java.time.ZoneOffset.UTC))
-                .param("home", isHome)
-                .param("status", status)
+                .param("home", isHome).param("status", status)
                 .update() == 1;
     }
 
@@ -107,8 +95,7 @@ class MatchRepository {
                         SET anonymized_at = now(), status = 'CANCELLED', updated_at = now()
                         WHERE tenant_id = :tenant AND id = :id AND anonymized_at IS NULL
                         """)
-                .param("tenant", tenantId)
-                .param("id", id)
+                .param("tenant", tenantId).param("id", id)
                 .update() == 1;
     }
 
@@ -121,8 +108,7 @@ class MatchRepository {
                         WHERE tenant_id = :tenant AND match_id = :match
                         ORDER BY set_number
                         """)
-                .param("tenant", tenantId)
-                .param("match", matchId)
+                .param("tenant", tenantId).param("match", matchId)
                 .query((rs, i) -> new SetScoreRow(
                         rs.getInt("set_number"),
                         rs.getInt("our_points"),
@@ -138,12 +124,8 @@ class MatchRepository {
                         DO UPDATE SET our_points = EXCLUDED.our_points, opponent_points = EXCLUDED.opponent_points,
                                       updated_at = now()
                         """)
-                .param("tenant", tenantId)
-                .param("match", matchId)
-                .param("set", setNumber)
-                .param("our", ourPoints)
-                .param("opp", opponentPoints)
-                .param("actor", actorId)
+                .param("tenant", tenantId).param("match", matchId).param("set", setNumber)
+                .param("our", ourPoints).param("opp", opponentPoints).param("actor", actorId)
                 .update();
     }
 
@@ -152,9 +134,7 @@ class MatchRepository {
                         DELETE FROM set_score
                         WHERE tenant_id = :tenant AND match_id = :match AND set_number = :set
                         """)
-                .param("tenant", tenantId)
-                .param("match", matchId)
-                .param("set", setNumber)
+                .param("tenant", tenantId).param("match", matchId).param("set", setNumber)
                 .update() == 1;
     }
 
@@ -168,15 +148,14 @@ class MatchRepository {
                         WHERE c.tenant_id = :tenant AND c.match_id = :match AND a.anonymized_at IS NULL
                         ORDER BY a.full_name, a.id
                         """)
-                .param("tenant", tenantId)
-                .param("match", matchId)
+                .param("tenant", tenantId).param("match", matchId)
                 .query((rs, i) -> new CallUpRow(
                         rs.getObject("athlete_id", UUID.class),
                         rs.getString("full_name"),
                         rs.getString("status"),
                         rs.getString("response"),
                         rs.getObject("responded_at", OffsetDateTime.class) == null ? null
-                                : rs.getObject("responded_at", OffsetDateTime.class).toInstant()))
+                                : Db.instant(rs, "responded_at")))
                 .list();
     }
 
@@ -186,9 +165,7 @@ class MatchRepository {
                             SELECT 1 FROM call_up
                             WHERE tenant_id = :tenant AND match_id = :match AND athlete_id = :athlete)
                         """)
-                .param("tenant", tenantId)
-                .param("match", matchId)
-                .param("athlete", athleteId)
+                .param("tenant", tenantId).param("match", matchId).param("athlete", athleteId)
                 .query(Boolean.class)
                 .single();
     }
@@ -198,9 +175,7 @@ class MatchRepository {
                         INSERT INTO call_up (tenant_id, match_id, athlete_id, status, created_by)
                         VALUES (:tenant, :match, :athlete, 'CALLED_UP', :actor)
                         """)
-                .param("tenant", tenantId)
-                .param("match", matchId)
-                .param("athlete", athleteId)
+                .param("tenant", tenantId).param("match", matchId).param("athlete", athleteId)
                 .param("actor", actorId)
                 .update();
     }
@@ -211,11 +186,8 @@ class MatchRepository {
                         SET response = :response, responded_at = :responded, status = :status, updated_at = now()
                         WHERE tenant_id = :tenant AND match_id = :match AND athlete_id = :athlete
                         """)
-                .param("tenant", tenantId)
-                .param("match", matchId)
-                .param("athlete", athleteId)
-                .param("response", response)
-                .param("responded", respondedAt == null ? null
+                .param("tenant", tenantId).param("match", matchId).param("athlete", athleteId)
+                .param("response", response).param("responded", respondedAt == null ? null
                         : OffsetDateTime.ofInstant(respondedAt, java.time.ZoneOffset.UTC))
                 .param("status", response == null ? "CALLED_UP" : response)
                 .update();
@@ -226,9 +198,7 @@ class MatchRepository {
                         DELETE FROM call_up
                         WHERE tenant_id = :tenant AND match_id = :match AND athlete_id = :athlete
                         """)
-                .param("tenant", tenantId)
-                .param("match", matchId)
-                .param("athlete", athleteId)
+                .param("tenant", tenantId).param("match", matchId).param("athlete", athleteId)
                 .update() == 1;
     }
 
@@ -239,8 +209,7 @@ class MatchRepository {
         Boolean exists = jdbc.sql("""
                         SELECT EXISTS (SELECT 1 FROM venue WHERE tenant_id = :tenant AND id = :id AND anonymized_at IS NULL)
                         """)
-                .param("tenant", tenantId)
-                .param("id", venueId)
+                .param("tenant", tenantId).param("id", venueId)
                 .query(Boolean.class)
                 .single();
         return Boolean.TRUE.equals(exists);
@@ -251,9 +220,7 @@ class MatchRepository {
                         INSERT INTO audit_log (tenant_id, user_id, action, entity, entity_id)
                         VALUES (:tenant, :actor, :action, 'match', :entity)
                         """)
-                .param("tenant", tenantId)
-                .param("actor", actorId)
-                .param("action", action)
+                .param("tenant", tenantId).param("actor", actorId).param("action", action)
                 .param("entity", entityId)
                 .update();
     }
@@ -266,10 +233,10 @@ class MatchRepository {
                 rs.getString("opponent"),
                 rs.getString("location"),
                 rs.getObject("court_id", UUID.class),
-                rs.getObject("match_date", OffsetDateTime.class).toInstant(),
+                Db.instant(rs, "match_date"),
                 rs.getBoolean("is_home"),
                 rs.getString("status"),
-                rs.getObject("created_at", OffsetDateTime.class).toInstant(),
-                rs.getObject("updated_at", OffsetDateTime.class).toInstant());
+                Db.instant(rs, "created_at"),
+                Db.instant(rs, "updated_at"));
     }
 }

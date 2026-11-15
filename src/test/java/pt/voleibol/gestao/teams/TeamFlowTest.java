@@ -2,38 +2,22 @@ package pt.voleibol.gestao.teams;
 
 import com.jayway.jsonpath.JsonPath;
 
-import java.nio.charset.StandardCharsets;
 import java.sql.Connection;
 import java.sql.Date;
-import java.sql.DriverManager;
-import java.sql.PreparedStatement;
-import java.sql.ResultSet;
 import java.sql.SQLException;
-import java.util.Base64;
 import java.util.List;
 import java.util.UUID;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
-import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.http.MediaType;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
-import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.ResultActions;
-import org.springframework.test.web.servlet.request.RequestPostProcessor;
-import org.springframework.test.web.servlet.setup.MockMvcBuilders;
-import org.springframework.web.context.WebApplicationContext;
-import org.testcontainers.junit.jupiter.Container;
-import org.testcontainers.junit.jupiter.Testcontainers;
-import org.testcontainers.postgresql.PostgreSQLContainer;
-
-import pt.voleibol.gestao.tenancy.TenantFilter;
+import pt.voleibol.gestao.shared.FlowTestSupport;
 
 import static org.assertj.core.api.Assertions.assertThat;
-import static org.springframework.security.test.web.servlet.setup.SecurityMockMvcConfigurers.springSecurity;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
@@ -44,20 +28,18 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
  * Base mínima de equipas contra PostgreSQL real: CRUD, isolamento entre clubes, staff e plantel,
  * e o âmbito do TREINADOR (só vê as equipas em que é staff) sem poder gerir plantel/staff.
  */
-@SpringBootTest(properties = "app.security.login-rate-limit.enabled=false")
-@Testcontainers
-class TeamFlowTest {
+class TeamFlowTest extends FlowTestSupport {
 
-    @Container
-    static final PostgreSQLContainer POSTGRES = new PostgreSQLContainer("postgres:16-alpine")
-            .withInitScript("db/init/01-roles.sql");
+    @DynamicPropertySource
+    static void propriedades(DynamicPropertyRegistry registry) {
+        registarPropriedades(registry);
+    }
 
     static final UUID CLUBE_A = UUID.fromString("00000000-0000-0000-0000-00000000d101");
     static final UUID CLUBE_B = UUID.fromString("00000000-0000-0000-0000-00000000d102");
 
     static final String HOST_A = "clube-equipas.localhost";
     static final String HOST_B = "clube-equipas-b.localhost";
-    static final String PASS = "palavra-passe-teste";
 
     static final String ADMIN = "admin@equipas.test";
     static final String DIRECAO = "direcao@equipas.test";
@@ -71,7 +53,8 @@ class TeamFlowTest {
     static final UUID EQUIPA_CLUBE_B = UUID.fromString("00000000-0000-0000-0000-00000000e103");
 
     static final UUID EPOCA_A = UUID.fromString("00000000-0000-0000-0000-00000000e201");
-    static final UUID ESCALAO_A = UUID.fromString("00000000-0000-0000-0000-00000000e211");
+    /** Escalão do catálogo federal, resolvido na semeadura. */
+    static UUID ESCALAO_A;
 
     static final UUID ATLETA_A = UUID.fromString("00000000-0000-0000-0000-00000000f201");
     static final UUID ATLETA_B = UUID.fromString("00000000-0000-0000-0000-00000000f202");
@@ -80,32 +63,8 @@ class TeamFlowTest {
 
     private static String passwordHash;
 
-    @DynamicPropertySource
-    static void propriedades(DynamicPropertyRegistry registry) {
-        registry.add("spring.datasource.url", POSTGRES::getJdbcUrl);
-        registry.add("spring.datasource.username", () -> "volei_app");
-        registry.add("spring.datasource.password", () -> "dev");
-        registry.add("spring.flyway.user", () -> "volei_migrator");
-        registry.add("spring.flyway.password", () -> "dev");
-        registry.add("app.security.jwt.secret", () -> Base64.getEncoder().encodeToString(
-                "clave-de-teste-com-mais-de-32-bytes-ok!".getBytes(StandardCharsets.UTF_8)));
-    }
-
-    @Autowired
-    WebApplicationContext context;
-    @Autowired
-    TenantFilter tenantFilter;
-    @Autowired
-    PasswordEncoder passwordEncoder;
-
-    MockMvc mvc;
-
     @BeforeEach
     void preparar() throws SQLException {
-        mvc = MockMvcBuilders.webAppContextSetup(context)
-                .addFilters(tenantFilter)
-                .apply(springSecurity())
-                .build();
         semear();
     }
 
@@ -223,13 +182,13 @@ class TeamFlowTest {
     void validacaoFpVDoPlantel() throws Exception {
         String admin = acesso(HOST_A, ADMIN);
 
-        // Atlea dentro da faixa do escalão (nascimento entre min e max): permite a inserção.
+        // Atleta dentro da faixa do escalão (15 anos na data de referência): permite a inserção.
         adicionarAtleta(HOST_A, admin, EQUIPA_B, ATLETA_A).andExpect(status().isOk());
 
-        // Atlea mais velho do que o escalão: proibido atuar em escalão inferior conforme regulamento FPV.
+        // Atleta mais velho do que o escalão: exige autorização excepcional de subida de escalão.
         adicionarAtleta(HOST_A, admin, EQUIPA_B, ATLETA_C).andExpect(status().isBadRequest());
 
-        // Atlea mais novo do que o escalão: exige autorização excepcional de subida de escalão.
+        // Atleta mais novo do que o escalão: proibido atuar em escalão inferior conforme regulamento FPV.
         adicionarAtleta(HOST_A, admin, EQUIPA_B, ATLETA_D).andExpect(status().isBadRequest());
 
         // Com autorização excepcional ativa para a época, a subida de escalão é permitida.
@@ -237,11 +196,11 @@ class TeamFlowTest {
             executar(c, """
                     INSERT INTO season_promotion (tenant_id, season_id, athlete_id, age_group_id, authorized_by, status)
                     VALUES (?, ?, ?, ?, ?, 'ACTIVE')
-                    """, CLUBE_A, EPOCA_A, ATLETA_D, ESCALAO_A, id(ADMIN));
+                    """, CLUBE_A, EPOCA_A, ATLETA_C, ESCALAO_A, id(ADMIN));
         }
-        adicionarAtleta(HOST_A, admin, EQUIPA_B, ATLETA_D).andExpect(status().isOk());
+        adicionarAtleta(HOST_A, admin, EQUIPA_B, ATLETA_C).andExpect(status().isOk());
 
-        mvc.perform(delete("/api/v1/teams/" + EQUIPA_B + "/athletes/" + ATLETA_D)
+        mvc.perform(delete("/api/v1/teams/" + EQUIPA_B + "/athletes/" + ATLETA_C)
                         .header("Authorization", "Bearer " + admin).with(host(HOST_A)))
                 .andExpect(status().isNoContent());
 
@@ -251,9 +210,9 @@ class TeamFlowTest {
                     UPDATE season_promotion
                     SET status = 'REVOKED'
                     WHERE tenant_id = ? AND season_id = ? AND athlete_id = ? AND age_group_id = ?
-                    """, CLUBE_A, EPOCA_A, ATLETA_D, ESCALAO_A);
+                    """, CLUBE_A, EPOCA_A, ATLETA_C, ESCALAO_A);
         }
-        adicionarAtleta(HOST_A, admin, EQUIPA_B, ATLETA_D).andExpect(status().isBadRequest());
+        adicionarAtleta(HOST_A, admin, EQUIPA_B, ATLETA_C).andExpect(status().isBadRequest());
     }
 
     @Test
@@ -359,27 +318,6 @@ class TeamFlowTest {
                 .content("{\"athleteId\":\"" + athleteId + "\"}"));
     }
 
-    private String acesso(String host, String email) throws Exception {
-        String resposta = mvc.perform(post("/api/v1/auth/login")
-                        .contentType(MediaType.APPLICATION_JSON)
-                        .content("{\"email\":\"" + email + "\",\"password\":\"" + PASS + "\"}")
-                        .with(host(host)))
-                .andExpect(status().isOk())
-                .andReturn().getResponse().getContentAsString();
-        return JsonPath.read(resposta, "$.accessToken");
-    }
-
-    private static RequestPostProcessor host(String serverName) {
-        return request -> {
-            request.setServerName(serverName);
-            return request;
-        };
-    }
-
-    private static UUID id(String email) {
-        return UUID.nameUUIDFromBytes(email.getBytes(StandardCharsets.UTF_8));
-    }
-
     // --- semeadura ---
 
     private void semear() throws SQLException {
@@ -391,7 +329,6 @@ class TeamFlowTest {
             executar(c, "DELETE FROM team_staff");
             executar(c, "DELETE FROM team");
             executar(c, "DELETE FROM season_promotion");
-            executar(c, "DELETE FROM age_group");
             executar(c, "DELETE FROM season");
             clube(c, CLUBE_A, "Clube Equipas", "clube-equipas");
             clube(c, CLUBE_B, "Clube Equipas B", "clube-equipas-b");
@@ -405,11 +342,11 @@ class TeamFlowTest {
 
             atleta(c, ATLETA_A, CLUBE_A, "Atleta A");
             atleta(c, ATLETA_B, CLUBE_B, "Atleta B");
-            atleta(c, ATLETA_C, CLUBE_A, "Atleta Velho", 2005);
+            atleta(c, ATLETA_C, CLUBE_A, "Atleta Velho", 2008);
             atleta(c, ATLETA_D, CLUBE_A, "Atleta Novo", 2018);
 
             epoca(c, EPOCA_A, CLUBE_A, "Época A");
-            escalao(c, ESCALAO_A, CLUBE_A, "Sub-14", 2008, 2012);
+            ESCALAO_A = escalao(c, "CADETES");
 
             equipa(c, EQUIPA_A, CLUBE_A, "Equipa A", EPOCA_A, ESCALAO_A);
             equipa(c, EQUIPA_B, CLUBE_A, "Equipa B", EPOCA_A, ESCALAO_A);
@@ -424,13 +361,6 @@ class TeamFlowTest {
                     VALUES (?, ?, ?) ON CONFLICT (tenant_id, team_id, athlete_id) DO NOTHING
                     """, CLUBE_A, EQUIPA_A, ATLETA_A);
         }
-    }
-
-    private static void clube(Connection c, UUID tenantId, String nome, String slug) throws SQLException {
-        executar(c, """
-                INSERT INTO tenant (id, name, slug) VALUES (?, ?, ?)
-                ON CONFLICT (id) DO UPDATE SET name = EXCLUDED.name, slug = EXCLUDED.slug
-                """, tenantId, nome, slug);
     }
 
     private void membro(Connection c, String email, UUID tenant, String... roles) throws SQLException {
@@ -464,22 +394,13 @@ class TeamFlowTest {
 
     private static void epoca(Connection c, UUID seasonId, UUID tenantId, String nome) throws SQLException {
         executar(c, """
-                INSERT INTO season (id, tenant_id, name, start_date, end_date, is_active)
-                VALUES (?, ?, ?, ?, ?, true)
+                INSERT INTO season (id, tenant_id, name, start_date, end_date, cutoff_date, is_active)
+                VALUES (?, ?, ?, ?, ?, ?, true)
                 ON CONFLICT (id) DO UPDATE SET name = EXCLUDED.name, start_date = EXCLUDED.start_date,
-                    end_date = EXCLUDED.end_date, is_active = true, anonymized_at = NULL
-                """, seasonId, tenantId, nome, Date.valueOf("2025-08-01"), Date.valueOf("2026-07-31"));
-    }
-
-    private static void escalao(Connection c, UUID ageGroupId, UUID tenantId, String nome, int minBirthYear,
-                                int maxBirthYear) throws SQLException {
-        executar(c, """
-                INSERT INTO age_group (id, tenant_id, season_id, name, min_birth_year, max_birth_year)
-                VALUES (?, ?, ?, ?, ?, ?)
-                ON CONFLICT (id) DO UPDATE SET name = EXCLUDED.name, season_id = EXCLUDED.season_id,
-                    min_birth_year = EXCLUDED.min_birth_year, max_birth_year = EXCLUDED.max_birth_year,
+                    end_date = EXCLUDED.end_date, cutoff_date = EXCLUDED.cutoff_date, is_active = true,
                     anonymized_at = NULL
-                """, ageGroupId, tenantId, EPOCA_A, nome, minBirthYear, maxBirthYear);
+                """, seasonId, tenantId, nome, Date.valueOf("2025-08-01"), Date.valueOf("2026-07-31"),
+                Date.valueOf("2026-01-01"));
     }
 
     private static void equipa(Connection c, UUID teamId, UUID tenantId, String nome, UUID seasonId,
@@ -493,32 +414,4 @@ class TeamFlowTest {
                 """, teamId, tenantId, nome, seasonId, ageGroupId);
     }
 
-    private static int contarAuditoria(String action) throws SQLException {
-        return contar("SELECT count(*) FROM audit_log WHERE action = ?", action);
-    }
-
-    private static int contar(String sql, Object... params) throws SQLException {
-        try (Connection c = superuser(); PreparedStatement ps = c.prepareStatement(sql)) {
-            for (int i = 0; i < params.length; i++) {
-                ps.setObject(i + 1, params[i]);
-            }
-            try (ResultSet rs = ps.executeQuery()) {
-                rs.next();
-                return rs.getInt(1);
-            }
-        }
-    }
-
-    private static Connection superuser() throws SQLException {
-        return DriverManager.getConnection(POSTGRES.getJdbcUrl(), POSTGRES.getUsername(), POSTGRES.getPassword());
-    }
-
-    private static void executar(Connection c, String sql, Object... params) throws SQLException {
-        try (PreparedStatement ps = c.prepareStatement(sql)) {
-            for (int i = 0; i < params.length; i++) {
-                ps.setObject(i + 1, params[i]);
-            }
-            ps.executeUpdate();
-        }
-    }
 }

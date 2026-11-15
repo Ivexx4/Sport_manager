@@ -1,12 +1,13 @@
 package pt.voleibol.gestao.billing;
 
 import java.time.Instant;
-import java.time.OffsetDateTime;
 import java.util.List;
 import java.util.UUID;
 
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.stereotype.Repository;
+
+import pt.voleibol.gestao.shared.Db;
 
 @Repository
 class PaymentRepository {
@@ -39,6 +40,6 @@ class PaymentRepository {
     private static Row map(java.sql.ResultSet rs, int n) throws java.sql.SQLException {
         return new Row(rs.getObject("id", UUID.class), rs.getObject("charge_id", UUID.class),
                 rs.getString("method"), rs.getLong("amount_cents"), rs.getString("reference"),
-                rs.getObject("paid_at", OffsetDateTime.class).toInstant());
+                Db.instant(rs, "paid_at"));
     }
 }

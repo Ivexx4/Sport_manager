@@ -2,10 +2,7 @@ package pt.voleibol.gestao.identity;
 
 import java.nio.charset.StandardCharsets;
 import java.sql.Connection;
-import java.sql.DriverManager;
-import java.sql.PreparedStatement;
 import java.sql.SQLException;
-import java.util.Base64;
 import java.util.Queue;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentLinkedQueue;
@@ -16,8 +13,6 @@ import com.jayway.jsonpath.JsonPath;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
-import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.test.context.TestConfiguration;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Import;
@@ -26,20 +21,12 @@ import org.springframework.http.MediaType;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
-import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.ResultActions;
-import org.springframework.test.web.servlet.request.RequestPostProcessor;
-import org.springframework.test.web.servlet.setup.MockMvcBuilders;
-import org.springframework.web.context.WebApplicationContext;
-import org.testcontainers.junit.jupiter.Container;
-import org.testcontainers.junit.jupiter.Testcontainers;
-import org.testcontainers.postgresql.PostgreSQLContainer;
 
 import pt.voleibol.gestao.notifications.EmailSender;
-import pt.voleibol.gestao.tenancy.TenantFilter;
+import pt.voleibol.gestao.shared.FlowTestSupport;
 
 import static org.assertj.core.api.Assertions.assertThat;
-import static org.springframework.security.test.web.servlet.setup.SecurityMockMvcConfigurers.springSecurity;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
@@ -48,14 +35,13 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
  * Convites, aceitação, recuperação e alteração de password, contra PostgreSQL real.
  * Os e-mails são capturados em memória; os tokens saem do link da mensagem, como na vida real.
  */
-@SpringBootTest(properties = "app.security.login-rate-limit.enabled=false")
-@Testcontainers
 @Import(AccountFlowTest.CapturedEmails.class)
-class AccountFlowTest {
+class AccountFlowTest extends FlowTestSupport {
 
-    @Container
-    static final PostgreSQLContainer POSTGRES = new PostgreSQLContainer("postgres:16-alpine")
-            .withInitScript("db/init/01-roles.sql");
+    @DynamicPropertySource
+    static void propriedades(DynamicPropertyRegistry registry) {
+        registarPropriedades(registry);
+    }
 
     record Sent(String to, String subject, String body) {
     }
@@ -81,36 +67,11 @@ class AccountFlowTest {
     static final String TREINADOR_A = "treinador@clube-a.test";
     static final String ADMIN_B = "admin@clube-b.test";
     static final String SO_CLUBE_A = "so-clube-a@clube-a.test";
-    static final String PASS = "palavra-passe-de-teste";
 
     private static final Pattern TOKEN = Pattern.compile("token=([A-Za-z0-9_-]+)");
 
-    @DynamicPropertySource
-    static void propriedades(DynamicPropertyRegistry registry) {
-        registry.add("spring.datasource.url", POSTGRES::getJdbcUrl);
-        registry.add("spring.datasource.username", () -> "volei_app");
-        registry.add("spring.datasource.password", () -> "dev");
-        registry.add("spring.flyway.user", () -> "volei_migrator");
-        registry.add("spring.flyway.password", () -> "dev");
-        registry.add("app.security.jwt.secret", () -> Base64.getEncoder().encodeToString(
-                "clave-de-teste-com-mais-de-32-bytes-ok!".getBytes(StandardCharsets.UTF_8)));
-    }
-
-    @Autowired
-    WebApplicationContext context;
-    @Autowired
-    TenantFilter tenantFilter;
-    @Autowired
-    PasswordEncoder passwordEncoder;
-
-    MockMvc mvc;
-
     @BeforeEach
     void preparar() throws SQLException {
-        mvc = MockMvcBuilders.webAppContextSetup(context)
-                .addFilters(tenantFilter)
-                .apply(springSecurity())
-                .build();
         semear();
     }
 
@@ -335,11 +296,6 @@ class AccountFlowTest {
                 .content("{\"refreshToken\":\"" + refreshToken + "\"}").with(host(host)));
     }
 
-    private String acesso(String host, String email, String password) throws Exception {
-        return JsonPath.read(login(host, email, password).andExpect(status().isOk())
-                .andReturn().getResponse().getContentAsString(), "$.accessToken");
-    }
-
     private static String refreshDe(ResultActions login) throws Exception {
         return JsonPath.read(login.andExpect(status().isOk()).andReturn().getResponse().getContentAsString(),
                 "$.refreshToken");
@@ -360,13 +316,6 @@ class AccountFlowTest {
 
     private static String novoEmail() {
         return "novo-" + UUID.randomUUID() + "@clube-a.test";
-    }
-
-    private static RequestPostProcessor host(String serverName) {
-        return request -> {
-            request.setServerName(serverName);
-            return request;
-        };
     }
 
     /** Dados de base inseridos com o superuser do contentor (ignora RLS). Idempotente. */
@@ -399,22 +348,10 @@ class AccountFlowTest {
                 tenant, userId, papel);
     }
 
-    private static Connection superuser() throws SQLException {
-        return DriverManager.getConnection(POSTGRES.getJdbcUrl(), POSTGRES.getUsername(), POSTGRES.getPassword());
-    }
-
     private static void executarComoSuperuser(String sql, Object... params) throws SQLException {
         try (Connection c = superuser()) {
             executar(c, sql, params);
         }
     }
 
-    private static void executar(Connection c, String sql, Object... params) throws SQLException {
-        try (PreparedStatement ps = c.prepareStatement(sql)) {
-            for (int i = 0; i < params.length; i++) {
-                ps.setObject(i + 1, params[i]);
-            }
-            ps.executeUpdate();
-        }
-    }
 }

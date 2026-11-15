@@ -196,6 +196,7 @@ export const api = {
     headers: { "X-Bootstrap-Key": bootstrapKey },
     body: JSON.stringify(data)
   }),
+  generateBootstrapKey: () => request<{ bootstrapKey: string }>("/api/v1/platform/bootstrap-key", { method: "POST" }),
   me: () => request<{ userId: string; tenantId: string; roles: Role[] }>("/api/v1/auth/me"),
   logout: () => request<void>("/api/v1/auth/logout", {
     method: "POST", body: JSON.stringify({ refreshToken: authStore.refresh ?? "" })

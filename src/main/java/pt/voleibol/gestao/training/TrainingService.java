@@ -269,8 +269,7 @@ class TrainingService {
         Boolean exists = jdbc.sql("""
                         SELECT EXISTS (SELECT 1 FROM team WHERE tenant_id = :tenant AND id = :id AND anonymized_at IS NULL)
                         """)
-                .param("tenant", tenantId)
-                .param("id", teamId)
+                .param("tenant", tenantId).param("id", teamId)
                 .query(Boolean.class)
                 .single();
         return Boolean.TRUE.equals(exists);
@@ -300,9 +299,7 @@ class TrainingService {
                                           WHERE s.tenant_id = t.tenant_id AND s.team_id = t.id
                                             AND s.user_id = :actor))
                         """)
-                .param("tenant", tenantId)
-                .param("id", teamId)
-                .param("actor", actorId)
+                .param("tenant", tenantId).param("id", teamId).param("actor", actorId)
                 .query(Boolean.class)
                 .single();
         return Boolean.TRUE.equals(exists);
@@ -314,9 +311,7 @@ class TrainingService {
                             SELECT 1 FROM team_athlete
                             WHERE tenant_id = :tenant AND team_id = :team AND athlete_id = :athlete)
                         """)
-                .param("tenant", tenantId)
-                .param("team", teamId)
-                .param("athlete", athleteId)
+                .param("tenant", tenantId).param("team", teamId).param("athlete", athleteId)
                 .query(Boolean.class)
                 .single();
         return Boolean.TRUE.equals(exists);

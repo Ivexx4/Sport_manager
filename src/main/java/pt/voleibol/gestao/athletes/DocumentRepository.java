@@ -1,13 +1,14 @@
 package pt.voleibol.gestao.athletes;
 
 import java.time.LocalDate;
-import java.time.OffsetDateTime;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.stereotype.Repository;
+
+import pt.voleibol.gestao.shared.Db;
 
 @Repository
 class DocumentRepository {
@@ -29,8 +30,7 @@ class DocumentRepository {
                         WHERE tenant_id = :tenant AND athlete_id = :athlete AND anonymized_at IS NULL
                         ORDER BY created_at DESC, id
                         """)
-                .param("tenant", tenantId)
-                .param("athlete", athleteId)
+                .param("tenant", tenantId).param("athlete", athleteId)
                 .query(DocumentRepository::map)
                 .list();
     }
@@ -41,8 +41,7 @@ class DocumentRepository {
                         FROM document
                         WHERE tenant_id = :tenant AND id = :id AND anonymized_at IS NULL
                         """)
-                .param("tenant", tenantId)
-                .param("id", id)
+                .param("tenant", tenantId).param("id", id)
                 .query(DocumentRepository::map)
                 .optional();
     }
@@ -53,13 +52,8 @@ class DocumentRepository {
                         INSERT INTO document (id, tenant_id, athlete_id, type, file_name, file_url, valid_until, created_by)
                         VALUES (:id, :tenant, :athlete, :type, :name, :url, :valid, :actor)
                         """)
-                .param("id", id)
-                .param("tenant", tenantId)
-                .param("athlete", athleteId)
-                .param("type", type)
-                .param("name", fileName)
-                .param("url", fileUrl)
-                .param("valid", validUntil)
+                .param("id", id).param("tenant", tenantId).param("athlete", athleteId).param("type", type)
+                .param("name", fileName).param("url", fileUrl).param("valid", validUntil)
                 .param("actor", actorId)
                 .update();
     }
@@ -71,12 +65,8 @@ class DocumentRepository {
                             expiry_notified_at = NULL, updated_at = now()
                         WHERE tenant_id = :tenant AND id = :id AND anonymized_at IS NULL
                         """)
-                .param("tenant", tenantId)
-                .param("id", id)
-                .param("type", type)
-                .param("name", fileName)
-                .param("url", fileUrl)
-                .param("valid", validUntil)
+                .param("tenant", tenantId).param("id", id).param("type", type).param("name", fileName)
+                .param("url", fileUrl).param("valid", validUntil)
                 .update() == 1;
     }
 
@@ -86,8 +76,7 @@ class DocumentRepository {
                         SET anonymized_at = now(), updated_at = now()
                         WHERE tenant_id = :tenant AND id = :id AND anonymized_at IS NULL
                         """)
-                .param("tenant", tenantId)
-                .param("id", id)
+                .param("tenant", tenantId).param("id", id)
                 .update() == 1;
     }
 
@@ -106,15 +95,14 @@ class DocumentRepository {
                           AND (d.expiry_notified_at IS NULL
                                OR d.expiry_notified_at < (now() - interval '7 days'))
                         """)
-                .param("t", tenantId)
-                .param("days", days)
+                .param("t", tenantId).param("days", days)
                 .query((rs, i) -> new ExpiringRow(
                         rs.getObject("id", UUID.class),
                         rs.getObject("athlete_id", UUID.class),
                         rs.getString("full_name"),
                         rs.getString("email"),
                         rs.getString("type"),
-                        rs.getObject("valid_until", java.sql.Date.class).toLocalDate()))
+                        Db.date(rs, "valid_until")))
                 .list();
     }
 
@@ -124,8 +112,7 @@ class DocumentRepository {
                         UPDATE document SET expiry_notified_at = now()
                         WHERE tenant_id = :tenant AND id = :id AND anonymized_at IS NULL
                         """)
-                .param("tenant", tenantId)
-                .param("id", id)
+                .param("tenant", tenantId).param("id", id)
                 .update() == 1;
     }
 
@@ -133,8 +120,7 @@ class DocumentRepository {
         Boolean exists = jdbc.sql("""
                         SELECT EXISTS (SELECT 1 FROM athlete WHERE tenant_id = :tenant AND id = :id AND anonymized_at IS NULL)
                         """)
-                .param("tenant", tenantId)
-                .param("id", athleteId)
+                .param("tenant", tenantId).param("id", athleteId)
                 .query(Boolean.class)
                 .single();
         return Boolean.TRUE.equals(exists);
@@ -145,9 +131,7 @@ class DocumentRepository {
                         INSERT INTO audit_log (tenant_id, user_id, action, entity, entity_id)
                         VALUES (:tenant, :actor, :action, 'document', :entity)
                         """)
-                .param("tenant", tenantId)
-                .param("actor", actorId)
-                .param("action", action)
+                .param("tenant", tenantId).param("actor", actorId).param("action", action)
                 .param("entity", entityId)
                 .update();
     }
@@ -159,9 +143,8 @@ class DocumentRepository {
                 rs.getString("type"),
                 rs.getString("file_name"),
                 rs.getString("file_url"),
-                rs.getObject("valid_until", java.sql.Date.class) == null ? null
-                        : rs.getObject("valid_until", java.sql.Date.class).toLocalDate(),
-                rs.getObject("created_at", OffsetDateTime.class).toInstant(),
-                rs.getObject("updated_at", OffsetDateTime.class).toInstant());
+                Db.date(rs, "valid_until"),
+                Db.instant(rs, "created_at"),
+                Db.instant(rs, "updated_at"));
     }
 }

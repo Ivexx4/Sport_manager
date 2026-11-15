@@ -58,7 +58,9 @@ class PlatformController {
         if (!isLoopback(request.getRemoteAddr())) {
             return ResponseEntity.status(HttpStatus.FORBIDDEN).build();
         }
-        return ResponseEntity.ok(new BootstrapKeyResponse(provisioningService.generateBootstrapKey()));
+        return ResponseEntity.ok()
+                .header("Cache-Control", "no-store")
+                .body(new BootstrapKeyResponse(provisioningService.generateBootstrapKey()));
     }
 
     private static boolean isLoopback(String address) {

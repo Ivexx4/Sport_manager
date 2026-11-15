@@ -1,37 +1,22 @@
 package pt.voleibol.gestao.identity;
 
-import java.nio.charset.StandardCharsets;
 import java.sql.Connection;
 import java.sql.DriverManager;
-import java.sql.PreparedStatement;
-import java.sql.ResultSet;
 import java.sql.SQLException;
-import java.util.Base64;
 import java.util.UUID;
 
 import com.jayway.jsonpath.JsonPath;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
-import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.http.MediaType;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
-import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.ResultActions;
-import org.springframework.test.web.servlet.request.RequestPostProcessor;
-import org.springframework.test.web.servlet.setup.MockMvcBuilders;
-import org.springframework.web.context.WebApplicationContext;
-import org.testcontainers.junit.jupiter.Container;
-import org.testcontainers.junit.jupiter.Testcontainers;
-import org.testcontainers.postgresql.PostgreSQLContainer;
-
-import pt.voleibol.gestao.tenancy.TenantFilter;
+import pt.voleibol.gestao.shared.FlowTestSupport;
 
 import static org.assertj.core.api.Assertions.assertThat;
-import static org.springframework.security.test.web.servlet.setup.SecurityMockMvcConfigurers.springSecurity;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
@@ -42,13 +27,12 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
  * Fluxo completo de autenticação contra PostgreSQL real, com o filtro de tenant e a cadeia de segurança
  * montados como em produção. O tenant escolhe-se pelo nome do servidor (subdomínio).
  */
-@SpringBootTest(properties = "app.security.login-rate-limit.enabled=false")
-@Testcontainers
-class AuthFlowTest {
+class AuthFlowTest extends FlowTestSupport {
 
-    @Container
-    static final PostgreSQLContainer POSTGRES = new PostgreSQLContainer("postgres:16-alpine")
-            .withInitScript("db/init/01-roles.sql");
+    @DynamicPropertySource
+    static void propriedades(DynamicPropertyRegistry registry) {
+        registarPropriedades(registry);
+    }
 
     static final UUID CLUBE_A = UUID.fromString("00000000-0000-0000-0000-00000000aaaa");
     static final UUID CLUBE_B = UUID.fromString("00000000-0000-0000-0000-00000000bbbb");
@@ -59,33 +43,9 @@ class AuthFlowTest {
     static final String HOST_A = "clube-a.localhost";
     static final String HOST_B = "clube-b.localhost";
 
-    @DynamicPropertySource
-    static void propriedades(DynamicPropertyRegistry registry) {
-        registry.add("spring.datasource.url", POSTGRES::getJdbcUrl);
-        registry.add("spring.datasource.username", () -> "volei_app");
-        registry.add("spring.datasource.password", () -> "dev");
-        registry.add("spring.flyway.user", () -> "volei_migrator");
-        registry.add("spring.flyway.password", () -> "dev");
-        registry.add("app.security.jwt.secret", () -> Base64.getEncoder().encodeToString(
-                "clave-de-teste-com-mais-de-32-bytes-ok!".getBytes(StandardCharsets.UTF_8)));
-    }
-
-    @Autowired
-    WebApplicationContext context;
-    @Autowired
-    TenantFilter tenantFilter;
-    @Autowired
-    PasswordEncoder passwordEncoder;
-
-    MockMvc mvc;
-
     @BeforeEach
     void preparar() throws SQLException {
         // O filtro de tenant tem de vir antes da cadeia do Spring Security, como em produção.
-        mvc = MockMvcBuilders.webAppContextSetup(context)
-                .addFilters(tenantFilter)
-                .apply(springSecurity())
-                .build();
         semear();
     }
 
@@ -235,13 +195,6 @@ class AuthFlowTest {
                 "$.refreshToken");
     }
 
-    private static RequestPostProcessor host(String serverName) {
-        return request -> {
-            request.setServerName(serverName);
-            return request;
-        };
-    }
-
     /** Dados da plataforma e de vários clubes: inseridos com o superuser do contentor (ignora RLS). */
     private void semear() throws SQLException {
         try (Connection c = DriverManager.getConnection(
@@ -271,26 +224,4 @@ class AuthFlowTest {
                 + "ON CONFLICT DO NOTHING", tenant, user, role, status);
     }
 
-    private static void executar(Connection c, String sql, Object... params) throws SQLException {
-        try (PreparedStatement ps = c.prepareStatement(sql)) {
-            for (int i = 0; i < params.length; i++) {
-                ps.setObject(i + 1, params[i]);
-            }
-            ps.executeUpdate();
-        }
-    }
-
-    private static int contarAuditoria(String acao) throws SQLException {
-        try (Connection c = DriverManager.getConnection(
-                POSTGRES.getJdbcUrl(), POSTGRES.getUsername(), POSTGRES.getPassword());
-             PreparedStatement ps = c.prepareStatement(
-                     "SELECT count(*) FROM audit_log WHERE tenant_id = ? AND action = ?")) {
-            ps.setObject(1, CLUBE_A);
-            ps.setString(2, acao);
-            try (ResultSet rs = ps.executeQuery()) {
-                rs.next();
-                return rs.getInt(1);
-            }
-        }
-    }
 }
