@@ -35,6 +35,15 @@ class ProvisioningServiceTest {
     }
 
     @Test
+    void geraChaveAleatoriaQueFicaAtiva() {
+        ProvisioningService service = new ProvisioningService(null, ENCODER, "");
+
+        String key = service.generateBootstrapKey();
+
+        assertThat(key).hasSize(43).matches("[A-Za-z0-9_-]+");
+    }
+
+    @Test
     void validaChaveSlugNomeAdministradorEPasswordAntesDaBaseDeDados() {
         ProvisioningService service = new ProvisioningService(null, ENCODER, "bootstrap");
 

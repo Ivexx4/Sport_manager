@@ -51,6 +51,16 @@ class BillingController {
             return new GenerateChargesResponse(v.period(), v.created(), v.skipped());
         }
     }
+    record PromotionRequest(@NotNull UUID athleteId, UUID feePlanId, @NotNull Long amountCents,
+                        @NotNull LocalDate validFrom, LocalDate validTo, String reason) {
+    }
+    record PromotionResponse(UUID id, UUID athleteId, UUID feePlanId, long amountCents, LocalDate validFrom,
+                         LocalDate validTo, String reason, boolean active) {
+    static PromotionResponse from(BillingService.PromotionView v) {
+        return new PromotionResponse(v.id(), v.athleteId(), v.feePlanId(), v.amountCents(),
+                v.validFrom(), v.validTo(), v.reason(), v.active());
+    }
+    }
 
     record PaymentRequest(@NotNull UUID chargeId, String method, @NotNull Long amountCents, String reference) {
     }
@@ -88,6 +98,24 @@ class BillingController {
     @DeleteMapping("/fee-plans/{id}")
     ResponseEntity<Void> deleteFeePlan(@AuthenticationPrincipal Jwt jwt, @PathVariable UUID id) {
         service.deleteFeePlan(actor(jwt), roles(jwt), id);
+        return ResponseEntity.noContent().build();
+    }
+
+    @GetMapping("/athletes/{athleteId}/promotions")
+    List<PromotionResponse> listPromotions(@AuthenticationPrincipal Jwt jwt, @PathVariable UUID athleteId) {
+        return service.listPromotions(roles(jwt), athleteId).stream().map(PromotionResponse::from).toList();
+    }
+    @PostMapping("/athlete-promotions")
+    ResponseEntity<PromotionResponse> createPromotion(@AuthenticationPrincipal Jwt jwt,
+                                                       @Valid @RequestBody PromotionRequest r) {
+        PromotionResponse created = PromotionResponse.from(service.createPromotion(actor(jwt), roles(jwt),
+                r.athleteId(), r.feePlanId(), r.amountCents(), r.validFrom(), r.validTo(), r.reason()));
+        return ResponseEntity.status(HttpStatus.CREATED).body(created);
+    }
+    @PatchMapping("/athlete-promotions/{id}/active")
+    ResponseEntity<Void> setPromotionActive(@AuthenticationPrincipal Jwt jwt, @PathVariable UUID id,
+                                            @RequestBody StatusRequest r) {
+        service.setPromotionActive(actor(jwt), roles(jwt), id, r != null && "ACTIVE".equalsIgnoreCase(r.status()));
         return ResponseEntity.noContent().build();
     }
 

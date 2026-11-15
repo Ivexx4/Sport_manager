@@ -7,6 +7,7 @@ import jakarta.validation.constraints.Size;
 
 import java.util.UUID;
 
+import jakarta.servlet.http.HttpServletRequest;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -30,6 +31,10 @@ class PlatformController {
         static ProvisionTenantResponse from(ProvisioningService.ProvisionResult r) {
             return new ProvisionTenantResponse(r.tenantId(), r.slug(), r.name(), r.adminUserId(), r.adminEmail());
         }
+
+    }
+
+    record BootstrapKeyResponse(String bootstrapKey) {
     }
 
     private final ProvisioningService provisioningService;
@@ -46,5 +51,21 @@ class PlatformController {
                 bootstrapKey, request.name(), request.slug(),
                 request.adminEmail(), request.adminName(), request.adminPassword());
         return ResponseEntity.status(HttpStatus.CREATED).body(ProvisionTenantResponse.from(result));
+    }
+
+    @PostMapping("/bootstrap-key")
+    ResponseEntity<BootstrapKeyResponse> generateBootstrapKey(HttpServletRequest request) {
+        if (!isLoopback(request.getRemoteAddr())) {
+            return ResponseEntity.status(HttpStatus.FORBIDDEN).build();
+        }
+        return ResponseEntity.ok(new BootstrapKeyResponse(provisioningService.generateBootstrapKey()));
+    }
+
+    private static boolean isLoopback(String address) {
+        try {
+            return java.net.InetAddress.getByName(address).isLoopbackAddress();
+        } catch (java.net.UnknownHostException e) {
+            return false;
+        }
     }
 }

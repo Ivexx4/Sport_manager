@@ -24,7 +24,7 @@ class SeasonServiceUnitTest {
     private static final UUID ACTOR = UUID.randomUUID();
     private static final UUID ID = UUID.randomUUID();
     private static final SeasonRepository.SeasonRow ROW = new SeasonRepository.SeasonRow(
-            ID, "2025/26", LocalDate.of(2025, 9, 1), LocalDate.of(2026, 6, 30), true,
+            ID, "2025/26", LocalDate.of(2025, 9, 1), LocalDate.of(2026, 6, 30), null, true,
             Instant.EPOCH, Instant.EPOCH);
 
     @AfterEach
@@ -59,6 +59,31 @@ class SeasonServiceUnitTest {
                 .insert(any(), eq(TENANT), any(), eq(ACTOR));
         assertStatus(() -> service.create(ACTOR, Set.of("ADMIN"), "Duplicada", null, null, false),
                 HttpStatus.CONFLICT);
+    }
+
+    @Test
+    void criaEscaloesFpvPorDefeitoComBaseNoAnoDeInicio() {
+        TenantContext.set(TENANT);
+        SeasonRepository seasons = mock(SeasonRepository.class);
+        AgeGroupRepository ageGroups = mock(AgeGroupRepository.class);
+        when(seasons.nameExists(TENANT, "Nova", null)).thenReturn(false);
+        when(seasons.findById(eq(TENANT), any())).thenReturn(Optional.of(ROW));
+
+        SeasonService service = new SeasonService(seasons, ageGroups);
+        service.create(ACTOR, Set.of("ADMIN"), "Nova",
+                LocalDate.of(2025, 9, 1), LocalDate.of(2026, 6, 30), null);
+
+        var groups = org.mockito.ArgumentCaptor.forClass(AgeGroupRepository.Data.class);
+        verify(ageGroups, times(14)).insert(any(), eq(TENANT), groups.capture(), eq(ACTOR));
+        assertThat(groups.getAllValues())
+                .extracting(AgeGroupRepository.Data::name)
+                .containsExactly("Minis A", "Minis B", "Infantis", "Iniciados", "Cadetes", "Juvenis",
+                        "Juniores", "Sub21", "1.ª Divisão (JB1)", "2.ª Divisão (JB)", "Seniores",
+                        "Veteranos A", "Veteranos B", "Veteranos C");
+        assertThat(groups.getAllValues().get(0).minBirthYear()).isEqualTo(2015);
+        assertThat(groups.getAllValues().get(0).maxBirthYear()).isEqualTo(2019);
+        assertThat(groups.getAllValues().get(10).minBirthYear()).isEqualTo(1900);
+        assertThat(groups.getAllValues().get(10).maxBirthYear()).isEqualTo(2006);
     }
 
     @Test

@@ -30,6 +30,9 @@ class BillingService {
     }
     record GenerateView(String period, int created, int skipped) {
     }
+    record PromotionView(UUID id, UUID athleteId, UUID feePlanId, long amountCents, LocalDate validFrom,
+                         LocalDate validTo, String reason, boolean active) {
+    }
     record PaymentView(UUID id, UUID chargeId, String method, long amountCents, String reference, java.time.Instant paidAt) {
     }
     record LedgerView(UUID id, String type, String category, long amountCents, LocalDate entryDate, String description) {
@@ -95,6 +98,43 @@ class BillingService {
         feePlans.audit(t, actorId, "FEE_PLAN_ANONYMIZED", id);
     }
 
+    @Transactional(readOnly = true)
+    List<PromotionView> listPromotions(Set<String> roles, UUID athleteId) {
+        requireWriter(roles);
+        return feePlans.listPromotions(tenant(), athleteId).stream()
+                .map(p -> new PromotionView(p.id(), p.athleteId(), p.feePlanId(), p.amountCents(),
+                        p.validFrom(), p.validTo(), p.reason(), p.active())).toList();
+    }
+
+    @Transactional
+    PromotionView createPromotion(UUID actorId, Set<String> roles, UUID athleteId, UUID feePlanId,
+                                  long amountCents, LocalDate validFrom, LocalDate validTo, String reason) {
+        requireWriter(roles);
+        UUID t = tenant();
+        requireAmount(amountCents);
+        if (validFrom == null || (validTo != null && validTo.isBefore(validFrom))) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Período da promoção inválido");
+        }
+        if (!charges.athleteExists(t, athleteId)) {
+            throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Atleta não encontrado");
+        }
+        if (feePlanId != null) {
+            feePlans.findById(t, feePlanId)
+                    .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Plano não encontrado"));
+        }
+        UUID id = UUID.randomUUID();
+        feePlans.insertPromotion(id, t, athleteId, feePlanId, amountCents, validFrom, validTo, reason, actorId);
+        return new PromotionView(id, athleteId, feePlanId, amountCents, validFrom, validTo, reason, true);
+    }
+
+    @Transactional
+    void setPromotionActive(UUID actorId, Set<String> roles, UUID id, boolean active) {
+        requireWriter(roles);
+        if (!feePlans.setPromotionActive(tenant(), id, active)) {
+            throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Promoção não encontrada");
+        }
+    }
+
     // --- charges ---
     @Transactional(readOnly = true)
     List<ChargeView> listCharges(UUID actorId, Set<String> roles, UUID athleteId, String status) {
@@ -119,13 +159,25 @@ class BillingService {
         if (guardianId != null && !charges.guardianExists(t, guardianId)) {
             throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Encarregado não encontrado");
         }
-        if (feePlanId != null && feePlans.findById(t, feePlanId).isEmpty()) {
-            throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Plano não encontrado");
+        String billingPeriod = null;
+        if (feePlanId != null) {
+            FeePlanRepository.Row plan = feePlans.findById(t, feePlanId)
+                    .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Plano não encontrado"));
+            if ("ONE_TIME".equals(plan.periodicity())) {
+                billingPeriod = "ONE_TIME";
+            }
         }
         UUID id = UUID.randomUUID();
-        charges.insert(id, t, athleteId, guardianId, feePlanId, amountCents, dueDate, chargeStatus, actorId);
+        try {
+            charges.insert(id, t, athleteId, guardianId, feePlanId, amountCents, dueDate, chargeStatus, billingPeriod, actorId);
+        } catch (org.springframework.dao.DuplicateKeyException e) {
+            if ("ONE_TIME".equals(billingPeriod)) {
+                throw new ResponseStatusException(HttpStatus.CONFLICT, "Esta taxa já foi registada para o atleta");
+            }
+            throw e;
+        }
         charges.audit(t, actorId, "CHARGE_CREATED", id);
-        return new ChargeView(id, athleteId, guardianId, feePlanId, amountCents, dueDate, chargeStatus, null);
+        return new ChargeView(id, athleteId, guardianId, feePlanId, amountCents, dueDate, chargeStatus, billingPeriod);
     }
 
     // --- geração automática a partir dos planos ---
@@ -157,6 +209,12 @@ class BillingService {
         int created = 0;
         int skipped = 0;
         for (FeePlanRepository.Row plan : plans) {
+            LocalDate periodDate = period.atDay(1);
+            if (!plan.active()
+                    || (plan.effectiveFrom() != null && periodDate.isBefore(plan.effectiveFrom()))
+                    || (plan.effectiveTo() != null && periodDate.isAfter(plan.effectiveTo()))) {
+                continue;
+            }
             String billingPeriod = billingPeriod(plan.periodicity(), period);
             if (billingPeriod == null) {
                 continue; // plano único ou período fora da cadência (trimestre/ano)
@@ -173,8 +231,10 @@ class BillingService {
                     continue;
                 }
                 UUID id = UUID.randomUUID();
+                long amountCents = feePlans.overrideAmount(tenantId, target.athleteId(), plan.id(), dueDate)
+                        .orElse(plan.amountCents());
                 if (charges.insertGenerated(id, tenantId, target.athleteId(), guardianId, plan.id(),
-                        plan.amountCents(), dueDate, billingPeriod, actorId)) {
+                        amountCents, dueDate, billingPeriod, actorId)) {
                     charges.audit(tenantId, actorId, "CHARGE_GENERATED", id);
                     created++;
                 } else {

@@ -79,12 +79,15 @@ class ChargeRepository {
         return Boolean.TRUE.equals(exists);
     }
 
-    void insert(UUID id, UUID tenantId, UUID athleteId, UUID guardianId, UUID feePlanId, long amountCents, LocalDate dueDate, String status, UUID actorId) {
+    void insert(UUID id, UUID tenantId, UUID athleteId, UUID guardianId, UUID feePlanId, long amountCents,
+                LocalDate dueDate, String status, String billingPeriod, UUID actorId) {
         jdbc.sql("""
-                INSERT INTO charge (id, tenant_id, athlete_id, guardian_id, fee_plan_id, amount_cents, due_date, status, created_by)
-                VALUES (:id,:t,:a,:g,:f,:amount,:due,:status,:actor)
+                INSERT INTO charge (id, tenant_id, athlete_id, guardian_id, fee_plan_id, amount_cents, due_date,
+                                    status, billing_period, created_by)
+                VALUES (:id,:t,:a,:g,:f,:amount,:due,:status,:period,:actor)
                 """).param("id", id).param("t", tenantId).param("a", athleteId).param("g", guardianId)
-                .param("f", feePlanId).param("amount", amountCents).param("due", dueDate).param("status", status).param("actor", actorId).update();
+                .param("f", feePlanId).param("amount", amountCents).param("due", dueDate).param("status", status)
+                .param("period", billingPeriod).param("actor", actorId).update();
     }
 
     /**

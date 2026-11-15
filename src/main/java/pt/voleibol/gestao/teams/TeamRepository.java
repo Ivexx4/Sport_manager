@@ -1,6 +1,7 @@
 package pt.voleibol.gestao.teams;
 
 import java.time.Instant;
+import java.time.LocalDate;
 import java.time.OffsetDateTime;
 import java.util.List;
 import java.util.Optional;
@@ -237,6 +238,22 @@ class TeamRepository {
                 .update();
     }
 
+    void saveRegistration(UUID tenantId, UUID seasonId, UUID athleteId, UUID ageGroupId, UUID actorId) {
+        jdbc.sql("""
+                INSERT INTO athlete_season_registration
+                    (tenant_id, season_id, athlete_id, age_group_id, created_by)
+                VALUES (:tenant, :season, :athlete, :group, :actor)
+                ON CONFLICT (tenant_id, season_id, athlete_id)
+                DO UPDATE SET age_group_id = EXCLUDED.age_group_id, updated_at = now()
+                """)
+                .param("tenant", tenantId)
+                .param("season", seasonId)
+                .param("athlete", athleteId)
+                .param("group", ageGroupId)
+                .param("actor", actorId)
+                .update();
+    }
+
     boolean deleteAthlete(UUID tenantId, UUID teamId, UUID athleteId) {
         return jdbc.sql("""
                         DELETE FROM team_athlete
@@ -290,24 +307,22 @@ class TeamRepository {
         return jdbc.sql("""
                         SELECT EXISTS (
                             SELECT 1 FROM age_group
-                            WHERE tenant_id = :tenant AND id = :id AND anonymized_at IS NULL)
+                            WHERE id = :id AND is_active)
                         """)
-                .param("tenant", tenantId)
                 .param("id", ageGroupId)
                 .query(Boolean.class)
                 .single();
     }
 
-    /** Ano de nascimento do atleta (o regresso já é o ano civil de `birth_date`). */
-    Integer birthYear(UUID tenantId, UUID athleteId) {
+    LocalDate birthDate(UUID tenantId, UUID athleteId) {
         return jdbc.sql("""
-                        SELECT EXTRACT(YEAR FROM birth_date)::int AS birth_year
+                        SELECT birth_date
                         FROM athlete
                         WHERE tenant_id = :tenant AND id = :id AND anonymized_at IS NULL
                         """)
                 .param("tenant", tenantId)
                 .param("id", athleteId)
-                .query((rs, i) -> rs.getInt("birth_year"))
+                .query((rs, i) -> rs.getObject("birth_date", LocalDate.class))
                 .single();
     }
 

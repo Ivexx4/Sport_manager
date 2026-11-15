@@ -3,7 +3,6 @@ package pt.voleibol.gestao.teams;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.util.List;
-import java.util.Locale;
 import java.util.Set;
 import java.util.UUID;
 
@@ -24,14 +23,17 @@ class SeasonService {
 
     private static final Set<String> MANAGERS = Set.of("ADMIN", "DIRECAO");
 
-    record SeasonView(UUID id, String name, LocalDate startDate, LocalDate endDate, boolean isActive,
+    record SeasonView(UUID id, String name, LocalDate startDate, LocalDate endDate, LocalDate cutoffDate, boolean isActive,
                       Instant createdAt, Instant updatedAt) {
     }
 
     private final SeasonRepository seasons;
-
     SeasonService(SeasonRepository seasons) {
         this.seasons = seasons;
+    }
+
+    SeasonService(SeasonRepository seasons, AgeGroupRepository ignoredAgeGroups) {
+        this(seasons);
     }
 
     @Transactional(readOnly = true)
@@ -50,16 +52,23 @@ class SeasonService {
     @Transactional
     SeasonView create(UUID actorId, Set<String> roles, String name, LocalDate startDate,
                       LocalDate endDate, Boolean isActive) {
+        return create(actorId, roles, name, startDate, endDate, null, isActive);
+    }
+
+    @Transactional
+    SeasonView create(UUID actorId, Set<String> roles, String name, LocalDate startDate,
+                      LocalDate endDate, LocalDate cutoffDate, Boolean isActive) {
         UUID tenantId = requireTenant();
         requireManager(roles);
         String normalizedName = requiredText(name);
         requireValidPeriod(startDate, endDate);
+        cutoffDate = defaultCutoff(cutoffDate);
         if (seasons.nameExists(tenantId, normalizedName, null)) {
             throw new ResponseStatusException(HttpStatus.CONFLICT, "Já existe uma época com este nome");
         }
         UUID id = UUID.randomUUID();
         try {
-            seasons.insert(id, tenantId, new SeasonRepository.Data(normalizedName, startDate, endDate,
+            seasons.insert(id, tenantId, new SeasonRepository.Data(normalizedName, startDate, endDate, cutoffDate,
                     isActive == null || isActive), actorId);
         } catch (DuplicateKeyException e) {
             throw new ResponseStatusException(HttpStatus.CONFLICT, "Já existe uma época com este nome");
@@ -68,20 +77,29 @@ class SeasonService {
         return view(seasons.findById(tenantId, id).orElseThrow(SeasonService::notFound));
     }
 
+
     @Transactional
     SeasonView update(UUID actorId, Set<String> roles, UUID seasonId, String name,
                       LocalDate startDate, LocalDate endDate, Boolean isActive) {
+        return update(actorId, roles, seasonId, name, startDate, endDate, null, isActive);
+    }
+
+    @Transactional
+    SeasonView update(UUID actorId, Set<String> roles, UUID seasonId, String name,
+                      LocalDate startDate,                       LocalDate endDate, LocalDate cutoffDate, Boolean isActive) {
         UUID tenantId = requireTenant();
         requireManager(roles);
         SeasonRepository.SeasonRow current =
                 seasons.findById(tenantId, seasonId).orElseThrow(SeasonService::notFound);
         String normalizedName = requiredText(name);
         requireValidPeriod(startDate, endDate);
+        cutoffDate = defaultCutoff(cutoffDate);
         if (seasons.nameExists(tenantId, normalizedName, seasonId)) {
             throw new ResponseStatusException(HttpStatus.CONFLICT, "Já existe uma época com este nome");
         }
         try {
             if (!seasons.update(tenantId, seasonId, new SeasonRepository.Data(normalizedName, startDate, endDate,
+                    cutoffDate,
                     isActive == null ? current.isActive() : isActive))) {
                 throw notFound();
             }
@@ -125,6 +143,10 @@ class SeasonService {
         }
     }
 
+    private static LocalDate defaultCutoff(LocalDate cutoffDate) {
+        return cutoffDate == null ? LocalDate.of(LocalDate.now().getYear() + 1, 1, 1) : cutoffDate;
+    }
+
     private static String requiredText(String value) {
         if (value == null || value.isBlank()) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Nome obrigatório");
@@ -142,7 +164,7 @@ class SeasonService {
     }
 
     private static SeasonView view(SeasonRepository.SeasonRow row) {
-        return new SeasonView(row.id(), row.name(), row.startDate(), row.endDate(), row.isActive(),
+        return new SeasonView(row.id(), row.name(), row.startDate(), row.endDate(), row.cutoffDate(), row.isActive(),
                 row.createdAt(), row.updatedAt());
     }
 }

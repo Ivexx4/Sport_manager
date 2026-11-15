@@ -26,11 +26,152 @@ docker compose up -d                              # PostgreSQL 16 (volei_migrato
 SPRING_PROFILES_ACTIVE=dev mvn spring-boot:run    # perfil dev: segredo JWT, SMTP local e bootstrap key
 ```
 
-### Frontend da Fase 1
+### Lançamento completo (ambiente local)
 
-O frontend React/TypeScript está em `frontend/` e cobre o fluxo de gestão de épocas,
-escalões, atletas, equipas e importação CSV. Em desenvolvimento, arranca-o em paralelo
-com a API:
+Na primeira execução, instalar **JDK 25**, **Maven 3.6.3 ou superior**, **Node.js 20 ou
+superior** e **Docker Desktop** com o motor Docker em execução. A aplicação usa PostgreSQL
+16; não é necessário instalar PostgreSQL localmente.
+
+1. Abrir um terminal na raiz do repositório e iniciar a infraestrutura:
+
+   ```bash
+   docker compose up -d
+   docker compose ps
+   ```
+
+   O `db` expõe PostgreSQL em `localhost:5432` e o `mailpit` expõe a caixa de correio em
+   [http://localhost:8025](http://localhost:8025). Na primeira inicialização são criados os
+   papéis `volei_migrator` e `volei_app`; o Spring Boot executa automaticamente todas as
+   migrações Flyway.
+
+2. Gerar um segredo JWT para qualquer ambiente que não seja `dev`:
+
+   ```bash
+   openssl rand -base64 48
+   ```
+
+   Guardar o resultado como `JWT_SECRET`. No perfil `dev` é usado um segredo local pré-configurado
+   e a chave de provisionamento é `dev-bootstrap-key`; estes valores não devem ser usados em
+   produção.
+
+3. Iniciar a API:
+
+   ```bash
+   # Linux/macOS/Git Bash
+   SPRING_PROFILES_ACTIVE=dev mvn spring-boot:run
+
+   # PowerShell
+   $env:SPRING_PROFILES_ACTIVE = "dev"
+   mvn spring-boot:run
+   ```
+
+   A API fica disponível em [http://localhost:8080](http://localhost:8080). Confirmar o arranque
+   com:
+
+   ```bash
+   curl http://localhost:8080/api/v1/ping
+   ```
+
+4. Criar dados de demonstração **ou** um clube vazio:
+
+   ```bash
+   # Opção A: seed completo, incluindo clube-piloto e administrador
+   docker compose exec -T db psql -U postgres -d volei < docker/dev-seed.sql
+
+   # Opção B: provisionar um clube através da API
+   curl -s -X POST http://localhost:8080/api/v1/platform/tenants \
+     -H "Content-Type: application/json" \
+     -H "X-Bootstrap-Key: dev-bootstrap-key" \
+     -d '{"name":"Clube Piloto 2","slug":"clube-piloto-2","adminEmail":"admin@clube-piloto-2.local","adminName":"Admin","adminPassword":"admin12345!"}'
+   ```
+
+5. Instalar e iniciar o frontend num segundo terminal:
+
+   ```bash
+   cd frontend
+   npm install
+   npm run dev
+   ```
+
+   Abrir [http://clube-piloto.localhost:5173](http://clube-piloto.localhost:5173) e entrar com
+   `admin@clube-piloto.local` / `admin123` quando tiver sido usado o seed. Para uma API diferente,
+   definir `VITE_API_URL` antes de `npm run dev` ou `npm run build`.
+
+Para parar a execução sem apagar dados:
+
+```bash
+docker compose down
+```
+
+Para recomeçar a base de dados local do zero (**apaga todos os dados locais**):
+
+```bash
+docker compose down -v
+docker compose up -d
+```
+
+### Verificação, testes e build
+
+```bash
+# Backend: compilação
+mvn -DskipTests package
+
+# Backend: testes unitários e de integração (requer Docker/Testcontainers)
+mvn test
+
+# Backend: relatório de cobertura em target/site/jacoco
+mvn test
+
+# Frontend: verificação TypeScript e build de produção
+cd frontend
+npm run build
+```
+
+O perfil `coverage-check` impõe os limiares de cobertura configurados no `pom.xml`:
+
+```bash
+mvn -Pcoverage-check verify
+```
+
+### Configuração fora de `dev`
+
+Em staging/produção, definir pelo menos `JWT_SECRET`, `DB_APP_PASSWORD`,
+`DB_MIGRATOR_PASSWORD` e `APP_PLATFORM_BOOTSTRAP_KEY` através do gestor de secrets. Também
+configurar `APP_BASE_DOMAIN`, `APP_WEB_URL_TEMPLATE` e SMTP (`SPRING_MAIL_HOST`,
+`SPRING_MAIL_PORT`, `SPRING_MAIL_USERNAME`, `SPRING_MAIL_PASSWORD` e `APP_MAIL_FROM`).
+Não expor PostgreSQL nem a chave de bootstrap à Internet; o proxy deve preservar o subdomínio
+do clube no cabeçalho `Host`/`X-Forwarded-Host`.
+
+### Frontend web
+
+O frontend React/TypeScript está em `frontend/`. Depois do login, apresenta uma visão geral
+do clube e navegação para atletas, equipas, épocas e escalões, treinos, jogos e convocatórias
+e quotas/financeiro. Os módulos de atletas, equipas e épocas/escalões incluem formulários de
+criação; a listagem de atletas permite pesquisar, abrir o detalhe, desativar e importar um
+ficheiro CSV UTF-8.
+
+Na criação de uma equipa, a época e o escalão são obrigatórios. O catálogo federal de
+escalões é carregado para o clube; ao mudar de época, o escalão é limpo. A equipa criada
+fica assim associada à época e ao escalão que aparecem no cartão da equipa.
+
+Os escalões são o catálogo oficial FPV, comum a todos os clubes e mantido por migrações da
+base de dados. Usam limites de idade (não anos de nascimento), não podem ser criados ou
+alterados na interface e incluem Minis A/B, Infantis, Iniciados, Cadetes, Juvenis, Juniores,
+Sub21, Seniores e Veteranos A/B/C. Os escalões JB1 e JB não são criados. Ao criar uma época,
+a data de referência da idade é preenchida por defeito com 1 de janeiro do ano seguinte ao
+ano atual e pode ser ajustada no formulário; as validações calculam a idade exata nessa data.
+
+Os módulos de treinos, jogos e quotas permitem criar sessões, jogos e planos quando o
+utilizador tem permissões de gestão. O módulo financeiro inclui quotas recorrentes e taxas
+únicas por atleta, geração automática de cobranças periódicas (com modo de simulação),
+atualização do estado das cobranças, registo de pagamentos por método, mapa de pendentes,
+saldo contabilístico e lançamentos de receitas/despesas. O papel `FINANCEIRO` tem acesso de
+gestão a este módulo.
+Os pagamentos reais por webhook de Multibanco/MB WAY continuam dependentes da integração
+com o agregador. A interface adapta-se a ecrãs pequenos com menu lateral colapsável.
+As áreas ainda não implementadas no backend aparecem desativadas no menu.
+
+Em desenvolvimento, arranca-o em paralelo com a API:
 
 ```bash
 cd frontend
@@ -58,6 +199,8 @@ docker compose exec -T db psql -U postgres -d volei < docker/dev-seed.sql
 
 Fora do perfil `dev`, a variável `JWT_SECRET` é obrigatória (Base64, 32 bytes ou mais): `openssl rand -base64 48`.
 O provisionamento de novos clubes requer `APP_PLATFORM_BOOTSTRAP_KEY` (no perfil `dev` existe uma chave por omissão: `dev-bootstrap-key`).
+Também é possível gerar/rodar a chave através de `POST /api/v1/platform/bootstrap-key`;
+este endpoint só aceita ligações locais (`127.0.0.1`/`::1`) e devolve a nova chave uma única vez na resposta.
 
 ### Provisionamento de um clube
 
@@ -67,6 +210,14 @@ curl -s -X POST http://localhost:8080/api/v1/platform/tenants \
   -H 'X-Bootstrap-Key: dev-bootstrap-key' \
   -d '{"name":"Clube Piloto 2","slug":"clube-piloto-2","adminEmail":"admin@clube-piloto-2.local","adminName":"Admin","adminPassword":"admin12345!"}'
 ```
+
+Para gerar uma chave localmente, sem a guardar no código:
+
+```bash
+curl -s -X POST http://127.0.0.1:8080/api/v1/platform/bootstrap-key
+```
+
+Usa o valor `bootstrapKey` devolvido no cabeçalho `X-Bootstrap-Key` ao criar clubes.
 
 Cria o clube e o primeiro administrador (`ADMIN`) com a password indicada (se o e-mail já existir, a conta é associada ao novo clube e a password existente mantém-se). Respostas: `201` com `tenantId`/`adminUserId`; `400` para validação; `403` para chave inválida; `409` se o slug já existir; `503` se o provisionamento estiver desativado (chave vazia).
 
@@ -670,8 +821,10 @@ encarregados) e base mínima de equipas (staff e plantel), `V10` remoção não 
 `season_promotion`), com a associação à equipa, `V12` treinos e jogos (`venue`, `training_session`,
 `attendance`, `match`, `set_score`, `call_up`), `V13` documentos com validade por atleta e importação CSV,
 `V14` financeiro (`fee_plan`, `charge`, `payment`, `ledger_entry`), `V15` deduplicação dos alertas de
-documentos (`document.expiry_notified_at`) e `V16` geração de cobranças (`charge.billing_period` e índice
-único parcial de idempotência). Papéis em
+documentos (`document.expiry_notified_at`), `V16` geração de cobranças (`charge.billing_period` e índice
+único parcial de idempotência), `V17` inscrições oficiais por atleta/época, `V18` modalidades,
+datas de corte, épocas automáticas e exceções de quotas, `V19` remoção em cascata das referências
+de escalão e `V20` promoções permanentes de atletas. Papéis em
 `docker/postgres-init/01-roles.sql`, também
 usado pelos testes (passwords `dev`, só para desenvolvimento; o `volei_migrator` tem `BYPASSRLS`).
 
@@ -694,10 +847,9 @@ Scripts de apoio em `scripts/`: `coverage.ps1` resume a cobertura JaCoCo por pac
 ## Por fazer
 
 - MFA para administradores (fase 0).
-- Módulo financeiro (V14): planos de quotas, cobranças, pagamentos e lançamentos entregues, com autorização por
-  recurso (o `FINANCEIRO` gere tudo e o `ATLETA`/`ENCARREGADO` só vêem as cobranças que lhes pertencem) e geração
-  automática de quotas a partir dos planos (endpoint e agendador mensal, V16). Falta a integração real com
-  Multibanco/MB WAY (webhooks e reconciliação automática) e o mapa de dívidas.
+- Módulo financeiro: backend e frontend entregues, com quotas recorrentes, taxas únicas por atleta,
+  geração de cobranças, pagamentos, estados, mapa de pendentes e lançamentos contabilísticos. Falta a integração real com
+  Multibanco/MB WAY (webhooks e reconciliação automática).
 - Fase 2 (treinos e jogos): backend entregue (sessões, presenças, jogos, sets e convocatórias), com notificação
   das convocatórias por e-mail/outbox; falta a PWA e as notificações push/SMS.
 - Alertas de caducidade de documentos: envio diário às 08:00 com janela de 30 dias e deduplicação semanal (V15);

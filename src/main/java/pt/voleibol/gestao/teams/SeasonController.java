@@ -34,13 +34,14 @@ class SeasonController {
     record SeasonRequest(@NotBlank @Size(max = 120) String name,
                           LocalDate startDate,
                           LocalDate endDate,
+                          LocalDate cutoffDate,
                           Boolean isActive) {
     }
 
-    record SeasonResponse(UUID id, String name, LocalDate startDate, LocalDate endDate, boolean isActive,
+    record SeasonResponse(UUID id, String name, LocalDate startDate, LocalDate endDate, LocalDate cutoffDate, boolean isActive,
                            Instant createdAt, Instant updatedAt) {
         static SeasonResponse from(SeasonService.SeasonView s) {
-            return new SeasonResponse(s.id(), s.name(), s.startDate(), s.endDate(), s.isActive(),
+            return new SeasonResponse(s.id(), s.name(), s.startDate(), s.endDate(), s.cutoffDate(), s.isActive(),
                     s.createdAt(), s.updatedAt());
         }
     }
@@ -65,7 +66,7 @@ class SeasonController {
     ResponseEntity<SeasonResponse> create(@AuthenticationPrincipal Jwt jwt,
                                           @Valid @RequestBody SeasonRequest request) {
         SeasonResponse created = SeasonResponse.from(seasonService.create(actor(jwt), roles(jwt),
-                request.name(), request.startDate(), request.endDate(), request.isActive()));
+                request.name(), request.startDate(), request.endDate(), request.cutoffDate(), request.isActive()));
         return ResponseEntity.status(HttpStatus.CREATED).body(created);
     }
 
@@ -73,7 +74,7 @@ class SeasonController {
     SeasonResponse update(@AuthenticationPrincipal Jwt jwt, @PathVariable UUID seasonId,
                           @Valid @RequestBody SeasonRequest request) {
         return SeasonResponse.from(seasonService.update(actor(jwt), roles(jwt), seasonId,
-                request.name(), request.startDate(), request.endDate(), request.isActive()));
+                request.name(), request.startDate(), request.endDate(), request.cutoffDate(), request.isActive()));
     }
 
     @DeleteMapping("/{seasonId}")

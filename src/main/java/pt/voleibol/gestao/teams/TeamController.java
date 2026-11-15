@@ -45,7 +45,7 @@ class TeamController {
                         @Pattern(regexp = STAFF_ROLE_PATTERN) String role) {
     }
 
-    record RosterRequest(@NotNull UUID athleteId) {
+    record RosterRequest(@NotNull UUID athleteId, UUID registrationAgeGroupId) {
     }
 
     record TeamResponse(UUID id, String name, String status, UUID seasonId, UUID ageGroupId,
@@ -136,7 +136,8 @@ class TeamController {
     @PostMapping("/{teamId}/athletes")
     List<RosterResponse> addAthleteToTeam(@AuthenticationPrincipal Jwt jwt, @PathVariable UUID teamId,
                                          @Valid @RequestBody RosterRequest request) {
-        return teamService.addAthleteToTeam(actor(jwt), roles(jwt), teamId, request.athleteId()).stream()
+        return teamService.addAthleteToTeam(actor(jwt), roles(jwt), teamId, request.athleteId(),
+                        request.registrationAgeGroupId()).stream()
                 .map(RosterResponse::from).toList();
     }
 

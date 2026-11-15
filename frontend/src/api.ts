@@ -7,6 +7,14 @@ export interface TokenResponse {
   expiresIn: number;
 }
 
+export interface ProvisionTenantResponse {
+  tenantId: string;
+  slug: string;
+  name: string;
+  adminUserId: string;
+  adminEmail: string;
+}
+
 export interface Athlete {
   id: string;
   fullName: string;
@@ -34,15 +42,16 @@ export interface Season {
   name: string;
   startDate?: string;
   endDate?: string;
+  cutoffDate?: string;
   isActive: boolean;
 }
 
 export interface AgeGroup {
   id: string;
-  seasonId: string;
   name: string;
-  minBirthYear: number;
-  maxBirthYear: number;
+  minAge: number;
+  maxAge?: number;
+  isActive: boolean;
 }
 
 export interface Team {
@@ -51,6 +60,13 @@ export interface Team {
   status: "ACTIVE" | "INACTIVE";
   seasonId?: string;
   ageGroupId?: string;
+}
+
+export interface TeamStaff {
+  userId: string;
+  name: string;
+  email: string;
+  role: "TREINADOR" | "TREINADOR_ADJUNTO";
 }
 
 export interface Document {
@@ -102,6 +118,24 @@ export interface Charge {
   dueDate: string;
   status: string;
   billingPeriod?: string;
+}
+
+export interface Payment {
+  id: string;
+  chargeId: string;
+  method: string;
+  amountCents: number;
+  reference?: string;
+  paidAt: string;
+}
+
+export interface LedgerEntry {
+  id: string;
+  type: "INCOME" | "EXPENSE";
+  category: string;
+  amountCents: number;
+  entryDate: string;
+  description?: string;
 }
 
 const API_BASE = import.meta.env.VITE_API_URL ?? "";
@@ -157,6 +191,11 @@ export const api = {
   login: (email: string, password: string) => request<TokenResponse>("/api/v1/auth/login", {
     method: "POST", body: JSON.stringify({ email, password })
   }),
+  provisionTenant: (bootstrapKey: string, data: Record<string, unknown>) => request<ProvisionTenantResponse>("/api/v1/platform/tenants", {
+    method: "POST",
+    headers: { "X-Bootstrap-Key": bootstrapKey },
+    body: JSON.stringify(data)
+  }),
   me: () => request<{ userId: string; tenantId: string; roles: Role[] }>("/api/v1/auth/me"),
   logout: () => request<void>("/api/v1/auth/logout", {
     method: "POST", body: JSON.stringify({ refreshToken: authStore.refresh ?? "" })
@@ -177,9 +216,11 @@ export const api = {
   seasons: () => request<Season[]>("/api/v1/seasons"),
   createSeason: (data: Record<string, unknown>) => request<Season>("/api/v1/seasons", { method: "POST", body: JSON.stringify(data) }),
   ageGroups: () => request<AgeGroup[]>("/api/v1/age-groups"),
-  createAgeGroup: (data: Record<string, unknown>) => request<AgeGroup>("/api/v1/age-groups", { method: "POST", body: JSON.stringify(data) }),
   teams: () => request<Team[]>("/api/v1/teams"),
   teamAthletes: (teamId: string) => request<{ athleteId: string; fullName: string; status: string }[]>(`/api/v1/teams/${teamId}/athletes`),
+  teamStaff: (teamId: string) => request<TeamStaff[]>(`/api/v1/teams/${teamId}/staff`),
+  addTeamStaff: (teamId: string, data: { userId: string; role?: string }) => request<TeamStaff[]>(`/api/v1/teams/${teamId}/staff`, { method: "POST", body: JSON.stringify(data) }),
+  removeTeamStaff: (teamId: string, userId: string) => request<void>(`/api/v1/teams/${teamId}/staff/${userId}`, { method: "DELETE" }),
   createTeam: (data: Record<string, unknown>) => request<Team>("/api/v1/teams", { method: "POST", body: JSON.stringify(data) }),
   documents: (athleteId: string) => request<Document[]>(`/api/v1/athletes/${athleteId}/documents`),
   trainingSessions: () => request<TrainingSession[]>("/api/v1/training-sessions"),
@@ -190,5 +231,12 @@ export const api = {
   feePlans: () => request<FeePlan[]>("/api/v1/fee-plans"),
   createFeePlan: (data: Record<string, unknown>) => request<FeePlan>("/api/v1/fee-plans", { method: "POST", body: JSON.stringify(data) }),
   charges: (status?: string) => request<Charge[]>(`/api/v1/charges${status ? `?status=${encodeURIComponent(status)}` : ""}`),
-  generateCharges: (data: Record<string, unknown>) => request<{ period: string; created: number; skipped: number }>("/api/v1/charges/generate", { method: "POST", body: JSON.stringify(data) })
+  createCharge: (data: Record<string, unknown>) => request<Charge>("/api/v1/charges", { method: "POST", body: JSON.stringify(data) }),
+  generateCharges: (data: Record<string, unknown>) => request<{ period: string; created: number; skipped: number }>("/api/v1/charges/generate", { method: "POST", body: JSON.stringify(data) }),
+  updateChargeStatus: (id: string, status: string) => request<void>(`/api/v1/charges/${id}/status`, { method: "PATCH", body: JSON.stringify({ status }) }),
+  payments: (chargeId: string) => request<Payment[]>(`/api/v1/charges/${chargeId}/payments`),
+  createPayment: (data: Record<string, unknown>) => request<Payment>("/api/v1/payments", { method: "POST", body: JSON.stringify(data) }),
+  ledgerEntries: () => request<LedgerEntry[]>("/api/v1/ledger-entries"),
+  createLedgerEntry: (data: Record<string, unknown>) => request<LedgerEntry>("/api/v1/ledger-entries", { method: "POST", body: JSON.stringify(data) }),
+  deleteLedgerEntry: (id: string) => request<void>(`/api/v1/ledger-entries/${id}`, { method: "DELETE" })
 };

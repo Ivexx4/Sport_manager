@@ -4,6 +4,9 @@ import java.util.Locale;
 import java.util.Optional;
 import java.util.UUID;
 import java.util.regex.Pattern;
+import java.security.SecureRandom;
+import java.security.MessageDigest;
+import java.util.Base64;
 
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpStatus;
@@ -18,13 +21,14 @@ import org.springframework.web.server.ResponseStatusException;
 public class ProvisioningService {
 
     private static final Pattern SLUG = Pattern.compile("^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$");
+    private static final SecureRandom RANDOM = new SecureRandom();
 
     record ProvisionResult(UUID tenantId, String slug, String name, UUID adminUserId, String adminEmail) {
     }
 
     private final JdbcClient jdbc;
     private final PasswordEncoder passwordEncoder;
-    private final String bootstrapKey;
+    private volatile String bootstrapKey;
 
     public ProvisioningService(JdbcClient jdbc, PasswordEncoder passwordEncoder,
                                @Value("${app.platform.bootstrap-key:}") String bootstrapKey) {
@@ -33,13 +37,22 @@ public class ProvisioningService {
         this.bootstrapKey = bootstrapKey == null ? "" : bootstrapKey.trim();
     }
 
+    public synchronized String generateBootstrapKey() {
+        byte[] bytes = new byte[32];
+        RANDOM.nextBytes(bytes);
+        bootstrapKey = Base64.getUrlEncoder().withoutPadding().encodeToString(bytes);
+        return bootstrapKey;
+    }
+
     @Transactional
     public ProvisionResult provisionTenant(String providedKey, String name, String slug,
                                            String adminEmail, String adminName, String adminPassword) {
         if (bootstrapKey.isEmpty()) {
             throw new ResponseStatusException(HttpStatus.SERVICE_UNAVAILABLE, "Provisionamento desativado");
         }
-        if (providedKey == null || providedKey.isBlank() || !bootstrapKey.equals(providedKey)) {
+        if (providedKey == null || providedKey.isBlank()
+                || !MessageDigest.isEqual(bootstrapKey.getBytes(java.nio.charset.StandardCharsets.UTF_8),
+                        providedKey.getBytes(java.nio.charset.StandardCharsets.UTF_8))) {
             throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Chave de bootstrap inválida");
         }
 
