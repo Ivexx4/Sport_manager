@@ -16,23 +16,24 @@ encarregados de educação, equipas, épocas e escalões com autorização por r
 ## Requisitos
 
 - JDK 25 (o `pom.xml` fixa `java.version` a 25)
-- Maven 3.6.3+
+- Maven 3.6.3+ — dispensável se usares o wrapper incluído (`./mvnw` em Bash, `.\mvnw.cmd` no
+  PowerShell), que descarrega a versão fixada em `.mvn/wrapper/maven-wrapper.properties`
 - Docker (PostgreSQL 16 local, Mailpit, Testcontainers e imagem de staging)
 
 ## Arranque
 
 ```bash
 docker compose up -d                              # PostgreSQL 16 (volei_migrator/volei_app) + Mailpit (SMTP/UI)
-SPRING_PROFILES_ACTIVE=dev mvn spring-boot:run    # perfil dev: segredo JWT, SMTP local e bootstrap key
+SPRING_PROFILES_ACTIVE=dev ./mvnw spring-boot:run # perfil dev: segredo JWT, SMTP local e bootstrap key
 ```
 
 Em WSL/Linux, executa exatamente o segundo comando com o prefixo
-`SPRING_PROFILES_ACTIVE=dev`. Se executares apenas `mvn spring-boot:run`, a aplicação usa o
+`SPRING_PROFILES_ACTIVE=dev`. Se executares apenas `./mvnw spring-boot:run`, a aplicação usa o
 perfil `default` e exige `JWT_SECRET` no ambiente:
 
 ```bash
 export JWT_SECRET="$(openssl rand -base64 48)"
-mvn spring-boot:run
+./mvnw spring-boot:run
 ```
 
 ### Lançamento completo (ambiente local)
@@ -67,11 +68,11 @@ superior** e **Docker Desktop** com o motor Docker em execução. A aplicação 
 
    ```bash
    # Linux/macOS/Git Bash
-   SPRING_PROFILES_ACTIVE=dev mvn spring-boot:run
+   SPRING_PROFILES_ACTIVE=dev ./mvnw spring-boot:run
 
-   # PowerShell
+   # PowerShell (o wrapper é um script de shell; usar o .cmd)
    $env:SPRING_PROFILES_ACTIVE = "dev"
-   mvn spring-boot:run
+   .\mvnw.cmd spring-boot:run
    ```
 
    A API fica disponível em [http://localhost:8080](http://localhost:8080). Confirmar o arranque
@@ -123,13 +124,13 @@ docker compose up -d
 
 ```bash
 # Backend: compilação
-mvn -DskipTests package
+./mvnw -DskipTests package
 
 # Backend: testes unitários e de integração (requer Docker/Testcontainers)
-mvn test
+./mvnw test
 
 # Backend: relatório de cobertura em target/site/jacoco
-mvn test
+./mvnw test
 
 # Frontend: verificação TypeScript e build de produção
 cd frontend
@@ -139,7 +140,7 @@ npm run build
 O perfil `coverage-check` impõe os limiares de cobertura configurados no `pom.xml`:
 
 ```bash
-mvn -Pcoverage-check verify
+./mvnw -Pcoverage-check verify
 ```
 
 ### Configuração fora de `dev`
@@ -701,7 +702,7 @@ nunca remove um token ou convite ainda válido.
 ## Testes
 
 ```bash
-mvn test
+./mvnw test
 ```
 
 Os testes de integração precisam de Docker. Corre-se um PostgreSQL real com Testcontainers:
@@ -786,7 +787,7 @@ sem limite superior e o cálculo da idade na data de referência).
 
 ### Cobertura de testes (JaCoCo)
 
-O build está instrumentado com JaCoCo 0.8.14; `mvn test` deixa o relatório em `target/site/jacoco/`:
+O build está instrumentado com JaCoCo 0.8.14; `./mvnw test` deixa o relatório em `target/site/jacoco/`:
 
 | Ficheiro     | Uso                                                             |
 |--------------|-----------------------------------------------------------------|
@@ -805,38 +806,39 @@ Resumo no terminal:
 Impor mínimos (o build falha abaixo deles):
 
 ```bash
-mvn -Pcoverage-check verify
-mvn -Pcoverage-check verify -Djacoco.min.line=0.92 -Djacoco.min.branch=0.72
+./mvnw -Pcoverage-check verify
+./mvnw -Pcoverage-check verify -Djacoco.min.line=0.92 -Djacoco.min.branch=0.72
 ```
 
 Os limiares por omissão são **90% de linhas** e **70% de ramos** (`pom.xml`). Fora do perfil a cobertura é
 apenas medida e nunca falha o build; os valores podem ser trocados na linha de comandos
 (`-Djacoco.min.line=0.92 -Djacoco.min.branch=0.72`). A conta abrange `src/main/java` (exclui só `package-info`).
 
-No último levantamento a suite dava **92,5% de linhas** e **76,4% de ramos**. A maior lacuna está em
-`notifications` (`EmailOutboxDispatcher` e `SmtpMailTransport`), sem impacto nos restantes módulos,
-que ficam acima de 93% de linhas.
+Na última execução a suite dava **92,9% de linhas** (2940/3165) e **76,9% de ramos** (1032/1342).
+As maiores lacunas estão em `shared` (74,8% de linhas) e `billing` (79,7%); os restantes módulos
+ficam acima de 90% de linhas.
 
 No CI, cada execução publica o relatório como artefacto `cobertura-jacoco` e escreve o resumo no
 *step summary* do workflow.
 
-Integração contínua: workflow GitHub Actions em `.github/workflows/ci.yml` (JDK 25, `mvn -B -ntp test`,
-com Docker disponível no runner). Em `main`, o mesmo workflow publica a imagem e faz deploy para staging
-(ver a secção seguinte).
+Integração contínua: workflow GitHub Actions em `.github/workflows/ci.yml` (JDK 25, `mvn -B -ntp
+-Pcoverage-check verify`, com Docker disponível no runner). Em `master`, o mesmo workflow publica a
+imagem e faz deploy para staging (ver a secção seguinte).
 
 ## CI/CD e staging
 
-O workflow `.github/workflows/ci.yml` tem três jobs:
+O workflow `.github/workflows/ci.yml` tem quatro jobs:
 
 | Job             | Quando corre                                    | O que faz                                                                                                                     |
 |-----------------|-------------------------------------------------|-------------------------------------------------------------------------------------------------------------------------------|
-| `test`          | todos os pushes, pull requests e execução manual | `mvn -B -ntp test` com JDK 25 (o Testcontainers usa o Docker do runner)                                                        |
-| `image`         | depois dos testes                               | valida o `Dockerfile` em pull requests; em `main` publica `ghcr.io/<owner>/<repo>:<sha>` e `:staging` no GHCR                   |
-| `deploy-staging`| só em `main`                                    | por SSH, atualiza a stack Docker Compose no servidor e espera pelos healthchecks; falha com os logs se a app não ficar saudável |
+| `test`          | todos os pushes, pull requests e execução manual | `mvn -B -ntp -Pcoverage-check verify` com JDK 25 (o Testcontainers usa o Docker do runner) e falha abaixo dos limiares de cobertura |
+| `frontend`      | todos os pushes, pull requests e execução manual | em `frontend/`: Node 20 com cache npm, `npm ci` e `npm run build`                                                              |
+| `image`         | depois dos testes                               | valida o `Dockerfile` em pull requests; em `master` publica `ghcr.io/<owner>/<repo>:<sha>` e `:staging` no GHCR                |
+| `deploy-staging`| só em `master`                                  | depois de `image` e `frontend`; por SSH, atualiza a stack Docker Compose no servidor e espera pelos healthchecks; falha com os logs se a app não ficar saudável |
 
 A imagem é multi-stage (`Dockerfile`): build com Maven/JDK 25 e runtime `eclipse-temurin:25-jre-alpine`, com
 utilizador sem privilégios e healthcheck em `/api/v1/ping`. A tag `:<sha>` é imutável e é a usada no deploy;
-`:staging` aponta sempre para a última versão de `main`.
+`:staging` aponta sempre para a última versão de `master`.
 
 ### Configurar o staging no GitHub
 
@@ -905,8 +907,8 @@ docker compose --env-file .env -f docker-compose.staging.yml logs -f app
 
 ### Deploy e rollback
 
-O deploy corre automaticamente em cada push para `main`; também pode ser disparado à mão em
-*Actions > CI > Run workflow* (no branch `main`). Para voltar a uma versão anterior, usar a tag imutável
+O deploy corre automaticamente em cada push para `master`; também pode ser disparado à mão em
+*Actions > CI > Run workflow* (no branch `master`). Para voltar a uma versão anterior, usar a tag imutável
 `:<sha>` do commit pretendido (re-executar o workflow desse commit ou, no servidor, alterar `APP_IMAGE` no
 `.env` e correr `docker compose ... up -d --wait`). A tag `:staging` não serve para rollback porque se move.
 
