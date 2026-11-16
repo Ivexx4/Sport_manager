@@ -7,6 +7,7 @@ import java.time.Instant;
 import java.time.LocalDate;
 import java.util.List;
 import java.util.Locale;
+import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
@@ -18,6 +19,7 @@ import org.springframework.web.server.ResponseStatusException;
 
 import pt.voleibol.gestao.shared.Rules;
 import pt.voleibol.gestao.billing.ChargeRepository;
+import pt.voleibol.gestao.teams.SeasonEligibility;
 
 /**
  * Atletas e encarregados de educação, com autorização por recurso:
@@ -49,10 +51,12 @@ class AthleteService {
 
     private final AthleteRepository athletes;
     private final ChargeRepository charges;
+    private final SeasonEligibility eligibility;
 
-    AthleteService(AthleteRepository athletes, ChargeRepository charges) {
+    AthleteService(AthleteRepository athletes, ChargeRepository charges, SeasonEligibility eligibility) {
         this.athletes = athletes;
         this.charges = charges;
+        this.eligibility = eligibility;
     }
 
     @Transactional(readOnly = true)
@@ -152,7 +156,7 @@ class AthleteService {
     @Transactional
     AthleteView update(UUID actorId, Set<String> roles, UUID athleteId, AthleteRepository.Data data) {
         UUID tenantId = Rules.tenant();
-        requireWritable(tenantId, athleteId, actorId, roles);
+        AthleteRepository.AthleteRow current = requireWritable(tenantId, athleteId, actorId, roles);
 
         if (data.licenseNumber() != null
                 && athletes.licenseExists(tenantId, data.licenseNumber(), athleteId)) {
@@ -162,6 +166,11 @@ class AthleteService {
             if (!athletes.update(tenantId, athleteId, data)) throw notFound();
         } catch (DuplicateKeyException e) {
             throw Rules.conflict("Já existe um atleta com esta licença");
+        }
+        // A data de nascimento decide o escalão: uma alteração que torne o atleta inelegível desfaz
+        // a edição, em vez de deixar inscrições ou plantéis ilegais.
+        if (!Objects.equals(current.birthDate(), data.birthDate())) {
+            eligibility.requireAthleteStillEligible(tenantId, athleteId);
         }
         athletes.audit(tenantId, actorId, "ATHLETE_UPDATED", athleteId);
         return get(actorId, roles, athleteId);
@@ -283,10 +292,11 @@ class AthleteService {
         athletes.findVisible(tenantId, athleteId, actorId, roles).orElseThrow(AthleteService::notFound);
     }
 
-    private void requireWritable(UUID tenantId, UUID athleteId, UUID actorId, Set<String> roles) {
+    private AthleteRepository.AthleteRow requireWritable(UUID tenantId, UUID athleteId, UUID actorId,
+                                                         Set<String> roles) {
         Optional<AthleteRepository.AthleteRow> writable =
                 athletes.findWritable(tenantId, athleteId, actorId, roles);
-        if (writable.isPresent()) return;
+        if (writable.isPresent()) return writable.get();
         if (athletes.findVisible(tenantId, athleteId, actorId, roles).isPresent()) throw Rules.forbidden();
         throw notFound();
     }

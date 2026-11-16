@@ -116,7 +116,8 @@ class AthleteFlowTest extends FlowTestSupport {
     void remocaoAnonimizaEMantemRelacoes() throws Exception {
         String admin = acesso(HOST_A, ADMIN);
 
-        String criado = criar(HOST_A, admin, corpo("Atleta a Remover", "2011-02-03", "M",
+        // 15 anos na data de referência da época: dentro da faixa de Cadetes, por isso pode entrar no plantel.
+        String criado = criar(HOST_A, admin, corpo("Atleta a Remover", "2010-02-03", "M",
                 "123456789", "remover@exemplo.pt", "910000000", "REM-1", null, null))
                 .andExpect(status().isCreated()).andReturn().getResponse().getContentAsString();
         UUID id = UUID.fromString(JsonPath.read(criado, "$.id"));

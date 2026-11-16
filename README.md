@@ -160,8 +160,8 @@ criação; a listagem de atletas permite pesquisar, abrir o detalhe, desativar e
 ficheiro CSV UTF-8.
 
 Na criação de uma equipa, a época e o escalão são obrigatórios. O catálogo federal de
-escalões é carregado para o clube; ao mudar de época, o escalão é limpo. A equipa criada
-fica assim associada à época e ao escalão que aparecem no cartão da equipa.
+escalões é comum a todos os clubes e só de leitura; ao mudar de época, o escalão é limpo.
+A equipa criada fica assim associada à época e ao escalão que aparecem no cartão da equipa.
 
 Os escalões são o catálogo oficial FPV, comum a todos os clubes e mantido por migrações da
 base de dados. Usam limites de idade (não anos de nascimento), não podem ser criados ou
@@ -169,6 +169,9 @@ alterados na interface e incluem Minis A/B, Infantis, Iniciados, Cadetes, Juveni
 Sub21, Seniores e Veteranos A/B/C. Os escalões JB1 e JB não são criados. Ao criar uma época,
 a data de referência da idade é preenchida por defeito com 1 de janeiro do ano seguinte ao
 ano atual e pode ser ajustada no formulário; as validações calculam a idade exata nessa data.
+Na mesma página, a gestão vê as autorizações de subida de escalão da época selecionada e pode
+conceder (`Nova autorização`), revogar e reativar; os erros do servidor (`400`/`409`) aparecem
+no aviso com a mensagem devolvida pela API.
 
 Os módulos de treinos, jogos e quotas permitem criar sessões, jogos e planos quando o
 utilizador tem permissões de gestão. O módulo financeiro inclui quotas recorrentes e taxas
@@ -391,7 +394,7 @@ FPV) foi entregue.
 | `GET /api/v1/athletes`                          | `ADMIN`, `DIRECAO`, `FINANCEIRO` (todos) e `TREINADOR`/`ATLETA`/`ENCARREGADO` (âmbito) | Lista paginada: `q` (nome), `status`, `teamId`, `page` (≥0), `size` (1–100, omissão 20) |
 | `GET /api/v1/athletes/{id}`                     | idem                                                                      | Detalhe; fora do âmbito devolve `404`                                     |
 | `POST /api/v1/athletes`                         | `ADMIN`, `DIRECAO`                                                        | Cria; `409` para licença repetida ou conta já ligada                      |
-| `PUT /api/v1/athletes/{id}`                     | `ADMIN`, `DIRECAO`, e o âmbito de `TREINADOR`/`ATLETA`/`ENCARREGADO`      | Atualiza os dados; fora do âmbito de leitura `404`, dentro mas sem escrita `403` |
+| `PUT /api/v1/athletes/{id}`                     | `ADMIN`, `DIRECAO`, e o âmbito de `TREINADOR`/`ATLETA`/`ENCARREGADO`      | Atualiza os dados; fora do âmbito de leitura `404`, dentro mas sem escrita `403`; mudar a `birthDate` revalida inscrições e plantéis (`400`) |
 | `DELETE /api/v1/athletes/{id}`                  | `ADMIN`, `DIRECAO`                                                        | Desativa e anonimiza (remoção não destrutiva), mantendo histórico e relações |
 | `POST /api/v1/athletes/{id}/account`            | `ADMIN`, `DIRECAO`                                                        | `{userId}` liga a conta; a conta tem de ter membership ativo no clube     |
 | `DELETE /api/v1/athletes/{id}/account`          | `ADMIN`, `DIRECAO`                                                        | Desliga a conta                                                           |
@@ -411,7 +414,7 @@ Cada conta (`athlete.user_id`) só pode estar ligada a um atleta no mesmo clube.
 | `GET /api/v1/teams`                           | `ADMIN`, `DIRECAO`, `TREINADOR`    | Todas para a gestão; o treinador só vê as equipas em que é staff |
 | `GET /api/v1/teams/{id}`                      | idem                               | Detalhe; fora do âmbito devolve `404`                            |
 | `POST /api/v1/teams`                          | `ADMIN`, `DIRECAO`                 | `{name, status?, seasonId?, ageGroupId?}`; nome único por clube (sem distinguir maiúsculas); época/escalão têm de existir no clube (`404`) |
-| `PUT /api/v1/teams/{id}`                      | `ADMIN`, `DIRECAO`                 | Atualiza nome/estado e associações; `null` em `seasonId`/`ageGroupId` remove a associação |
+| `PUT /api/v1/teams/{id}`                      | `ADMIN`, `DIRECAO`                 | Atualiza nome/estado e associações; `null` em `seasonId`/`ageGroupId` remove a associação; mudar a época ou o escalão revalida o plantel (`400`) |
 | `DELETE /api/v1/teams/{id}`                   | `ADMIN`, `DIRECAO`                 | Desativa e anonimiza; staff e plantel ficam preservados para histórico |
 | `GET /api/v1/teams/{id}/staff`                | mesma visibilidade da equipa       | Lista treinadores/adjuntos                                       |
 | `POST /api/v1/teams/{id}/staff`               | `ADMIN`, `DIRECAO`                 | `{userId, role?}`: `TREINADOR` ou `TREINADOR_ADJUNTO`            |
@@ -425,34 +428,66 @@ própria equipa para alargar o seu âmbito de autorização.
 
 ### Regra federativa FPV no plantel
 
-No `POST /api/v1/teams/{teamId}/athletes` (`addAthleteToTeam`) o plantel passa a validar a idade do
-atleta contra o escalão da época da equipa (`season` → `age_group`):
+A idade do atleta é sempre calculada na **data de referência da época** (`season.cutoff_date`;
+sem ela, `season.start_date`; sem nenhuma das duas, a data de hoje) e comparada com os limites
+do escalão (`age_group.min_age`/`max_age`). A regra vive numa só classe (`AgeGroupEligibility`)
+e é aplicada em três pontos: o plantel (`POST /api/v1/teams/{teamId}/athletes`, contra o escalão
+da equipa), a escolha do escalão de inscrição do atleta na época e a revalidação de estados já
+guardados.
 
-1. O atleta tem de estar no mesmo clube e não estar já no plantel (`404`/`409`).
-2. A equipa tem de estar associada a uma época e a um escalão (`400` se não o estiver).
-3. Com o `birth_year` do atleta (extraído de `birth_date`), a regra federativa é:
-   - `min_birth_year <= birth_year <= max_birth_year` → **permite** a inserção;
-   - `birth_year > max_birth_year` (subida) → exige **autorização excepcional** de subida de escalão
-     para a época (`season_promotion`, `ACTIVE`); sem autorização → `400`;
-   - `birth_year < min_birth_year` (tentativa de jogar em escalão inferior) → **`400`**:
-     "Proibido atuar em escalão inferior conforme regulamento FPV".
+Com o atleta no clube e ainda fora do plantel (`404`/`409`), o resultado é:
 
-### Endpoints de épocas e escalões
+| Idade vs. escalão | Resultado |
+|---|---|
+| `min_age <= idade <= max_age` | **permite** |
+| `idade < min_age` (atleta **mais novo**, subida) | exige uma **autorização excepcional** `ACTIVE` em `season_promotion` para a época × atleta × escalão; sem ela → `400` "Subida de escalão exige autorização excepcional para a época" |
+| `idade > max_age` (atleta **mais velho**, descida) | **`400` sempre**, mesmo com autorização: "Proibido atuar em escalão inferior conforme regulamento FPV" |
+| `max_age` nulo (Seniores, Veteranos) | não tem limite superior; a idade mínima continua a mandar (um atleta de 18 anos em Seniores é uma subida) |
 
-| Endpoint                            | Quem pode          | Descrição                                                                 |
-|-------------------------------------|--------------------|---------------------------------------------------------------------------|
-| `GET /api/v1/seasons`               | qualquer membro    | Lista as épocas do clube                                                  |
-| `GET /api/v1/seasons/{id}`          | qualquer membro    | Detalhe; `404` se não existir no clube                                    |
-| `POST /api/v1/seasons`              | `ADMIN`, `DIRECAO` | `{name, startDate?, endDate?, isActive?}` → 201                           |
-| `PUT /api/v1/seasons/{id}`          | `ADMIN`, `DIRECAO` | Atualiza a época; nome único por clube                                    |
-| `DELETE /api/v1/seasons/{id}`       | `ADMIN`, `DIRECAO` | Anonimiza a época (`isActive = false` + `anonymized_at`); as equipas associadas mantêm-se |
-| `GET /api/v1/age-groups`            | qualquer membro    | Lista os escalões (por época) do clube                                   |
-| `GET /api/v1/age-groups/{id}`       | qualquer membro    | Detalhe; `404` se não existir no clube                                    |
-| `POST /api/v1/age-groups`           | `ADMIN`, `DIRECAO` | `{seasonId, name, minBirthYear, maxBirthYear}` → 201                     |
-| `PUT /api/v1/age-groups/{id}`       | `ADMIN`, `DIRECAO` | Atualiza o escalão; nome único na época                                   |
-| `DELETE /api/v1/age-groups/{id}`    | `ADMIN`, `DIRECAO` | Anonimiza o escalão; o registo e as equipas associadas mantêm-se          |
+- A equipa tem de estar associada a uma época e a um escalão (`400` se não estiver).
+- Uma autorização só desbloqueia o caso "mais novo"; nunca permite descer de escalão.
+- Conceder é declarativo: não se verifica se o atleta precisa da autorização nem se impede que o
+  mesmo atleta tenha autorizações para escalões diferentes na mesma época.
 
-`isActive` marca a época corrente; `startDate`/`endDate` são opcionais, mas a data de fim não pode ser anterior à de início. Os escalões são faixas de anos de nascimento (`minBirthYear`/`maxBirthYear`) de uma época (`seasonId` obrigatório). As épocas e os escalões anonimizados deixam de aparecer nas leituras e não podem ser associados a novas equipas.
+### Revalidação de estados guardados
+
+Alterar os dados que servem de base à regra não pode criar estados ilegais. Quando o dado
+relevante muda, a escrita é seguida — na mesma transação, com rollback em caso de falha — de uma
+verificação de tudo o que já está guardado (`SeasonEligibility`):
+
+| Alteração | O que é revalidado |
+|---|---|
+| `PUT /api/v1/athletes/{id}` que muda a `birthDate` | inscrições na época e plantéis do atleta |
+| `PUT /api/v1/seasons/{id}` que muda `startDate`/`cutoffDate` | inscrições e plantéis da época |
+| `PUT /api/v1/teams/{id}` que muda `seasonId`/`ageGroupId` | plantel da equipa |
+
+A primeira violação devolve `400` com "A alteração tornaria o atleta inelegível em `<escalão>`
+(`<contexto>`)". Não há override deliberado: para aplicar uma alteração legítima é preciso
+resolver primeiro o estado, concedendo as autorizações necessárias ou removendo o atleta do
+plantel. Uma época sem `cutoffDate` é validada no `startDate` (e na data de hoje se também não
+tiver início); ao criar uma época, a data de referência em falta é preenchida com 1 de janeiro
+do ano seguinte.
+
+### Endpoints de épocas, escalões e autorizações de subida
+
+| Endpoint                                            | Quem pode          | Descrição                                                                 |
+|-----------------------------------------------------|--------------------|---------------------------------------------------------------------------|
+| `GET /api/v1/seasons`                               | qualquer membro    | Lista as épocas do clube                                                  |
+| `GET /api/v1/seasons/{id}`                          | qualquer membro    | Detalhe; `404` se não existir no clube                                    |
+| `POST /api/v1/seasons`                              | `ADMIN`, `DIRECAO` | `{name, startDate?, endDate?, cutoffDate?, isActive?}` → 201              |
+| `PUT /api/v1/seasons/{id}`                          | `ADMIN`, `DIRECAO` | Atualiza a época; nome único por clube; mudar as datas revalida inscrições e plantéis (`400`) |
+| `DELETE /api/v1/seasons/{id}`                       | `ADMIN`, `DIRECAO` | Anonimiza a época (`isActive = false` + `anonymized_at`); as equipas associadas mantêm-se |
+| `GET /api/v1/age-groups`                            | qualquer membro    | Lista o catálogo federal FPV (comum a todos os clubes)                    |
+| `GET /api/v1/age-groups/{id}`                       | qualquer membro    | Detalhe do escalão                                                        |
+| `GET /api/v1/seasons/{seasonId}/promotions`         | `ADMIN`, `DIRECAO` | Autorizações da época; `?athleteId=` filtra por atleta                    |
+| `POST /api/v1/seasons/{seasonId}/promotions`        | `ADMIN`, `DIRECAO` | `{athleteId, ageGroupId, reason?}` → 201; `404` fora do clube; `409` se já existir uma `ACTIVE` |
+| `PATCH /api/v1/seasons/{seasonId}/promotions/{id}`  | `ADMIN`, `DIRECAO` | `{status}`: `ACTIVE`/`REVOKED` → 204                                      |
+
+`isActive` marca a época corrente; `startDate`/`endDate` são opcionais, mas a data de fim não pode ser anterior à de início. `cutoffDate` é a data de referência da idade: quando não é indicada é preenchida com o `startDate` e, sem este, com 1 de janeiro do ano seguinte. As épocas anonimizadas deixam de aparecer nas leituras e não podem ser associadas a novas equipas.
+
+Os escalões (`age_group`) são o catálogo federal FPV, mantido por migrações e igual para todos os clubes: limites de idade (`min_age`/`max_age`) e sem `tenant_id`. São **só de leitura** pela API — `POST`/`PUT`/`DELETE /api/v1/age-groups` já não existem e devolvem `405`.
+
+A autorização (`season_promotion`) é por época × atleta × escalão, guarda `reason` (até 200 caracteres, opcional) e `authorized_by`. Um `POST` sobre uma autorização já revogada reativa a mesma linha em vez de criar outra. Revogar **não remove** o atleta do plantel nem a inscrição: só bloqueia as operações seguintes que dependam da autorização. Todas as alterações ficam em `audit_log` (`SEASON_PROMOTION_GRANTED`, `SEASON_PROMOTION_REVOKED`).
 
 ### Matriz de autorização por recurso
 
@@ -473,7 +508,9 @@ Regras transversais:
   escrita devolve `403`.
 - O RLS por `tenant_id` continua a ser a barreira final: nenhuma query vê dados de outro clube.
 - Encarregados e contas ligadas têm de ter membership ativo no clube; a conta de atleta é única por clube.
-- Todas as operações de escrita ficam em `audit_log` (`ATHLETE_*` e `TEAM_*`).
+- Todas as operações de escrita ficam em `audit_log` (`ATHLETE_*`, `TEAM_*` e `SEASON_PROMOTION_*`).
+- As autorizações de subida de escalão (`/api/v1/seasons/{id}/promotions`) são exclusivas de `ADMIN`/`DIRECAO`
+  nas três rotas: `TREINADOR`, `FINANCEIRO`, `ATLETA` e `ENCARREGADO` recebem `403`, mesmo para ler.
 
 ### Remoção não destrutiva (convenção de desenvolvimento)
 
@@ -492,9 +529,10 @@ devem ter `anonymized_at` (e `status` quando aplicável) e os índices de unicid
 (`WHERE anonymized_at IS NULL`). Só dados sem valor histórico — tokens, convites e mensagens da outbox — são
 apagados pela limpeza periódica.
 
-Exceção: os escalões (`age_group`) passaram a pertencer a uma época (`season`) e a conter anos de nascimento;
-o `DELETE` mantém a convenção de remoção não destrutiva (anonimização), preservando o registo e as
-equipas associadas.
+Exceções: o catálogo federal de escalões (`age_group`) não pertence ao clube — é global, só de leitura e
+mantido por migrações — pelo que não tem `DELETE`. As autorizações de subida de escalão mudam de estado
+(`ACTIVE`/`REVOKED`) em vez de desaparecerem, e revogar **não remove** as linhas de `team_athlete` nem de
+`athlete_season_registration`: apenas bloqueia as operações seguintes que dependam da autorização.
 
 ### Documentos, importação e estatísticas de atletas
 
@@ -608,13 +646,15 @@ Todas as tabelas abaixo levam `tenant_id`, `id` (UUID), `created_at`, `updated_a
 | `tenant` | nome, slug, NIF, estado, plano | raiz de todos os dados |
 | `app_user` | email, nome, estado | N:N com tenant via membership |
 | `membership` | user_id, papel, estado | liga utilizador a clube com papel |
-| `season` | nome, início, fim, ativa | 1:N com team |
-| `age_group` | nome, idade mín./máx., regra de data de corte | 1:N com team |
+| `season` | nome, início, fim, data de referência da idade (`cutoff_date`), ativa | 1:N com team, inscrições e promoções |
+| `age_group` | catálogo federal: `code`, nome, idade mín./máx. | global (sem `tenant_id`) e só de leitura; referenciado por team, inscrições, promoções e planos |
 | `team` | nome, season_id, age_group_id, género | 1:N com roster_entry, training_session, match |
 | `athlete` | nome, data de nascimento, género, NIF, contactos, nº licença, estado, conta | N:N com `athlete_guardian`; 1:N com document, attendance e call_up |
 | `athlete_guardian` | athlete_id, user_id, parentesco | liga atleta a encarregado de educação |
 | `team` | nome, season_id, age_group_id, género | 1:N com `team_athlete`, `team_staff`, training_session e match |
 | `team_athlete` | team_id, athlete_id | plantel da equipa |
+| `athlete_season_registration` | season_id, athlete_id, age_group_id | inscrição oficial do atleta na época |
+| `season_promotion` | season_id, athlete_id, age_group_id, estado, motivo, `authorized_by` | autorização excepcional de subida, por época × atleta × escalão |
 | `team_staff` | team_id, user_id, função | treinador, delegado |
 | `document` | athlete_id, tipo, ficheiro, validade, `expiry_notified_at` | alerta de caducidade (com deduplicação semanal) |
 | `venue` | nome, morada | pavilhão/campo usado por treinos e jogos |
@@ -633,7 +673,8 @@ Todas as tabelas abaixo levam `tenant_id`, `id` (UUID), `created_at`, `updated_a
 ### Regras de modelação:
 - Valores monetários em inteiros (cêntimos) ou `numeric(12,2)`, nunca `float`.
 - Datas e horas em `timestamptz`, guardadas em UTC e mostradas no fuso do clube (`Europe/Lisbon`).
-- Um atleta pode ter várias épocas; o escalão é sempre derivado da época e da data de nascimento, não guardado no atleta.
+- Um atleta pode ter várias épocas; o escalão é derivado da idade na data de referência da época e guardado na
+  inscrição (`athlete_season_registration`) e na equipa, nunca no atleta.
 - Apagar atletas faz-se por anonimização (RGPD), mantendo os registos financeiros exigidos por lei.
 - A faturação da plataforma é uma mensalidade única por clube, igual para todos: sem planos, tiers ou preço
   personalizado. Cada fatura guarda o valor cobrado no momento (snapshot), para que mudar o preço não reescreva
@@ -700,11 +741,18 @@ Os testes de integração precisam de Docker. Corre-se um PostgreSQL real com Te
   licenças repetidas e datas inválidas ignoradas, repetição sem duplicar e escrita restrita à gestão).
 - `TeamFlowTest`: CRUD de equipas, nome único, autorização da listagem, staff e plantel, isolamento entre clubes,
   remoção não destrutiva (a equipa é anonimizada e staff/plantel ficam preservados), o âmbito do `TREINADOR`
-  (só vê as equipas em que é staff e não as gere) e a regra federativa FPV no plantel (faixa de escalão, subida com
-  autorização excepcional e proibição em escalão inferior).
-- `SeasonAgeGroupFlowTest`: CRUD de épocas e escalões, validações de datas/anos de nascimento, leitura aberta a qualquer
-  membro, escrita só para `ADMIN`/`DIRECAO`, isolamento entre clubes, remoção não destrutiva e associação de
-  `seasonId`/`ageGroupId` às equipas (incluindo referências de outro clube ou anonimizadas).
+  (só vê as equipas em que é staff e não as gere) e a regra federativa FPV no plantel (faixa de escalão, atleta
+  mais novo a exigir autorização — concedida pela própria API — e atleta mais velho proibido mesmo com ela).
+  Cobre também a revalidação: mudar a data de referência da época, o escalão da equipa ou a data de nascimento
+  de um atleta do plantel devolve `400` e não deixa a escrita aplicada (rollback).
+- `PromotionFlowTest`: autorizações de subida de escalão. Conceder, listar (com filtro por atleta), revogar e
+  reativar a mesma linha, `409` para duplicado ativo, `404` para época/atleta/escalão de outro clube, `403` para
+  `TREINADOR` e `FINANCEIRO`, isolamento entre clubes, auditoria (`SEASON_PROMOTION_GRANTED`/`_REVOKED`) e a prova
+  de que revogar não altera `team_athlete` nem `athlete_season_registration`.
+- `SeasonAgeGroupFlowTest`: CRUD das épocas e catálogo federal de escalões só de leitura (`POST`/`PUT`/`DELETE`
+  devolvem `405` e os dois clubes vêem exatamente a mesma lista), validações de datas, leitura aberta a qualquer
+  membro, escrita de épocas só para `ADMIN`/`DIRECAO`, isolamento entre clubes, remoção não destrutiva e associação
+  de `seasonId`/`ageGroupId` às equipas (incluindo referências de outro clube ou anonimizadas).
 - `TrainingFlowTest`: locais e sessões de treino contra PostgreSQL real. Cobre CRUD, nome de local único (`409`),
   validações (`400`/`404`), presenças (upsert, listagem e remoção), autorização por papel (`TREINADOR` só nas suas
   equipas, `ATLETA`/`ENCARREGADO` só leitura das sessões da equipa do atleta, `FINANCEIRO` só leitura, gestão total
@@ -728,10 +776,13 @@ Os testes de integração precisam de Docker. Corre-se um PostgreSQL real com Te
 - `ExpiredDataPurgerTest`: a limpeza remove convites/tokens expirados, aceites, usados ou revogados de
   **vários clubes** numa só chamada, e mantém os dados recentes/válidos e as mensagens `PENDING` da outbox.
 
-Os testes unitários (`LoginRateLimiterTest`, `ClientIpResolverTest`, `ProvisioningServiceTest`,
-`ExpiredDataPurgerUnitTest`, `TotpTest`, `TenantClaimValidatorTest`, `AuthServiceUnitTest`, `SecurityConfigTest`)
+Os testes unitários (`AgeGroupEligibilityTest`, `LoginRateLimiterTest`, `ClientIpResolverTest`,
+`ProvisioningServiceTest`, `ExpiredDataPurgerUnitTest`, `TotpTest`, `TenantClaimValidatorTest`,
+`AuthServiceUnitTest`, `SecurityConfigTest`)
 não precisam de Docker; os dois primeiros controlam o relógio para verificar a expiração do bloqueio sem esperar,
-e o `TotpTest` confere os códigos com os vetores do RFC 6238.
+e o `TotpTest` confere os códigos com os vetores do RFC 6238. O `AgeGroupEligibilityTest` fixa a matriz da regra
+FPV (faixa exata, atleta mais novo com e sem autorização, atleta mais velho sempre proibido, Seniores e Veteranos
+sem limite superior e o cálculo da idade na data de referência).
 
 ### Cobertura de testes (JaCoCo)
 
@@ -886,11 +937,21 @@ encarregados) e base mínima de equipas (staff e plantel), `V10` remoção não 
 documentos (`document.expiry_notified_at`), `V16` geração de cobranças (`charge.billing_period` e índice
 único parcial de idempotência), `V17` inscrições oficiais por atleta/época, `V18` modalidades,
 datas de corte, épocas automáticas e exceções de quotas, `V19` remoção em cascata das referências
-de escalão, `V20` promoções permanentes de atletas, `V21` catálogo FPV de escalões por idade, `V22`
-promoções associadas a pagamento, `V23` desistência do atleta e `V24` MFA por TOTP (`app_user.mfa_*` e
-`mfa_recovery_code`). Papéis em
+de escalão, `V20` promoções permanentes de atletas, `V21` catálogo FPV de escalões por idade
+(substitui o catálogo por época: os escalões passam a ser globais, com `code`, `min_age`/`max_age`
+e apenas `GRANT SELECT` para `volei_app`; antes de recriar as chaves externas, a migração remapeia
+as referências antigas por nome — equipas, inscrições, promoções e planos de quotas — e apaga as
+que não têm correspondência), `V22` promoções associadas a pagamento, `V23` desistência do atleta,
+`V24` MFA por TOTP (`app_user.mfa_*` e `mfa_recovery_code`) e `V25` autorizações de escalão
+auditáveis (`season_promotion.reason` e índice parcial por época/escalão). Papéis em
 `docker/postgres-init/01-roles.sql`, também
 usado pelos testes (passwords `dev`, só para desenvolvimento; o `volei_migrator` tem `BYPASSRLS`).
+
+> **Atenção ao checksum do Flyway:** a `V21` foi reescrita depois de já ter corrido em bases de
+> desenvolvimento, pelo que o checksum guardado em `flyway_schema_history` deixa de coincidir e o
+> arranque falha com *Migration checksum mismatch*. Em desenvolvimento, recriar o volume
+> (`docker compose down -v`) e voltar a semear; em bases com dados a conservar (staging), correr
+> `flyway repair` — ou aplicar o projeto numa base nova — antes de arrancar a aplicação.
 
 Scripts de apoio em `scripts/`: `coverage.ps1` resume a cobertura JaCoCo por package (`-Open`, `-NoTests`,
 `-MinLine`).

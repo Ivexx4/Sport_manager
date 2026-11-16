@@ -3,6 +3,7 @@ package pt.voleibol.gestao.teams;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.util.List;
+import java.util.Objects;
 import java.util.Set;
 import java.util.UUID;
 
@@ -25,9 +26,11 @@ class SeasonService {
     }
 
     private final SeasonRepository seasons;
+    private final SeasonEligibility eligibility;
 
-    SeasonService(SeasonRepository seasons) {
+    SeasonService(SeasonRepository seasons, SeasonEligibility eligibility) {
         this.seasons = seasons;
+        this.eligibility = eligibility;
     }
 
     @Transactional(readOnly = true)
@@ -56,7 +59,7 @@ class SeasonService {
         Rules.requireManager(roles);
         String normalizedName = Rules.requiredText(name);
         requireValidPeriod(startDate, endDate);
-        cutoffDate = defaultCutoff(cutoffDate);
+        cutoffDate = defaultCutoff(cutoffDate, startDate);
         if (seasons.nameExists(tenantId, normalizedName, null)) throw Rules.conflict("Já existe uma época com este nome");
         UUID id = UUID.randomUUID();
         try {
@@ -84,8 +87,10 @@ class SeasonService {
                 seasons.findById(tenantId, seasonId).orElseThrow(SeasonService::notFound);
         String normalizedName = Rules.requiredText(name);
         requireValidPeriod(startDate, endDate);
-        cutoffDate = defaultCutoff(cutoffDate);
+        cutoffDate = defaultCutoff(cutoffDate, startDate);
         if (seasons.nameExists(tenantId, normalizedName, seasonId)) throw Rules.conflict("Já existe uma época com este nome");
+        boolean referenceChanged = !Objects.equals(current.startDate(), startDate)
+                || !Objects.equals(current.cutoffDate(), cutoffDate);
         try {
             if (!seasons.update(tenantId, seasonId, new SeasonRepository.Data(normalizedName, startDate, endDate,
                     cutoffDate, isActive == null ? current.isActive() : isActive))) {
@@ -94,6 +99,9 @@ class SeasonService {
         } catch (DuplicateKeyException e) {
             throw Rules.conflict("Já existe uma época com este nome");
         }
+        // Mudar a data de referência recalcula a idade de todos os atletas da época: a validação corre
+        // depois da escrita, dentro da transação, e desfaz a alteração.
+        if (referenceChanged) eligibility.requireSeasonStillValid(tenantId, seasonId);
         seasons.audit(tenantId, actorId, "SEASON_UPDATED", seasonId);
         return view(seasons.findById(tenantId, seasonId).orElseThrow(SeasonService::notFound));
     }
@@ -115,8 +123,14 @@ class SeasonService {
             throw Rules.badRequest("A data de fim não pode ser anterior à data de início");
     }
 
-    private static LocalDate defaultCutoff(LocalDate cutoffDate) {
-        return cutoffDate == null ? LocalDate.of(LocalDate.now().getYear() + 1, 1, 1) : cutoffDate;
+    /**
+     * Data de referência para o cálculo da idade: a indicada, o início da época ou, em último caso, o
+     * primeiro dia do ano seguinte.
+     */
+    private static LocalDate defaultCutoff(LocalDate cutoffDate, LocalDate startDate) {
+        if (cutoffDate != null) return cutoffDate;
+        if (startDate != null) return startDate;
+        return LocalDate.of(LocalDate.now().getYear() + 1, 1, 1);
     }
 
     static ResponseStatusException notFound() {

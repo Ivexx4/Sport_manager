@@ -2,9 +2,9 @@ package pt.voleibol.gestao.teams;
 
 import java.time.Instant;
 import java.time.LocalDate;
-import java.time.Period;
 import java.util.List;
 import java.util.Locale;
+import java.util.Objects;
 import java.util.Set;
 import java.util.UUID;
 
@@ -40,11 +40,16 @@ class TeamService {
     private final TeamRepository teams;
     private final SeasonRepository seasons;
     private final AgeGroupRepository ageGroups;
+    private final PromotionRepository promotions;
+    private final SeasonEligibility eligibility;
 
-    TeamService(TeamRepository teams, SeasonRepository seasons, AgeGroupRepository ageGroups) {
+    TeamService(TeamRepository teams, SeasonRepository seasons, AgeGroupRepository ageGroups,
+                PromotionRepository promotions, SeasonEligibility eligibility) {
         this.teams = teams;
         this.seasons = seasons;
         this.ageGroups = ageGroups;
+        this.promotions = promotions;
+        this.eligibility = eligibility;
     }
 
     @Transactional(readOnly = true)
@@ -88,6 +93,8 @@ class TeamService {
         String normalizedName = Rules.requiredText(name);
         requireReferences(tenantId, seasonId, ageGroupId);
         if (teams.nameExists(tenantId, normalizedName, teamId)) throw Rules.conflict("Já existe uma equipa com este nome");
+        boolean contextChanged = !Objects.equals(current.seasonId(), seasonId)
+                || !Objects.equals(current.ageGroupId(), ageGroupId);
         try {
             if (!teams.update(tenantId, teamId, normalizedName,
                     status == null || status.isBlank() ? current.status() : Rules.status(status, STATUSES),
@@ -97,6 +104,9 @@ class TeamService {
         } catch (DuplicateKeyException e) {
             throw Rules.conflict("Já existe uma equipa com este nome");
         }
+        // Mudar a época ou o escalão pode invalidar o plantel: a validação corre depois da escrita,
+        // dentro da transação, e desfaz a alteração.
+        if (contextChanged) eligibility.requireTeamStillValid(tenantId, teamId);
         teams.audit(tenantId, actorId, "TEAM_UPDATED", teamId);
         return view(teams.findById(tenantId, teamId).orElseThrow(TeamService::notFound));
     }
@@ -193,22 +203,19 @@ class TeamService {
             UUID tenantId, SeasonRepository.SeasonRow season, UUID athleteId, LocalDate birthDate,
             UUID requestedGroupId) {
         List<AgeGroupRepository.AgeGroupRow> groups = ageGroups.list(tenantId);
-        int age = ageAt(birthDate, season);
+        int age = AgeGroupEligibility.ageAt(birthDate, season);
         if (requestedGroupId == null && (age >= 19 && age <= 21 || age > 35))
             throw Rules.badRequest("É obrigatório indicar o escalão de inscrição para este atleta");
         AgeGroupRepository.AgeGroupRow selected = requestedGroupId == null
-                ? groups.stream().filter(g -> eligible(age, g))
+                ? groups.stream().filter(g -> AgeGroupEligibility.eligible(age, g))
                     .findFirst()
-                    .or(() -> groups.stream().filter(g -> teams.promotionExists(
+                    .or(() -> groups.stream().filter(g -> promotions.activeExists(
                             tenantId, season.id(), g.id(), athleteId)).findFirst())
                     .orElseThrow(() -> Rules.badRequest("Não foi possível determinar o escalão de inscrição"))
                 : groups.stream().filter(g -> g.id().equals(requestedGroupId)).findFirst()
                     .orElseThrow(() -> Rules.notFound("Escalão de inscrição não encontrado"));
-        if (age < selected.minAge()) throw Rules.badRequest("O atleta não pode ser inscrito num escalão inferior");
-        if (selected.maxAge() != null && age > selected.maxAge()
-                && !(age >= 19 && "Seniores".equalsIgnoreCase(selected.name()))
-                && !teams.promotionExists(tenantId, season.id(), selected.id(), athleteId))
-            throw Rules.badRequest("A inscrição em escalão superior exige autorização");
+        AgeGroupEligibility.require(age, selected,
+                promotions.activeExists(tenantId, season.id(), selected.id(), athleteId), "inscrição na época");
         return selected;
     }
 
@@ -224,40 +231,15 @@ class TeamService {
     // --- auxiliares ---
 
     /**
-     * Regra federativa FPV no plantel: o atleta só pode integrar o escalão da época quando o seu ano
-     * de nascimento tem uma idade dentro dos limites do escalão na data de referência da época.
-     * Atleas mais novos do que o escalão (subida) dependem de autorização excepcional; atletas mais
-     * velhos do que o escalão não podem jogar em escalão inferior.
+     * Regra federativa FPV aplicada ao escalão da equipa: o atleta só pode integrar o plantel quando
+     * a idade na data de referência da época está dentro dos limites do escalão. Atletas mais novos
+     * do que o escalão (subida) dependem de autorização excepcional para a época; atletas mais velhos
+     * do que o escalão não podem jogar em escalão inferior.
      */
     private void validarRegrasFpV(UUID tenantId, SeasonRepository.SeasonRow season,
                                  AgeGroupRepository.AgeGroupRow ageGroup, UUID athleteId, LocalDate birthDate) {
-        int age = ageAt(birthDate, season);
-        if (isEligibleForSeniors(season, ageGroup, birthDate)) return;
-        if (age < ageGroup.minAge())
-            throw Rules.badRequest("Proibido atuar em escalão inferior conforme regulamento FPV");
-        if (ageGroup.maxAge() != null && age > ageGroup.maxAge()
-                && !teams.promotionExists(tenantId, season.id(), ageGroup.id(), athleteId))
-            throw Rules.badRequest("Subida de escalão excepcional não autorizada pela época");
-    }
-
-    static boolean isEligibleForSeniors(SeasonRepository.SeasonRow season,
-                                        AgeGroupRepository.AgeGroupRow ageGroup, LocalDate birthDate) {
-        if (!"Seniores".equalsIgnoreCase(ageGroup.name())) return false;
-        return ageAt(birthDate, season) >= 19;
-    }
-
-    static boolean isEligibleForSeniors(SeasonRepository.SeasonRow season,
-                                        AgeGroupRepository.AgeGroupRow ageGroup, int birthYear) {
-        return isEligibleForSeniors(season, ageGroup, LocalDate.of(birthYear, 1, 1));
-    }
-
-    private static int ageAt(LocalDate birthDate, SeasonRepository.SeasonRow season) {
-        LocalDate reference = season.cutoffDate() != null ? season.cutoffDate() : LocalDate.now();
-        return Period.between(birthDate, reference).getYears();
-    }
-
-    private static boolean eligible(int age, AgeGroupRepository.AgeGroupRow group) {
-        return age >= group.minAge() && (group.maxAge() == null || age <= group.maxAge());
+        AgeGroupEligibility.require(AgeGroupEligibility.ageAt(birthDate, season), ageGroup,
+                promotions.activeExists(tenantId, season.id(), ageGroup.id(), athleteId), "plantel da equipa");
     }
 
     private TeamRepository.TeamRow requireVisible(UUID tenantId, UUID teamId, UUID actorId, Set<String> roles) {

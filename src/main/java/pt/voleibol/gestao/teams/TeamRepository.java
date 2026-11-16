@@ -269,17 +269,77 @@ class TeamRepository {
                 .single();
     }
 
-    /** Autorização excepcional de subida de escalão para a época (só `ACTIVE` conta). */
-    boolean promotionExists(UUID tenantId, UUID seasonId, UUID ageGroupId, UUID athleteId) {
-        return Db.exists(jdbc.sql("""
-                        SELECT EXISTS (
-                            SELECT 1 FROM season_promotion sp
-                            WHERE sp.tenant_id = :tenant AND sp.season_id = :season
-                              AND sp.athlete_id = :athlete AND sp.age_group_id = :age_group
-                              AND sp.status = 'ACTIVE')
-                        """)
-                .param("tenant", tenantId).param("season", seasonId).param("athlete", athleteId)
-                .param("age_group", ageGroupId));
+    // --- reavaliação da regra federativa ---
+
+    /**
+     * Inscrição na época com a época, o escalão e a data de nascimento já resolvidos, para que a
+     * regra federativa possa ser reavaliada depois de uma alteração.
+     */
+    record EligibilityRow(UUID athleteId, String athleteName, String context, LocalDate birthDate,
+                          SeasonRepository.SeasonRow season, AgeGroupRepository.AgeGroupRow ageGroup) {
+    }
+
+    private static final String REGISTRATIONS = """
+            SELECT r.athlete_id, a.full_name, a.birth_date,
+                   s.id AS season_id, s.name AS season_name, s.start_date, s.end_date, s.cutoff_date,
+                   s.is_active AS season_active, s.created_at AS season_created_at,
+                   s.updated_at AS season_updated_at,
+                   g.id AS group_id, g.name AS group_name, g.min_age, g.max_age,
+                   g.is_active AS group_active, g.created_at AS group_created_at,
+                   g.updated_at AS group_updated_at
+            FROM athlete_season_registration r
+            JOIN athlete a ON a.tenant_id = r.tenant_id AND a.id = r.athlete_id
+            JOIN season s ON s.tenant_id = r.tenant_id AND s.id = r.season_id
+            JOIN age_group g ON g.id = r.age_group_id
+            WHERE r.tenant_id = :tenant AND a.anonymized_at IS NULL AND s.anonymized_at IS NULL
+              AND g.is_active
+            """;
+
+    private static final String ROSTER = """
+            SELECT ta.athlete_id, a.full_name, a.birth_date,
+                   s.id AS season_id, s.name AS season_name, s.start_date, s.end_date, s.cutoff_date,
+                   s.is_active AS season_active, s.created_at AS season_created_at,
+                   s.updated_at AS season_updated_at,
+                   g.id AS group_id, g.name AS group_name, g.min_age, g.max_age,
+                   g.is_active AS group_active, g.created_at AS group_created_at,
+                   g.updated_at AS group_updated_at
+            FROM team_athlete ta
+            JOIN team t ON t.tenant_id = ta.tenant_id AND t.id = ta.team_id
+            JOIN athlete a ON a.tenant_id = ta.tenant_id AND a.id = ta.athlete_id
+            JOIN season s ON s.tenant_id = t.tenant_id AND s.id = t.season_id
+            JOIN age_group g ON g.id = t.age_group_id
+            WHERE ta.tenant_id = :tenant AND t.anonymized_at IS NULL AND a.anonymized_at IS NULL
+              AND s.anonymized_at IS NULL AND g.is_active
+            """;
+
+    List<EligibilityRow> registrationsOfAthlete(UUID tenantId, UUID athleteId) {
+        return jdbc.sql(REGISTRATIONS + " AND r.athlete_id = :athlete ORDER BY s.name, g.min_age")
+                .param("tenant", tenantId).param("athlete", athleteId)
+                .query((rs, i) -> mapEligibility(rs, "inscrição na época")).list();
+    }
+
+    List<EligibilityRow> registrationsOfSeason(UUID tenantId, UUID seasonId) {
+        return jdbc.sql(REGISTRATIONS + " AND r.season_id = :season ORDER BY a.full_name, g.min_age")
+                .param("tenant", tenantId).param("season", seasonId)
+                .query((rs, i) -> mapEligibility(rs, "inscrição na época")).list();
+    }
+
+    List<EligibilityRow> rosterOfAthlete(UUID tenantId, UUID athleteId) {
+        return jdbc.sql(ROSTER + " AND ta.athlete_id = :athlete ORDER BY s.name, g.min_age")
+                .param("tenant", tenantId).param("athlete", athleteId)
+                .query((rs, i) -> mapEligibility(rs, "plantel da equipa")).list();
+    }
+
+    List<EligibilityRow> rosterOfSeason(UUID tenantId, UUID seasonId) {
+        return jdbc.sql(ROSTER + " AND s.id = :season ORDER BY a.full_name, g.min_age")
+                .param("tenant", tenantId).param("season", seasonId)
+                .query((rs, i) -> mapEligibility(rs, "plantel da equipa")).list();
+    }
+
+    List<EligibilityRow> rosterOfTeam(UUID tenantId, UUID teamId) {
+        return jdbc.sql(ROSTER + " AND ta.team_id = :team ORDER BY a.full_name, g.min_age")
+                .param("tenant", tenantId).param("team", teamId)
+                .query((rs, i) -> mapEligibility(rs, "plantel da equipa")).list();
     }
 
     void audit(UUID tenantId, UUID actorId, String action, UUID teamId) {
@@ -290,5 +350,17 @@ class TeamRepository {
         return new TeamRow(Db.uuid(rs, "id"), rs.getString("name"), rs.getString("status"), Db.uuid(rs, "season_id"),
                 Db.uuid(rs, "age_group_id"), Db.instant(rs, "created_at"),
                 Db.instant(rs, "updated_at"));
+    }
+
+    private static EligibilityRow mapEligibility(java.sql.ResultSet rs, String context) throws java.sql.SQLException {
+        return new EligibilityRow(Db.uuid(rs, "athlete_id"), rs.getString("full_name"), context,
+                Db.date(rs, "birth_date"),
+                new SeasonRepository.SeasonRow(Db.uuid(rs, "season_id"), rs.getString("season_name"),
+                        Db.date(rs, "start_date"), Db.date(rs, "end_date"), Db.date(rs, "cutoff_date"),
+                        rs.getBoolean("season_active"), Db.instant(rs, "season_created_at"),
+                        Db.instant(rs, "season_updated_at")),
+                new AgeGroupRepository.AgeGroupRow(Db.uuid(rs, "group_id"), rs.getString("group_name"),
+                        rs.getInt("min_age"), (Integer) rs.getObject("max_age"), rs.getBoolean("group_active"),
+                        Db.instant(rs, "group_created_at"), Db.instant(rs, "group_updated_at")));
     }
 }

@@ -18,6 +18,7 @@ import pt.voleibol.gestao.shared.FlowTestSupport;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.patch;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
@@ -51,8 +52,9 @@ class TeamFlowTest extends FlowTestSupport {
     static final UUID EQUIPA_CLUBE_B = UUID.fromString("00000000-0000-0000-0000-00000000e103");
 
     static final UUID EPOCA_A = UUID.fromString("00000000-0000-0000-0000-00000000e201");
-    /** Escalão do catálogo federal, resolvido na semeadura. */
+    /** Escalões do catálogo federal, resolvidos na semeadura. */
     static UUID ESCALAO_A;
+    static UUID ESCALAO_JUVENIS;
 
     static final UUID ATLETA_A = UUID.fromString("00000000-0000-0000-0000-00000000f201");
     static final UUID ATLETA_B = UUID.fromString("00000000-0000-0000-0000-00000000f202");
@@ -178,34 +180,76 @@ class TeamFlowTest extends FlowTestSupport {
         // Atleta dentro da faixa do escalão (15 anos na data de referência): permite a inserção.
         adicionarAtleta(HOST_A, admin, EQUIPA_B, ATLETA_A).andExpect(status().isOk());
 
-        // Atleta mais velho do que o escalão: exige autorização excepcional de subida de escalão.
-        adicionarAtleta(HOST_A, admin, EQUIPA_B, ATLETA_C).andExpect(status().isBadRequest());
-
-        // Atleta mais novo do que o escalão: proibido atuar em escalão inferior conforme regulamento FPV.
+        // Atleta mais novo do que o escalão (subida): exige autorização excepcional para a época.
         adicionarAtleta(HOST_A, admin, EQUIPA_B, ATLETA_D).andExpect(status().isBadRequest());
 
-        // Com autorização excepcional ativa para a época, a subida de escalão é permitida.
-        try (Connection c = superuser()) {
-            executar(c, """
-                    INSERT INTO season_promotion (tenant_id, season_id, athlete_id, age_group_id, authorized_by, status)
-                    VALUES (?, ?, ?, ?, ?, 'ACTIVE')
-                    """, CLUBE_A, EPOCA_A, ATLETA_C, ESCALAO_A, id(ADMIN));
-        }
-        adicionarAtleta(HOST_A, admin, EQUIPA_B, ATLETA_C).andExpect(status().isOk());
+        // Atleta mais velho do que o escalão (descida): proibido pelo regulamento FPV.
+        adicionarAtleta(HOST_A, admin, EQUIPA_B, ATLETA_C).andExpect(status().isBadRequest());
 
-        mvc.perform(delete("/api/v1/teams/" + EQUIPA_B + "/athletes/" + ATLETA_C)
+        // A autorização concedida pela API desbloqueia a subida de escalão.
+        String promocao = concederPromocao(HOST_A, admin, EPOCA_A, ATLETA_D, ESCALAO_A,
+                "Subida avaliada pela direção")
+                .andExpect(status().isCreated()).andReturn().getResponse().getContentAsString();
+        UUID promocaoId = UUID.fromString(JsonPath.read(promocao, "$.id"));
+        assertThat((String) JsonPath.read(promocao, "$.status")).isEqualTo("ACTIVE");
+        assertThat((String) JsonPath.read(promocao, "$.reason")).isEqualTo("Subida avaliada pela direção");
+
+        adicionarAtleta(HOST_A, admin, EQUIPA_B, ATLETA_D).andExpect(status().isOk());
+        mvc.perform(delete("/api/v1/teams/" + EQUIPA_B + "/athletes/" + ATLETA_D)
                         .header("Authorization", "Bearer " + admin).with(host(HOST_A)))
                 .andExpect(status().isNoContent());
 
-        // Após revogar a autorização, a subida de escalão volta a ser recusada.
-        try (Connection c = superuser()) {
-            executar(c, """
-                    UPDATE season_promotion
-                    SET status = 'REVOKED'
-                    WHERE tenant_id = ? AND season_id = ? AND athlete_id = ? AND age_group_id = ?
-                    """, CLUBE_A, EPOCA_A, ATLETA_C, ESCALAO_A);
-        }
+        // Revogar volta a bloquear a subida, mas não remove o plantel já criado.
+        alterarEstadoPromocao(HOST_A, admin, EPOCA_A, promocaoId, "REVOKED").andExpect(status().isNoContent());
+        adicionarAtleta(HOST_A, admin, EQUIPA_B, ATLETA_D).andExpect(status().isBadRequest());
+
+        // A descida continua proibida mesmo com autorização ativa.
+        concederPromocao(HOST_A, admin, EPOCA_A, ATLETA_C, ESCALAO_A, null).andExpect(status().isCreated());
         adicionarAtleta(HOST_A, admin, EQUIPA_B, ATLETA_C).andExpect(status().isBadRequest());
+
+        assertThat(contarAuditoria("SEASON_PROMOTION_GRANTED")).isPositive();
+        assertThat(contarAuditoria("SEASON_PROMOTION_REVOKED")).isPositive();
+    }
+
+    @Test
+    void dataDeReferenciaDaEpocaNaoPodeInvalidarInscricoes() throws Exception {
+        String admin = acesso(HOST_A, ADMIN);
+        adicionarAtleta(HOST_A, admin, EQUIPA_B, ATLETA_A).andExpect(status().isOk());
+
+        // A data recuada mantém os 15 anos do atleta: a alteração passa.
+        mudarDataDeReferencia(HOST_A, admin, "2025-12-31").andExpect(status().isOk());
+        assertThat((String) JsonPath.read(epoca(HOST_A, admin), "$.cutoffDate")).isEqualTo("2025-12-31");
+
+        // Recuar mais torna o atleta mais novo do que o escalão: recusado e sem efeito.
+        mudarDataDeReferencia(HOST_A, admin, "2023-01-01").andExpect(status().isBadRequest());
+        assertThat((String) JsonPath.read(epoca(HOST_A, admin), "$.cutoffDate")).isEqualTo("2025-12-31");
+    }
+
+    @Test
+    void escalaoDaEquipaNaoPodeInvalidarOPlantel() throws Exception {
+        String admin = acesso(HOST_A, ADMIN);
+        adicionarAtleta(HOST_A, admin, EQUIPA_B, ATLETA_A).andExpect(status().isOk());
+
+        // Juvenis (16 anos) torna o atleta de 15 mais novo do que o escalão: recusado.
+        mudarEscalaoDaEquipa(HOST_A, admin, ESCALAO_JUVENIS).andExpect(status().isBadRequest());
+
+        // Com a autorização do atleta para Juvenis, a mudança passa.
+        concederPromocao(HOST_A, admin, EPOCA_A, ATLETA_A, ESCALAO_JUVENIS, "Atleta mais novo do plantel")
+                .andExpect(status().isCreated());
+        mudarEscalaoDaEquipa(HOST_A, admin, ESCALAO_JUVENIS).andExpect(status().isOk());
+    }
+
+    @Test
+    void dataDeNascimentoNaoPodeInvalidarInscricao() throws Exception {
+        String admin = acesso(HOST_A, ADMIN);
+        adicionarAtleta(HOST_A, admin, EQUIPA_B, ATLETA_A).andExpect(status().isOk());
+
+        // Continua com 15 anos na data de referência: a edição passa.
+        mudarDataDeNascimento(HOST_A, admin, "2010-05-15").andExpect(status().isOk());
+
+        // 13 anos torna o atleta mais novo do que o escalão: recusado e sem efeito.
+        mudarDataDeNascimento(HOST_A, admin, "2012-06-15").andExpect(status().isBadRequest());
+        assertThat((String) JsonPath.read(consultarAtleta(HOST_A, admin), "$.birthDate")).isEqualTo("2010-05-15");
     }
 
     @Test
@@ -310,6 +354,59 @@ class TeamFlowTest extends FlowTestSupport {
                 .content("{\"athleteId\":\"" + athleteId + "\"}"));
     }
 
+    private ResultActions concederPromocao(String host, String token, UUID seasonId, UUID athleteId,
+                                           UUID ageGroupId, String reason) throws Exception {
+        String corpo = reason == null
+                ? "{\"athleteId\":\"" + athleteId + "\",\"ageGroupId\":\"" + ageGroupId + "\"}"
+                : "{\"athleteId\":\"" + athleteId + "\",\"ageGroupId\":\"" + ageGroupId
+                        + "\",\"reason\":\"" + reason + "\"}";
+        return mvc.perform(post("/api/v1/seasons/" + seasonId + "/promotions")
+                .header("Authorization", "Bearer " + token).with(host(host))
+                .contentType(MediaType.APPLICATION_JSON).content(corpo));
+    }
+
+    private ResultActions alterarEstadoPromocao(String host, String token, UUID seasonId, UUID promotionId,
+                                                String status) throws Exception {
+        return mvc.perform(patch("/api/v1/seasons/" + seasonId + "/promotions/" + promotionId)
+                .header("Authorization", "Bearer " + token).with(host(host))
+                .contentType(MediaType.APPLICATION_JSON).content("{\"status\":\"" + status + "\"}"));
+    }
+
+    private String epoca(String host, String token) throws Exception {
+        return mvc.perform(get("/api/v1/seasons/" + EPOCA_A)
+                        .header("Authorization", "Bearer " + token).with(host(host)))
+                .andExpect(status().isOk()).andReturn().getResponse().getContentAsString();
+    }
+
+    private ResultActions mudarDataDeReferencia(String host, String token, String cutoffDate) throws Exception {
+        return mvc.perform(put("/api/v1/seasons/" + EPOCA_A)
+                .header("Authorization", "Bearer " + token).with(host(host))
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"name\":\"Época A\",\"startDate\":\"2025-08-01\",\"endDate\":\"2026-07-31\","
+                        + "\"cutoffDate\":\"" + cutoffDate + "\"}"));
+    }
+
+    private ResultActions mudarEscalaoDaEquipa(String host, String token, UUID ageGroupId) throws Exception {
+        return mvc.perform(put("/api/v1/teams/" + EQUIPA_B)
+                .header("Authorization", "Bearer " + token).with(host(host))
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"name\":\"Equipa B\",\"seasonId\":\"" + EPOCA_A + "\",\"ageGroupId\":\""
+                        + ageGroupId + "\"}"));
+    }
+
+    private String consultarAtleta(String host, String token) throws Exception {
+        return mvc.perform(get("/api/v1/athletes/" + ATLETA_A)
+                        .header("Authorization", "Bearer " + token).with(host(host)))
+                .andExpect(status().isOk()).andReturn().getResponse().getContentAsString();
+    }
+
+    private ResultActions mudarDataDeNascimento(String host, String token, String birthDate) throws Exception {
+        return mvc.perform(put("/api/v1/athletes/" + ATLETA_A)
+                .header("Authorization", "Bearer " + token).with(host(host))
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"fullName\":\"Atleta A\",\"birthDate\":\"" + birthDate + "\",\"gender\":\"F\"}"));
+    }
+
     // --- semeadura ---
 
     private void semear() throws SQLException {
@@ -336,6 +433,7 @@ class TeamFlowTest extends FlowTestSupport {
 
             epocaComCorte(c, EPOCA_A, CLUBE_A, "Época A");
             ESCALAO_A = escalao(c, "CADETES");
+            ESCALAO_JUVENIS = escalao(c, "JUVENIS");
 
             equipa(c, EQUIPA_A, CLUBE_A, "Equipa A", EPOCA_A, ESCALAO_A);
             equipa(c, EQUIPA_B, CLUBE_A, "Equipa B", EPOCA_A, ESCALAO_A);

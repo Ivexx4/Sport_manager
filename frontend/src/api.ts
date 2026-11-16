@@ -161,6 +161,21 @@ export interface LedgerEntry {
   description?: string;
 }
 
+/** Autorização excepcional de subida de escalão, por época × atleta × escalão. */
+export interface Promotion {
+  id: string;
+  athleteId: string;
+  athleteName: string;
+  ageGroupId: string;
+  ageGroupCode: string;
+  ageGroupName: string;
+  status: "ACTIVE" | "REVOKED";
+  reason?: string;
+  authorizedBy?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
 const API_BASE = import.meta.env.VITE_API_URL ?? "";
 const ACCESS_KEY = "gestao.accessToken";
 const REFRESH_KEY = "gestao.refreshToken";
@@ -273,6 +288,12 @@ export const api = {
   seasons: () => request<Season[]>("/api/v1/seasons"),
   createSeason: (data: Record<string, unknown>) => request<Season>("/api/v1/seasons", { method: "POST", body: JSON.stringify(data) }),
   ageGroups: () => request<AgeGroup[]>("/api/v1/age-groups"),
+  promotions: (seasonId: string, athleteId?: string) =>
+    request<Promotion[]>(`/api/v1/seasons/${seasonId}/promotions${athleteId ? `?athleteId=${encodeURIComponent(athleteId)}` : ""}`),
+  grantPromotion: (seasonId: string, data: { athleteId: string; ageGroupId: string; reason?: string }) =>
+    request<Promotion>(`/api/v1/seasons/${seasonId}/promotions`, { method: "POST", body: JSON.stringify(data) }),
+  setPromotionStatus: (seasonId: string, id: string, status: "ACTIVE" | "REVOKED") =>
+    request<void>(`/api/v1/seasons/${seasonId}/promotions/${id}`, { method: "PATCH", body: JSON.stringify({ status }) }),
   teams: () => request<Team[]>("/api/v1/teams"),
   teamAthletes: (teamId: string) => request<{ athleteId: string; fullName: string; status: string }[]>(`/api/v1/teams/${teamId}/athletes`),
   teamStaff: (teamId: string) => request<TeamStaff[]>(`/api/v1/teams/${teamId}/staff`),

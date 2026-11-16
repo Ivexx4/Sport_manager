@@ -33,7 +33,7 @@ class SeasonServiceUnitTest {
 
     @Test
     void validaAcessoTenantEPeriodo() {
-        SeasonService service = new SeasonService(mock(SeasonRepository.class));
+        SeasonService service = new SeasonService(mock(SeasonRepository.class), mock(SeasonEligibility.class));
         assertStatus(() -> service.list(ACTOR, Set.of()), HttpStatus.FORBIDDEN);
         TenantContext.set(TENANT);
         assertStatus(() -> service.create(ACTOR, Set.of("MEMBER"), "x", null, null, null), HttpStatus.FORBIDDEN);
@@ -48,7 +48,7 @@ class SeasonServiceUnitTest {
         SeasonRepository repository = mock(SeasonRepository.class);
         when(repository.nameExists(TENANT, "Nova", null)).thenReturn(false);
         when(repository.findById(eq(TENANT), any())).thenReturn(Optional.of(ROW));
-        SeasonService service = new SeasonService(repository);
+        SeasonService service = new SeasonService(repository, mock(SeasonEligibility.class));
 
         assertThat(service.create(ACTOR, Set.of("ADMIN"), " Nova ", null, null, null).name()).isEqualTo("2025/26");
         verify(repository).insert(any(), eq(TENANT), argThat(d -> d.isActive() && d.name().equals("Nova")), eq(ACTOR));
@@ -65,7 +65,7 @@ class SeasonServiceUnitTest {
         TenantContext.set(TENANT);
         SeasonRepository repository = mock(SeasonRepository.class);
         when(repository.findById(TENANT, ID)).thenReturn(Optional.of(ROW));
-        SeasonService service = new SeasonService(repository);
+        SeasonService service = new SeasonService(repository, mock(SeasonEligibility.class));
 
         when(repository.nameExists(TENANT, "Atualizada", ID)).thenReturn(false);
         when(repository.update(eq(TENANT), eq(ID), any())).thenReturn(true);
@@ -92,7 +92,7 @@ class SeasonServiceUnitTest {
         SeasonRepository repository = mock(SeasonRepository.class);
         when(repository.list(TENANT)).thenReturn(java.util.List.of(ROW));
         when(repository.findById(TENANT, ID)).thenReturn(Optional.empty());
-        SeasonService service = new SeasonService(repository);
+        SeasonService service = new SeasonService(repository, mock(SeasonEligibility.class));
 
         assertThat(service.list(ACTOR, Set.of("MEMBER"))).hasSize(1);
         assertStatus(() -> service.get(ACTOR, Set.of("MEMBER"), ID), HttpStatus.NOT_FOUND);
