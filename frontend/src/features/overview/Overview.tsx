@@ -1,8 +1,8 @@
 import { useEffect, useState } from "react";
 import { Activity, BookOpen, ChevronRight, Plus, ShieldCheck, Sparkles, Users } from "lucide-react";
-import { api } from "../api";
-import { Stat } from "../components/ui";
-import type { View } from "../types";
+import { api } from "../../api";
+import { Stat } from "../../components";
+import type { View } from "../../types";
 
 /** Visão geral: indicadores do clube e primeiros passos. */
 export function Overview({ onNavigate, canManage }: { onNavigate: (view: View) => void; canManage: boolean }) {

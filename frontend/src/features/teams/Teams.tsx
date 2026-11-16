@@ -1,8 +1,8 @@
 import { useEffect, useState } from "react";
 import { Activity, ChevronRight, Plus, Users } from "lucide-react";
-import { api, type AgeGroup, type Season, type Team, type TeamStaff } from "../api";
-import { Empty, Modal, ModalActions, PageHeader } from "../components/ui";
-import type { ReportError, ShowToast } from "../types";
+import { api, type AgeGroup, type Season, type Team, type TeamStaff } from "../../api";
+import { Empty, Modal, ModalActions, PageHeader } from "../../components";
+import type { ReportError, ShowToast } from "../../types";
 
 /** Equipas do clube e a composição de cada uma (staff e plantel). */
 export function Teams({ showToast, canManage }: { showToast: ShowToast; canManage: boolean }) {

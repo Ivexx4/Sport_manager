@@ -1,9 +1,9 @@
 import { useEffect, useState } from "react";
 import { ChevronRight, FileText, Plus, Search, Users } from "lucide-react";
-import { api, type Athlete } from "../api";
-import { Empty, Loading, Modal, ModalActions, PageHeader } from "../components/ui";
-import { formatDate } from "../format";
-import type { ReportError, ShowToast } from "../types";
+import { api, type Athlete } from "../../api";
+import { Empty, Loading, Modal, ModalActions, PageHeader } from "../../components";
+import { formatDate } from "../../lib/format";
+import type { ReportError, ShowToast } from "../../types";
 
 /** Plantel do clube: pesquisa, importação CSV e ficha do atleta. */
 export function Athletes({ showToast }: { showToast: ShowToast }) {

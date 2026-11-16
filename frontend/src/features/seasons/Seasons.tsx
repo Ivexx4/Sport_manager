@@ -1,9 +1,9 @@
 import { useEffect, useState } from "react";
 import { BookOpen, ChevronRight, Plus, ShieldCheck, Users } from "lucide-react";
-import { api, type AgeGroup, type Athlete, type Promotion, type Season } from "../api";
-import { Empty, Modal, ModalActions, PageHeader } from "../components/ui";
-import { formatDate } from "../format";
-import type { ReportError, ShowToast } from "../types";
+import { api, type AgeGroup, type Athlete, type Promotion, type Season } from "../../api";
+import { Empty, Modal, ModalActions, PageHeader } from "../../components";
+import { formatDate } from "../../lib/format";
+import type { ReportError, ShowToast } from "../../types";
 
 /** Épocas, catálogo de escalões e autorizações de subida de escalão. */
 export function Seasons({ showToast, canManage }: { showToast: ShowToast; canManage: boolean }) {

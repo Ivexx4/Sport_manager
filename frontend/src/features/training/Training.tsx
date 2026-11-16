@@ -1,9 +1,9 @@
 import { useEffect, useState } from "react";
 import { CalendarDays, Plus } from "lucide-react";
-import { api, type Team, type TrainingSession } from "../api";
-import { Empty, Modal, ModalActions, PageHeader } from "../components/ui";
-import { formatDateTime, formatTime } from "../format";
-import type { ReportError, ShowToast } from "../types";
+import { api, type Team, type TrainingSession } from "../../api";
+import { Empty, Modal, ModalActions, PageHeader } from "../../components";
+import { formatDateTime, formatTime } from "../../lib/format";
+import type { ReportError, ShowToast } from "../../types";
 
 /** Calendário de treinos do clube. */
 export function Training({ showToast, canManage }: { showToast: ShowToast; canManage: boolean }) {

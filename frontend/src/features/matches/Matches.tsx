@@ -1,9 +1,9 @@
 import { useEffect, useState } from "react";
 import { Plus, Swords } from "lucide-react";
-import { api, type Match, type Team } from "../api";
-import { Empty, Modal, ModalActions, PageHeader } from "../components/ui";
-import { formatDate, formatTime } from "../format";
-import type { ReportError, ShowToast } from "../types";
+import { api, type Match, type Team } from "../../api";
+import { Empty, Modal, ModalActions, PageHeader } from "../../components";
+import { formatDate, formatTime } from "../../lib/format";
+import type { ReportError, ShowToast } from "../../types";
 
 /** Jogos do clube e respetivas convocatórias. */
 export function Matches({ showToast, canManage }: { showToast: ShowToast; canManage: boolean }) {

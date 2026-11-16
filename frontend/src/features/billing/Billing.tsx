@@ -1,9 +1,9 @@
 import { useEffect, useState } from "react";
 import { Activity, BookOpen, CreditCard, Plus, ShieldCheck } from "lucide-react";
-import { api, type Athlete, type Charge, type FeePlan, type LedgerEntry } from "../api";
-import { Empty, Modal, ModalActions, PageHeader, Stat } from "../components/ui";
-import { formatDate, formatMoney } from "../format";
-import type { ReportError, ShowToast } from "../types";
+import { api, type Athlete, type Charge, type FeePlan, type LedgerEntry } from "../../api";
+import { Empty, Modal, ModalActions, PageHeader, Stat } from "../../components";
+import { formatDate, formatMoney } from "../../lib/format";
+import type { ReportError, ShowToast } from "../../types";
 
 /** Quotas, pagamentos e movimentos do clube. */
 export function Billing({ showToast, canManage }: { showToast: ShowToast; canManage: boolean }) {

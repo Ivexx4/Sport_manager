@@ -17,13 +17,13 @@ import {
 } from "lucide-react";
 import { api, type Role } from "../api";
 import type { Toast, View } from "../types";
-import { Athletes } from "../views/Athletes";
-import { Billing } from "../views/Billing";
-import { Matches } from "../views/Matches";
-import { Overview } from "../views/Overview";
-import { Seasons } from "../views/Seasons";
-import { Teams } from "../views/Teams";
-import { Training } from "../views/Training";
+import { Athletes } from "../features/athletes/Athletes";
+import { Billing } from "../features/billing/Billing";
+import { Matches } from "../features/matches/Matches";
+import { Overview } from "../features/overview/Overview";
+import { Seasons } from "../features/seasons/Seasons";
+import { Teams } from "../features/teams/Teams";
+import { Training } from "../features/training/Training";
 
 const TITLES: Record<View, string> = {
   overview: "Visão geral",

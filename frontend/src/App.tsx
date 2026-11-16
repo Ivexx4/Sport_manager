@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { authStore } from "./api";
-import { Login } from "./auth/Login";
+import { Login } from "./features/auth/Login";
 import { Shell } from "./layout/Shell";
 
 /** Decide entre o ecrã de entrada e o painel e reage ao fim da sessão. */

@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { ChevronRight, ShieldCheck } from "lucide-react";
-import { api, authStore, isMfaChallenge, type MfaChallenge, type MfaSetup } from "../api";
+import { api, authStore, isMfaChallenge, type MfaChallenge, type MfaSetup } from "../../api";
 
 /** Entrada na aplicação: login, criação de clube e o segundo passo (MFA). */
 export function Login({ onLogin, message }: { onLogin: () => void; message?: string }) {
