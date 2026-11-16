@@ -8,6 +8,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.server.ResponseStatusException;
 
+import pt.voleibol.gestao.shared.AuditLog;
 import pt.voleibol.gestao.shared.CurrentUser;
 import pt.voleibol.gestao.shared.Rules;
 
@@ -29,11 +30,14 @@ class PromotionService {
     private final PromotionRepository promotions;
     private final SeasonRepository seasons;
     private final TeamRepository teams;
+    private final AuditLog audit;
 
-    PromotionService(PromotionRepository promotions, SeasonRepository seasons, TeamRepository teams) {
+    PromotionService(PromotionRepository promotions, SeasonRepository seasons, TeamRepository teams,
+                     AuditLog audit) {
         this.promotions = promotions;
         this.seasons = seasons;
         this.teams = teams;
+        this.audit = audit;
     }
 
     @Transactional(readOnly = true)
@@ -59,13 +63,13 @@ class PromotionService {
             throw Rules.conflict("Já existe uma autorização ativa para este atleta neste escalão");
         if (existing != null) {
             promotions.setStatus(tenantId, seasonId, existing.id(), PromotionStatus.ACTIVE.name());
-            promotions.audit(tenantId, user.id(), "SEASON_PROMOTION_GRANTED", existing.id());
+            audit.record(tenantId, user.id(), "SEASON_PROMOTION_GRANTED", "season_promotion", existing.id());
             return view(promotions.find(tenantId, seasonId, existing.id()).orElseThrow(PromotionService::notFound));
         }
 
         UUID id = UUID.randomUUID();
         promotions.insert(id, tenantId, seasonId, athleteId, ageGroupId, trimToNull(reason), user.id());
-        promotions.audit(tenantId, user.id(), "SEASON_PROMOTION_GRANTED", id);
+        audit.record(tenantId, user.id(), "SEASON_PROMOTION_GRANTED", "season_promotion", id);
         return view(promotions.find(tenantId, seasonId, id).orElseThrow(PromotionService::notFound));
     }
 
@@ -76,9 +80,10 @@ class PromotionService {
         requireSeason(tenantId, seasonId);
         String normalized = Rules.parse(PromotionStatus.class, status, "Estado").name();
         if (!promotions.setStatus(tenantId, seasonId, promotionId, normalized)) throw notFound();
-        promotions.audit(tenantId, user.id(),
-                PromotionStatus.REVOKED.name().equals(normalized) ? "SEASON_PROMOTION_REVOKED" : "SEASON_PROMOTION_GRANTED",
-                promotionId);
+        audit.record(tenantId, user.id(),
+                PromotionStatus.REVOKED.name().equals(normalized)
+                        ? "SEASON_PROMOTION_REVOKED" : "SEASON_PROMOTION_GRANTED",
+                "season_promotion", promotionId);
     }
 
     private void requireSeason(UUID tenantId, UUID seasonId) {

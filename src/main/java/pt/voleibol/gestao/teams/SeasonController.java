@@ -6,8 +6,6 @@ import java.util.UUID;
 
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
-import org.springframework.security.core.annotation.AuthenticationPrincipal;
-import org.springframework.security.oauth2.jwt.Jwt;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PatchMapping;
@@ -60,60 +58,60 @@ class SeasonController {
     }
 
     @GetMapping
-    List<SeasonService.SeasonView> list(@AuthenticationPrincipal Jwt jwt) {
-        return seasonService.list(CurrentUser.of(jwt));
+    List<SeasonService.SeasonView> list(CurrentUser user) {
+        return seasonService.list(user);
     }
 
     @GetMapping("/{seasonId}")
-    SeasonService.SeasonView get(@AuthenticationPrincipal Jwt jwt, @PathVariable UUID seasonId) {
-        return seasonService.get(CurrentUser.of(jwt), seasonId);
+    SeasonService.SeasonView get(CurrentUser user, @PathVariable UUID seasonId) {
+        return seasonService.get(user, seasonId);
     }
 
     @PostMapping
-    ResponseEntity<SeasonService.SeasonView> create(@AuthenticationPrincipal Jwt jwt,
+    ResponseEntity<SeasonService.SeasonView> create(CurrentUser user,
                                                     @Valid @RequestBody SeasonRequest request) {
-        SeasonService.SeasonView created = seasonService.create(CurrentUser.of(jwt),
+        SeasonService.SeasonView created = seasonService.create(user,
                 request.name(), request.startDate(), request.endDate(), request.cutoffDate(),
                 request.isActive());
         return ResponseEntity.status(HttpStatus.CREATED).body(created);
     }
 
     @PutMapping("/{seasonId}")
-    SeasonService.SeasonView update(@AuthenticationPrincipal Jwt jwt, @PathVariable UUID seasonId,
+    SeasonService.SeasonView update(CurrentUser user, @PathVariable UUID seasonId,
                                     @Valid @RequestBody SeasonRequest request) {
-        return seasonService.update(CurrentUser.of(jwt), seasonId, request.name(),
+        return seasonService.update(user, seasonId, request.name(),
                 request.startDate(), request.endDate(), request.cutoffDate(), request.isActive());
     }
 
     @DeleteMapping("/{seasonId}")
-    ResponseEntity<Void> delete(@AuthenticationPrincipal Jwt jwt, @PathVariable UUID seasonId) {
-        seasonService.delete(CurrentUser.of(jwt), seasonId);
+    ResponseEntity<Void> delete(CurrentUser user, @PathVariable UUID seasonId) {
+        seasonService.delete(user, seasonId);
         return ResponseEntity.noContent().build();
     }
 
     // --- autorizações excepcionais de subida de escalão ---
 
     @GetMapping("/{seasonId}/promotions")
-    List<PromotionService.PromotionView> listPromotions(@AuthenticationPrincipal Jwt jwt,
+    List<PromotionService.PromotionView> listPromotions(CurrentUser user,
                                                         @PathVariable UUID seasonId,
                                                         @RequestParam(required = false) UUID athleteId) {
-        return promotionService.list(CurrentUser.of(jwt), seasonId, athleteId);
+        return promotionService.list(user, seasonId, athleteId);
     }
 
     @PostMapping("/{seasonId}/promotions")
-    ResponseEntity<PromotionService.PromotionView> grantPromotion(@AuthenticationPrincipal Jwt jwt,
+    ResponseEntity<PromotionService.PromotionView> grantPromotion(CurrentUser user,
                                                                   @PathVariable UUID seasonId,
                                                                   @Valid @RequestBody PromotionRequest request) {
-        PromotionService.PromotionView created = promotionService.grant(CurrentUser.of(jwt),
+        PromotionService.PromotionView created = promotionService.grant(user,
                 seasonId, request.athleteId(), request.ageGroupId(), request.reason());
         return ResponseEntity.status(HttpStatus.CREATED).body(created);
     }
 
     @PatchMapping("/{seasonId}/promotions/{promotionId}")
-    ResponseEntity<Void> setPromotionStatus(@AuthenticationPrincipal Jwt jwt, @PathVariable UUID seasonId,
+    ResponseEntity<Void> setPromotionStatus(CurrentUser user, @PathVariable UUID seasonId,
                                             @PathVariable UUID promotionId,
                                             @Valid @RequestBody PromotionStatusRequest request) {
-        promotionService.setStatus(CurrentUser.of(jwt), seasonId, promotionId, request.status());
+        promotionService.setStatus(user, seasonId, promotionId, request.status());
         return ResponseEntity.noContent().build();
     }
 }

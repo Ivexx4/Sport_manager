@@ -12,8 +12,6 @@ import java.util.UUID;
 
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
-import org.springframework.security.core.annotation.AuthenticationPrincipal;
-import org.springframework.security.oauth2.jwt.Jwt;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -58,9 +56,8 @@ class AccountController {
 
     /** Só ADMIN e DIRECAO (regra também na cadeia de segurança); DIRECAO não atribui ADMIN nem DIRECAO. */
     @PostMapping("/users/invitations")
-    ResponseEntity<Void> invite(@AuthenticationPrincipal Jwt jwt, @Valid @RequestBody InviteRequest request) {
-        accountService.invite(CurrentUser.of(jwt), request.email(), request.name(),
-                request.roles());
+    ResponseEntity<Void> invite(CurrentUser user, @Valid @RequestBody InviteRequest request) {
+        accountService.invite(user, request.email(), request.name(), request.roles());
         return ResponseEntity.status(HttpStatus.ACCEPTED).build();
     }
 
@@ -84,9 +81,8 @@ class AccountController {
     }
 
     @PostMapping("/auth/password/change")
-    ResponseEntity<Void> changePassword(@AuthenticationPrincipal Jwt jwt,
-                                        @Valid @RequestBody ChangePasswordRequest request) {
-        if (!accountService.changePassword(CurrentUser.of(jwt).id(), request.currentPassword(), request.newPassword()))
+    ResponseEntity<Void> changePassword(CurrentUser user, @Valid @RequestBody ChangePasswordRequest request) {
+        if (!accountService.changePassword(user.id(), request.currentPassword(), request.newPassword()))
             throw Rules.badRequest("Password atual incorreta");
         return ResponseEntity.noContent().build();
     }
@@ -97,15 +93,14 @@ class AccountController {
     }
 
     @PostMapping("/users/{userId}/disable")
-    ResponseEntity<Void> disableMember(@AuthenticationPrincipal Jwt jwt, @PathVariable UUID userId) {
-        accountService.disableMember(CurrentUser.of(jwt), userId);
+    ResponseEntity<Void> disableMember(CurrentUser user, @PathVariable UUID userId) {
+        accountService.disableMember(user, userId);
         return ResponseEntity.noContent().build();
     }
 
     @DeleteMapping("/users/{userId}/roles/{role}")
-    ResponseEntity<Void> removeRole(@AuthenticationPrincipal Jwt jwt, @PathVariable UUID userId,
-                                    @PathVariable String role) {
-        accountService.removeRole(CurrentUser.of(jwt), userId, role);
+    ResponseEntity<Void> removeRole(CurrentUser user, @PathVariable UUID userId, @PathVariable String role) {
+        accountService.removeRole(user, userId, role);
         return ResponseEntity.noContent().build();
     }
 }

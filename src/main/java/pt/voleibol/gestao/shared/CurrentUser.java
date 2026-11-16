@@ -16,7 +16,7 @@ public record CurrentUser(UUID id, Set<Role> roles) {
         roles = roles == null ? Set.of() : Set.copyOf(roles);
     }
 
-    public static CurrentUser of(Jwt jwt) {
+    public static CurrentUser from(Jwt jwt) {
         return new CurrentUser(UUID.fromString(jwt.getSubject()), Role.fromAll(jwt.getClaimAsStringList("roles")));
     }
 

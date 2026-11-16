@@ -204,10 +204,6 @@ class MatchRepository {
                 .param("tenant", tenantId).param("id", venueId));
     }
 
-    void audit(UUID tenantId, UUID actorId, String action, UUID entityId) {
-        Db.audit(jdbc, tenantId, actorId, action, "match", entityId);
-    }
-
     private static MatchRow mapMatch(java.sql.ResultSet rs, int rowNum) throws java.sql.SQLException {
         return new MatchRow(Db.uuid(rs, "id"), Db.uuid(rs, "team_id"), rs.getString("competition"),
                 rs.getString("opponent"), rs.getString("location"), Db.uuid(rs, "court_id"),

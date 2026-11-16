@@ -117,10 +117,6 @@ class PromotionRepository {
                 .update() == 1;
     }
 
-    void audit(UUID tenantId, UUID actorId, String action, UUID promotionId) {
-        Db.audit(jdbc, tenantId, actorId, action, "season_promotion", promotionId);
-    }
-
     private static PromotionRow map(java.sql.ResultSet rs, int rowNum) throws java.sql.SQLException {
         return new PromotionRow(Db.uuid(rs, "id"), Db.uuid(rs, "athlete_id"), rs.getString("full_name"),
                 Db.uuid(rs, "age_group_id"), rs.getString("age_group_code"), rs.getString("age_group_name"),

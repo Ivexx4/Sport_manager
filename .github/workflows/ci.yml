@@ -123,7 +123,8 @@ jobs:
   deploy-staging:
     name: Deploy para staging
     needs: [image, frontend]
-    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/master'
+    # Desligado por omissão: só corre quando o repositório tem STAGING_ENABLED=true.
+    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/master' && vars.STAGING_ENABLED == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 15
     environment:

@@ -1,0 +1,13 @@
+/* Ponto único de entrada dos estilos, pela ordem em que devem cascatear. */
+@import url("https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Playfair+Display:ital,wght@0,600;1,600;1,700&display=swap");
+@import "./base.css";
+@import "./layout.css";
+@import "./ui.css";
+@import "./overview.css";
+@import "./athletes.css";
+@import "./teams.css";
+@import "./matches.css";
+@import "./seasons.css";
+@import "./billing.css";
+@import "./auth.css";
+@import "./responsive.css";

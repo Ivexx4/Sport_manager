@@ -11,6 +11,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.server.ResponseStatusException;
 
+import pt.voleibol.gestao.shared.AuditLog;
 import pt.voleibol.gestao.shared.CurrentUser;
 import pt.voleibol.gestao.shared.Role;
 import pt.voleibol.gestao.shared.Rules;
@@ -39,14 +40,16 @@ class TeamService {
     private final AgeGroupRepository ageGroups;
     private final PromotionRepository promotions;
     private final SeasonEligibility eligibility;
+    private final AuditLog audit;
 
     TeamService(TeamRepository teams, SeasonRepository seasons, AgeGroupRepository ageGroups,
-                PromotionRepository promotions, SeasonEligibility eligibility) {
+                PromotionRepository promotions, SeasonEligibility eligibility, AuditLog audit) {
         this.teams = teams;
         this.seasons = seasons;
         this.ageGroups = ageGroups;
         this.promotions = promotions;
         this.eligibility = eligibility;
+        this.audit = audit;
     }
 
     @Transactional(readOnly = true)
@@ -78,7 +81,7 @@ class TeamService {
         } catch (DuplicateKeyException e) {
             throw Rules.conflict("Já existe uma equipa com este nome");
         }
-        teams.audit(tenantId, user.id(), "TEAM_CREATED", id);
+        audit.record(tenantId, user.id(), "TEAM_CREATED", "team", id);
         return view(teams.findById(tenantId, id).orElseThrow(TeamService::notFound));
     }
 
@@ -106,7 +109,7 @@ class TeamService {
         // Mudar a época ou o escalão pode invalidar o plantel: a validação corre depois da escrita,
         // dentro da transação, e desfaz a alteração.
         if (contextChanged) eligibility.requireTeamStillValid(tenantId, teamId);
-        teams.audit(tenantId, user.id(), "TEAM_UPDATED", teamId);
+        audit.record(tenantId, user.id(), "TEAM_UPDATED", "team", teamId);
         return view(teams.findById(tenantId, teamId).orElseThrow(TeamService::notFound));
     }
 
@@ -116,7 +119,7 @@ class TeamService {
         Rules.requireManager(user);
         // Remoção não destrutiva: desativa e anonimiza, preservando staff e plantel para histórico.
         if (!teams.anonymize(tenantId, teamId)) throw notFound();
-        teams.audit(tenantId, user.id(), "TEAM_ANONYMIZED", teamId);
+        audit.record(tenantId, user.id(), "TEAM_ANONYMIZED", "team", teamId);
     }
 
     // --- staff ---
@@ -143,7 +146,7 @@ class TeamService {
         } catch (DuplicateKeyException e) {
             throw Rules.conflict("Este utilizador já é staff da equipa");
         }
-        teams.audit(tenantId, user.id(), "TEAM_STAFF_ADDED", teamId);
+        audit.record(tenantId, user.id(), "TEAM_STAFF_ADDED", "team", teamId);
         return listStaff(user, teamId);
     }
 
@@ -153,7 +156,7 @@ class TeamService {
         Rules.requireManager(user);
         requireVisible(tenantId, teamId, user);
         if (!teams.deleteStaff(tenantId, teamId, userId)) throw Rules.notFound("Utilizador não é staff da equipa");
-        teams.audit(tenantId, user.id(), "TEAM_STAFF_REMOVED", teamId);
+        audit.record(tenantId, user.id(), "TEAM_STAFF_REMOVED", "team", teamId);
     }
 
     // --- plantel ---
@@ -194,7 +197,7 @@ class TeamService {
             throw Rules.conflict("Este atleta já pertence à equipa");
         }
 
-        teams.audit(tenantId, user.id(), "TEAM_ATHLETE_ADDED", teamId);
+        audit.record(tenantId, user.id(), "TEAM_ATHLETE_ADDED", "team", teamId);
         return listAthletes(user, teamId);
     }
 
@@ -224,7 +227,7 @@ class TeamService {
         Rules.requireManager(user);
         requireVisible(tenantId, teamId, user);
         if (!teams.deleteAthlete(tenantId, teamId, athleteId)) throw Rules.notFound("Atleta não pertence à equipa");
-        teams.audit(tenantId, user.id(), "TEAM_ATHLETE_REMOVED", teamId);
+        audit.record(tenantId, user.id(), "TEAM_ATHLETE_REMOVED", "team", teamId);
     }
 
     // --- auxiliares ---

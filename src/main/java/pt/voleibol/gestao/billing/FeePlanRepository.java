@@ -1,7 +1,10 @@
 package pt.voleibol.gestao.billing;
 
 import java.time.Instant;
+import java.util.Collection;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
 
@@ -90,20 +93,32 @@ class FeePlanRepository {
                 .param("t", tenantId).param("id", id).update() == 1;
     }
 
-    Optional<Long> overrideAmount(UUID tenantId, UUID athleteId, UUID feePlanId,
-                                  java.time.LocalDate date, String billingPeriod) {
-        return jdbc.sql("""
-                        SELECT amount_cents
+    /**
+     * Promoções ativas que se aplicam a cada atleta na data e no período indicados, numa só consulta.
+     * A escolha por atleta mantém a ordem de preferência: promoção do plano antes da geral e, entre
+     * iguais, a mais recente.
+     */
+    Map<UUID, Long> overrideAmounts(UUID tenantId, UUID feePlanId, java.time.LocalDate date,
+                                    String billingPeriod, Collection<UUID> athleteIds) {
+        if (athleteIds.isEmpty()) return Map.of();
+        Map<UUID, Long> amounts = new HashMap<>();
+        jdbc.sql("""
+                        SELECT DISTINCT ON (athlete_id) athlete_id, amount_cents
                         FROM athlete_fee_override
-                        WHERE tenant_id = :t AND athlete_id = :a
+                        WHERE tenant_id = :t AND athlete_id IN (:athletes)
                           AND (fee_plan_id IS NULL OR fee_plan_id = :f)
                           AND (application_scope = 'ALL'
                                OR (application_scope = 'SINGLE' AND billing_period = :period))
                           AND is_active AND valid_from <= :date AND (valid_to IS NULL OR valid_to >= :date)
-                        ORDER BY CASE WHEN fee_plan_id = :f THEN 0 ELSE 1 END, valid_from DESC, id DESC
-                        LIMIT 1
-                        """).param("t", tenantId).param("a", athleteId).param("f", feePlanId).param("date", date)
-                .param("period", billingPeriod).query(Long.class).optional();
+                        ORDER BY athlete_id,
+                                 CASE WHEN fee_plan_id = :f THEN 0 ELSE 1 END,
+                                 valid_from DESC, id DESC
+                        """).param("t", tenantId).param("athletes", athleteIds).param("f", feePlanId)
+                .param("period", billingPeriod).param("date", date)
+                .query((rs, n) -> Map.entry(Db.uuid(rs, "athlete_id"), rs.getLong("amount_cents")))
+                .list()
+                .forEach(amount -> amounts.put(amount.getKey(), amount.getValue()));
+        return amounts;
     }
 
     List<Promotion> listPromotions(UUID tenantId, UUID athleteId) {
@@ -141,10 +156,6 @@ class FeePlanRepository {
                 UPDATE athlete_fee_override SET is_active = :active, updated_at = now()
                 WHERE tenant_id = :t AND id = :id
                 """).param("t", tenantId).param("id", id).param("active", active).update() == 1;
-    }
-
-    void audit(UUID tenantId, UUID actorId, String action, UUID entityId) {
-        Db.audit(jdbc, tenantId, actorId, action, "fee_plan", entityId);
     }
 
     private static Row map(java.sql.ResultSet rs, int n) throws java.sql.SQLException {

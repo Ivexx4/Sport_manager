@@ -8,6 +8,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.server.ResponseStatusException;
 
+import pt.voleibol.gestao.shared.AuditLog;
 import pt.voleibol.gestao.shared.CurrentUser;
 import pt.voleibol.gestao.shared.Role;
 import pt.voleibol.gestao.shared.Rules;
@@ -21,10 +22,12 @@ class DocumentService {
 
     private final DocumentRepository documents;
     private final AthleteRepository athletes;
+    private final AuditLog audit;
 
-    DocumentService(DocumentRepository documents, AthleteRepository athletes) {
+    DocumentService(DocumentRepository documents, AthleteRepository athletes, AuditLog audit) {
         this.documents = documents;
         this.athletes = athletes;
+        this.audit = audit;
     }
 
     @Transactional(readOnly = true)
@@ -45,7 +48,7 @@ class DocumentService {
         if (type == null || type.isBlank()) throw Rules.badRequest("Tipo obrigatório");
         UUID id = UUID.randomUUID();
         documents.insert(id, tenantId, athleteId, type.trim(), fileName, fileUrl, validUntil, user.id());
-        documents.audit(tenantId, user.id(), "ATHLETE_DOCUMENT_CREATED", id);
+        audit.record(tenantId, user.id(), "ATHLETE_DOCUMENT_CREATED", "document", id);
         return view(documents.findById(tenantId, id).orElseThrow(DocumentService::notFound));
     }
 
@@ -58,7 +61,7 @@ class DocumentService {
         requireWritableAthlete(tenantId, current.athleteId(), user);
         if (type == null || type.isBlank()) throw Rules.badRequest("Tipo obrigatório");
         if (!documents.update(tenantId, documentId, type.trim(), fileName, fileUrl, validUntil)) throw notFound();
-        documents.audit(tenantId, user.id(), "ATHLETE_DOCUMENT_UPDATED", documentId);
+        audit.record(tenantId, user.id(), "ATHLETE_DOCUMENT_UPDATED", "document", documentId);
         return view(documents.findById(tenantId, documentId).orElseThrow(DocumentService::notFound));
     }
 
@@ -69,7 +72,7 @@ class DocumentService {
                 .orElseThrow(DocumentService::notFound);
         requireWritableAthlete(tenantId, current.athleteId(), user);
         if (!documents.anonymize(tenantId, documentId)) throw notFound();
-        documents.audit(tenantId, user.id(), "ATHLETE_DOCUMENT_ANONYMIZED", documentId);
+        audit.record(tenantId, user.id(), "ATHLETE_DOCUMENT_ANONYMIZED", "document", documentId);
     }
 
     private void requireVisibleAthlete(UUID tenantId, UUID athleteId, CurrentUser user) {

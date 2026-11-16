@@ -1,0 +1,47 @@
+/* Jogos: cartões com data, confronto e local. */
+.match-card {
+  padding: 18px;
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+.match-date {
+  min-width: 70px;
+  text-align: center;
+  border-right: 1px solid #edf0f3;
+  padding-right: 15px;
+}
+.match-date span,
+.match-date strong {
+  display: block;
+}
+.match-date span {
+  color: #8996a6;
+  font-size: 10px;
+}
+.match-date strong {
+  color: #e86a33;
+  font-size: 16px;
+  margin-top: 5px;
+}
+.match-main {
+  flex: 1;
+}
+.match-main .eyebrow {
+  margin: 0 0 6px;
+  color: #9aa5b2;
+}
+.match-main h3 {
+  margin: 0;
+  font-size: 14px;
+}
+.match-main h3 small {
+  color: #a7b0bb;
+  font-weight: 400;
+  padding: 0 5px;
+}
+.match-main p {
+  color: #8996a6;
+  font-size: 11px;
+  margin: 7px 0 0;
+}

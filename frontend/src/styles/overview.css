@@ -1,0 +1,154 @@
+/* Visão geral: cartão de boas-vindas, indicadores e primeiros passos. */
+.welcome-card {
+  min-height: 225px;
+  background: #1c3c62;
+  border-radius: 12px;
+  color: white;
+  padding: 30px 34px;
+  position: relative;
+  overflow: hidden;
+  display: flex;
+  justify-content: space-between;
+  margin-bottom: 34px;
+}
+.welcome-card h2 {
+  font-size: 27px;
+  letter-spacing: -0.05em;
+  line-height: 1.1;
+  margin: 5px 0 10px;
+}
+.welcome-card p:not(.eyebrow) {
+  color: #afc0d3;
+  font-size: 12px;
+  margin: 0 0 18px;
+}
+.light-eyebrow {
+  color: #9caec2;
+  margin-left: 0;
+}
+.welcome-graphic {
+  width: 240px;
+  position: relative;
+}
+.graphic-ball {
+  width: 108px;
+  height: 108px;
+  border: 10px solid #f59a69;
+  border-radius: 50%;
+  position: absolute;
+  top: 26px;
+  right: 47px;
+  display: grid;
+  place-items: center;
+  color: #fff;
+  font: italic 65px Georgia;
+  transform: rotate(-15deg);
+}
+.graphic-ring {
+  position: absolute;
+  border: 1px solid #507496;
+  border-radius: 50%;
+}
+.ring-one {
+  width: 240px;
+  height: 240px;
+  top: -50px;
+  right: -30px;
+}
+.ring-two {
+  width: 180px;
+  height: 180px;
+  top: -20px;
+  right: 0;
+}
+.section-title,
+.panel-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+.section-title {
+  margin-bottom: 14px;
+}
+.section-title h2 {
+  margin: 0;
+  font-size: 16px;
+  letter-spacing: -0.03em;
+}
+.section-title span {
+  font-size: 11px;
+  color: #98a2b0;
+}
+.quick-list {
+  padding: 5px 12px 10px;
+}
+.quick-item {
+  width: 100%;
+  border: 0;
+  background: transparent;
+  display: flex;
+  align-items: center;
+  text-align: left;
+  gap: 12px;
+  padding: 12px 9px;
+  border-radius: 7px;
+}
+.quick-item:hover {
+  background: #f8fafc;
+}
+.quick-icon {
+  width: 32px;
+  height: 32px;
+  color: #e86a33;
+  background: #fff1e9;
+  border-radius: 7px;
+  display: grid;
+  place-items: center;
+}
+.quick-icon svg {
+  width: 16px;
+}
+.quick-item strong,
+.quick-item small {
+  display: block;
+}
+.quick-item strong {
+  font-size: 12px;
+}
+.quick-item small {
+  font-size: 11px;
+  color: #8995a4;
+  margin-top: 3px;
+}
+.quick-item > span:nth-child(2) {
+  flex: 1;
+}
+.check {
+  color: #e86a33;
+  font-size: 18px;
+}
+.check.done {
+  display: grid;
+  place-items: center;
+  width: 19px;
+  height: 19px;
+  border-radius: 50%;
+  background: #daf2e3;
+  color: #379064;
+  font-size: 11px;
+}
+.panel-note {
+  padding: 25px;
+  color: #765eb6;
+  background: #fbfaff;
+}
+.panel-note h3 {
+  color: #3e3760;
+  margin-top: 12px;
+}
+.panel-note p {
+  color: #81799b;
+  line-height: 1.7;
+  font-size: 12px;
+  margin: 8px 0 18px;
+}

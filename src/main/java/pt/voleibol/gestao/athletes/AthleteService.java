@@ -16,6 +16,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.server.ResponseStatusException;
 
+import pt.voleibol.gestao.shared.AuditLog;
 import pt.voleibol.gestao.shared.CurrentUser;
 import pt.voleibol.gestao.shared.Rules;
 import pt.voleibol.gestao.billing.ChargeRepository;
@@ -50,11 +51,14 @@ class AthleteService {
     private final AthleteRepository athletes;
     private final ChargeRepository charges;
     private final SeasonEligibility eligibility;
+    private final AuditLog audit;
 
-    AthleteService(AthleteRepository athletes, ChargeRepository charges, SeasonEligibility eligibility) {
+    AthleteService(AthleteRepository athletes, ChargeRepository charges, SeasonEligibility eligibility,
+                   AuditLog audit) {
         this.athletes = athletes;
         this.charges = charges;
         this.eligibility = eligibility;
+        this.audit = audit;
     }
 
     @Transactional(readOnly = true)
@@ -97,7 +101,7 @@ class AthleteService {
         } catch (DuplicateKeyException e) {
             throw Rules.conflict("Já existe um atleta com estes dados");
         }
-        athletes.audit(tenantId, user.id(), "ATHLETE_CREATED", id);
+        audit.record(tenantId, user.id(), "ATHLETE_CREATED", "athlete", id);
         return get(user, id);
     }
 
@@ -146,7 +150,7 @@ class AthleteService {
             } catch (DuplicateKeyException e) {
                 continue;
             }
-            athletes.audit(tenantId, user.id(), "ATHLETE_CREATED", id);
+            audit.record(tenantId, user.id(), "ATHLETE_CREATED", "athlete", id);
             count++;
         }
         return count;
@@ -171,7 +175,7 @@ class AthleteService {
         if (!Objects.equals(current.birthDate(), data.birthDate())) {
             eligibility.requireAthleteStillEligible(tenantId, athleteId);
         }
-        athletes.audit(tenantId, user.id(), "ATHLETE_UPDATED", athleteId);
+        audit.record(tenantId, user.id(), "ATHLETE_UPDATED", "athlete", athleteId);
         return get(user, athleteId);
     }
 
@@ -184,7 +188,7 @@ class AthleteService {
         // Remoção não destrutiva: desativa e anonimiza, preservando a linha e as relações.
         if (!athletes.anonymize(tenantId, athleteId)) throw notFound();
         athletes.deleteGuardian(tenantId, athleteId, null);
-        athletes.audit(tenantId, user.id(), "ATHLETE_ANONYMIZED", athleteId);
+        audit.record(tenantId, user.id(), "ATHLETE_ANONYMIZED", "athlete", athleteId);
     }
 
     // --- conta e estado ---
@@ -201,7 +205,7 @@ class AthleteService {
         } catch (DuplicateKeyException e) {
             throw Rules.conflict("Esta conta já está ligada a outro atleta");
         }
-        athletes.audit(tenantId, user.id(), "ATHLETE_ACCOUNT_LINKED", athleteId);
+        audit.record(tenantId, user.id(), "ATHLETE_ACCOUNT_LINKED", "athlete", athleteId);
         return get(user, athleteId);
     }
 
@@ -211,7 +215,7 @@ class AthleteService {
         Rules.requireManager(user);
         requireVisible(tenantId, athleteId, user);
         if (!athletes.unlinkUser(tenantId, athleteId)) throw notFound();
-        athletes.audit(tenantId, user.id(), "ATHLETE_ACCOUNT_UNLINKED", athleteId);
+        audit.record(tenantId, user.id(), "ATHLETE_ACCOUNT_UNLINKED", "athlete", athleteId);
         return get(user, athleteId);
     }
 
@@ -223,7 +227,7 @@ class AthleteService {
         if (!athletes.updateStatus(tenantId, athleteId, Rules.parse(AthleteStatus.class, status, "Estado").name()))
             throw notFound();
 
-        athletes.audit(tenantId, user.id(), "ATHLETE_STATUS_CHANGED", athleteId);
+        audit.record(tenantId, user.id(), "ATHLETE_STATUS_CHANGED", "athlete", athleteId);
         return get(user, athleteId);
     }
 
@@ -235,7 +239,7 @@ class AthleteService {
         requireVisible(tenantId, athleteId, user);
         if (!athletes.registerWithdrawal(tenantId, athleteId, withdrawalDate)) throw notFound();
         charges.cancelFutureRecurring(tenantId, athleteId, withdrawalDate);
-        athletes.audit(tenantId, user.id(), "ATHLETE_WITHDRAWN", athleteId);
+        audit.record(tenantId, user.id(), "ATHLETE_WITHDRAWN", "athlete", athleteId);
         return get(user, athleteId);
     }
 
@@ -263,7 +267,7 @@ class AthleteService {
         } catch (DuplicateKeyException e) {
             throw Rules.conflict("Este encarregado já está associado ao atleta");
         }
-        athletes.audit(tenantId, user.id(), "ATHLETE_GUARDIAN_ADDED", athleteId);
+        audit.record(tenantId, user.id(), "ATHLETE_GUARDIAN_ADDED", "athlete", athleteId);
         return listGuardians(user, athleteId);
     }
 
@@ -273,7 +277,7 @@ class AthleteService {
         Rules.requireManager(user);
         requireVisible(tenantId, athleteId, user);
         if (!athletes.deleteGuardian(tenantId, athleteId, userId)) throw Rules.notFound("Encarregado não associado ao atleta");
-        athletes.audit(tenantId, user.id(), "ATHLETE_GUARDIAN_REMOVED", athleteId);
+        audit.record(tenantId, user.id(), "ATHLETE_GUARDIAN_REMOVED", "athlete", athleteId);
     }
 
     // --- auxiliares ---

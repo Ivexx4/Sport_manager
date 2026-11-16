@@ -11,8 +11,6 @@ import java.util.UUID;
 
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
-import org.springframework.security.core.annotation.AuthenticationPrincipal;
-import org.springframework.security.oauth2.jwt.Jwt;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -55,70 +53,70 @@ class TeamController {
     }
 
     @GetMapping
-    List<TeamService.TeamView> list(@AuthenticationPrincipal Jwt jwt) {
-        return teamService.list(CurrentUser.of(jwt));
+    List<TeamService.TeamView> list(CurrentUser user) {
+        return teamService.list(user);
     }
 
     @GetMapping("/{teamId}")
-    TeamService.TeamView get(@AuthenticationPrincipal Jwt jwt, @PathVariable UUID teamId) {
-        return teamService.get(CurrentUser.of(jwt), teamId);
+    TeamService.TeamView get(CurrentUser user, @PathVariable UUID teamId) {
+        return teamService.get(user, teamId);
     }
 
     @PostMapping
-    ResponseEntity<TeamService.TeamView> create(@AuthenticationPrincipal Jwt jwt,
+    ResponseEntity<TeamService.TeamView> create(CurrentUser user,
                                                 @Valid @RequestBody TeamRequest request) {
-        TeamService.TeamView created = teamService.create(CurrentUser.of(jwt), request.name(),
+        TeamService.TeamView created = teamService.create(user, request.name(),
                 request.status(), request.seasonId(), request.ageGroupId());
         return ResponseEntity.status(HttpStatus.CREATED).body(created);
     }
 
     @PutMapping("/{teamId}")
-    TeamService.TeamView update(@AuthenticationPrincipal Jwt jwt, @PathVariable UUID teamId,
+    TeamService.TeamView update(CurrentUser user, @PathVariable UUID teamId,
                                 @Valid @RequestBody TeamRequest request) {
-        return teamService.update(CurrentUser.of(jwt), teamId, request.name(), request.status(),
+        return teamService.update(user, teamId, request.name(), request.status(),
                 request.seasonId(), request.ageGroupId());
     }
 
     @DeleteMapping("/{teamId}")
-    ResponseEntity<Void> delete(@AuthenticationPrincipal Jwt jwt, @PathVariable UUID teamId) {
-        teamService.delete(CurrentUser.of(jwt), teamId);
+    ResponseEntity<Void> delete(CurrentUser user, @PathVariable UUID teamId) {
+        teamService.delete(user, teamId);
         return ResponseEntity.noContent().build();
     }
 
     @GetMapping("/{teamId}/staff")
-    List<TeamService.StaffView> listStaff(@AuthenticationPrincipal Jwt jwt, @PathVariable UUID teamId) {
-        return teamService.listStaff(CurrentUser.of(jwt), teamId);
+    List<TeamService.StaffView> listStaff(CurrentUser user, @PathVariable UUID teamId) {
+        return teamService.listStaff(user, teamId);
     }
 
     @PostMapping("/{teamId}/staff")
-    List<TeamService.StaffView> addStaff(@AuthenticationPrincipal Jwt jwt, @PathVariable UUID teamId,
+    List<TeamService.StaffView> addStaff(CurrentUser user, @PathVariable UUID teamId,
                                          @Valid @RequestBody StaffRequest request) {
-        return teamService.addStaff(CurrentUser.of(jwt), teamId, request.userId(), request.role());
+        return teamService.addStaff(user, teamId, request.userId(), request.role());
     }
 
     @DeleteMapping("/{teamId}/staff/{userId}")
-    ResponseEntity<Void> removeStaff(@AuthenticationPrincipal Jwt jwt, @PathVariable UUID teamId,
+    ResponseEntity<Void> removeStaff(CurrentUser user, @PathVariable UUID teamId,
                                      @PathVariable UUID userId) {
-        teamService.removeStaff(CurrentUser.of(jwt), teamId, userId);
+        teamService.removeStaff(user, teamId, userId);
         return ResponseEntity.noContent().build();
     }
 
     @GetMapping("/{teamId}/athletes")
-    List<TeamService.RosterView> listAthletes(@AuthenticationPrincipal Jwt jwt, @PathVariable UUID teamId) {
-        return teamService.listAthletes(CurrentUser.of(jwt), teamId);
+    List<TeamService.RosterView> listAthletes(CurrentUser user, @PathVariable UUID teamId) {
+        return teamService.listAthletes(user, teamId);
     }
 
     @PostMapping("/{teamId}/athletes")
-    List<TeamService.RosterView> addAthleteToTeam(@AuthenticationPrincipal Jwt jwt, @PathVariable UUID teamId,
+    List<TeamService.RosterView> addAthleteToTeam(CurrentUser user, @PathVariable UUID teamId,
                                                   @Valid @RequestBody RosterRequest request) {
-        return teamService.addAthleteToTeam(CurrentUser.of(jwt), teamId, request.athleteId(),
+        return teamService.addAthleteToTeam(user, teamId, request.athleteId(),
                 request.registrationAgeGroupId());
     }
 
     @DeleteMapping("/{teamId}/athletes/{athleteId}")
-    ResponseEntity<Void> removeAthlete(@AuthenticationPrincipal Jwt jwt, @PathVariable UUID teamId,
+    ResponseEntity<Void> removeAthlete(CurrentUser user, @PathVariable UUID teamId,
                                        @PathVariable UUID athleteId) {
-        teamService.removeAthlete(CurrentUser.of(jwt), teamId, athleteId);
+        teamService.removeAthlete(user, teamId, athleteId);
         return ResponseEntity.noContent().build();
     }
 }

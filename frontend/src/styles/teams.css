@@ -1,0 +1,60 @@
+/* Equipas: cartões de equipa e estados do cartão. */
+.team-card {
+  overflow: hidden;
+}
+.team-cover {
+  height: 94px;
+  background: linear-gradient(130deg, #173555, #356489);
+  padding: 15px;
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+}
+.team-symbol {
+  display: grid;
+  place-items: center;
+  width: 43px;
+  height: 43px;
+  border: 2px solid #f2a376;
+  color: #f2a376;
+  border-radius: 50%;
+  font: italic 29px Georgia;
+}
+.team-body {
+  padding: 17px;
+}
+.team-body h3 {
+  margin: 0 0 5px;
+  font-size: 15px;
+}
+.team-body p {
+  color: #8996a6;
+  font-size: 11px;
+  margin: 0 0 17px;
+}
+.team-body p span {
+  padding: 0 4px;
+}
+.team-footer {
+  border-top: 1px solid #edf0f3;
+  padding-top: 12px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  color: #6e7c8e;
+  font-size: 11px;
+}
+.team-footer span {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+.team-card-button {
+  padding: 0;
+  text-align: left;
+  color: inherit;
+}
+.team-card-button:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 8px 20px #182b4010;
+}

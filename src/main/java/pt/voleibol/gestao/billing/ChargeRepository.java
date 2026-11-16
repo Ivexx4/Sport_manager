@@ -173,10 +173,6 @@ public class ChargeRepository {
                 .param("t", tenantId).param("id", id).update() == 1;
     }
 
-    void audit(UUID tenantId, UUID actorId, String action, UUID entityId) {
-        Db.audit(jdbc, tenantId, actorId, action, "charge", entityId);
-    }
-
     private static Row map(java.sql.ResultSet rs, int n) throws java.sql.SQLException {
         return new Row(Db.uuid(rs, "id"), Db.uuid(rs, "athlete_id"),
                 Db.uuid(rs, "guardian_id"), Db.uuid(rs, "fee_plan_id"),

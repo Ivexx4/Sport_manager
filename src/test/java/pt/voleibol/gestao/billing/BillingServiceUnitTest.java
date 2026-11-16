@@ -1,7 +1,10 @@
 package pt.voleibol.gestao.billing;
 
+import java.time.Clock;
+import java.time.Instant;
 import java.time.LocalDate;
 import java.time.YearMonth;
+import java.time.ZoneId;
 import java.util.List;
 import java.util.Set;
 import java.util.UUID;
@@ -9,6 +12,7 @@ import java.util.UUID;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 
+import pt.voleibol.gestao.shared.AuditLog;
 import pt.voleibol.gestao.shared.CurrentUser;
 import pt.voleibol.gestao.shared.Role;
 import pt.voleibol.gestao.tenancy.TenantContext;
@@ -29,6 +33,8 @@ class BillingServiceUnitTest {
     private static final UUID ADULT = UUID.fromString("00000000-0000-0000-0000-000000000023");
     private static final UUID PLAN = UUID.fromString("00000000-0000-0000-0000-000000000024");
     private static final UUID ACTOR = UUID.fromString("00000000-0000-0000-0000-000000000025");
+    private static final Clock CLOCK =
+            Clock.fixed(Instant.parse("2026-11-16T10:00:00Z"), ZoneId.of("Europe/Lisbon"));
 
     @AfterEach
     void limpaTenantContext() {
@@ -39,8 +45,9 @@ class BillingServiceUnitTest {
     void geraPlanosMensaisEContaDuplicados() {
         FeePlanRepository plans = mock(FeePlanRepository.class);
         ChargeRepository charges = mock(ChargeRepository.class);
+        AuditLog audit = mock(AuditLog.class);
         BillingService service = new BillingService(plans, charges, mock(PaymentRepository.class),
-                mock(LedgerRepository.class));
+                mock(LedgerRepository.class), audit, CLOCK);
         TenantContext.set(TENANT);
 
         FeePlanRepository.Row monthly = new FeePlanRepository.Row(PLAN, "Mensal", null, null, 1000,
@@ -58,7 +65,7 @@ class BillingServiceUnitTest {
 
         assertThat(result.created()).isEqualTo(1);
         assertThat(result.skipped()).isEqualTo(1);
-        verify(charges).audit(eq(TENANT), eq(null), eq("CHARGE_GENERATED"), any());
+        verify(audit).record(eq(TENANT), eq(null), eq("CHARGE_GENERATED"), eq("charge"), any());
     }
 
     @Test
@@ -66,7 +73,7 @@ class BillingServiceUnitTest {
         FeePlanRepository plans = mock(FeePlanRepository.class);
         ChargeRepository charges = mock(ChargeRepository.class);
         BillingService service = new BillingService(plans, charges, mock(PaymentRepository.class),
-                mock(LedgerRepository.class));
+                mock(LedgerRepository.class), mock(AuditLog.class), CLOCK);
         TenantContext.set(TENANT);
 
         FeePlanRepository.Row quarterly = new FeePlanRepository.Row(PLAN, "Trimestral", null, null, 1000,
@@ -90,7 +97,7 @@ class BillingServiceUnitTest {
     @Test
     void periodoInvalidoERejeitado() {
         BillingService service = new BillingService(mock(FeePlanRepository.class), mock(ChargeRepository.class),
-                mock(PaymentRepository.class), mock(LedgerRepository.class));
+                mock(PaymentRepository.class), mock(LedgerRepository.class), mock(AuditLog.class), CLOCK);
         TenantContext.set(TENANT);
 
         assertThatThrownBy(() -> service.generateCharges(user(Role.ADMIN), "2026-13", null, true))

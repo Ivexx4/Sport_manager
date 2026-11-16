@@ -130,8 +130,4 @@ class MfaRepository {
     void deleteRecoveryCodes(UUID userId) {
         jdbc.sql("DELETE FROM mfa_recovery_code WHERE user_id = :user").param("user", userId).update();
     }
-
-    void audit(UUID tenantId, UUID userId, String action) {
-        Db.audit(jdbc, tenantId, userId, action, "session", userId);
-    }
 }

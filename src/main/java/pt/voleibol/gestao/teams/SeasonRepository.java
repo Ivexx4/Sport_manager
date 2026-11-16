@@ -101,10 +101,6 @@ class SeasonRepository {
                 .update() == 1;
     }
 
-    void audit(UUID tenantId, UUID actorId, String action, UUID seasonId) {
-        Db.audit(jdbc, tenantId, actorId, action, "season", seasonId);
-    }
-
     private static SeasonRow map(java.sql.ResultSet rs, int rowNum) throws java.sql.SQLException {
         return new SeasonRow(Db.uuid(rs, "id"), rs.getString("name"), Db.date(rs, "start_date"),
                 Db.date(rs, "end_date"), Db.date(rs, "cutoff_date"), rs.getBoolean("is_active"),

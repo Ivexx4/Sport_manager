@@ -1,0 +1,91 @@
+/* Épocas e escalões: seletor, resumo, cartões de equipa e grupos. */
+.season-list {
+  display: grid;
+  gap: 12px;
+}
+.season-card {
+  display: flex;
+  align-items: center;
+  padding: 18px 21px;
+  gap: 15px;
+}
+.season-icon {
+  display: grid;
+  place-items: center;
+  width: 42px;
+  height: 42px;
+  border-radius: 9px;
+  background: #edf5fd;
+  color: #4a88b7;
+}
+.season-info {
+  flex: 1;
+}
+.season-info > div {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+}
+.season-info h3 {
+  margin: 0;
+  font-size: 14px;
+}
+.season-info p {
+  color: #8a96a5;
+  font-size: 11px;
+  margin: 7px 0 0;
+}
+.season-groups {
+  border-left: 1px solid #e9edf1;
+  padding-left: 27px;
+  padding-right: 27px;
+  text-align: center;
+}
+.season-groups small,
+.season-groups strong {
+  display: block;
+}
+.season-groups small {
+  color: #99a4b0;
+  font-size: 9px;
+  letter-spacing: 0.1em;
+}
+.season-groups strong {
+  font-size: 20px;
+  margin-top: 4px;
+}
+.season-selector {
+  margin: -12px 0 15px;
+  max-width: 360px;
+}
+.season-selector label {
+  display: grid;
+  gap: 6px;
+  color: #647286;
+  font-size: 11px;
+  font-weight: 600;
+}
+.season-selector select {
+  border: 1px solid #dfe5ec;
+  border-radius: 7px;
+  padding: 11px;
+  color: #263650;
+  background: white;
+}
+.season-summary {
+  display: flex;
+  align-items: center;
+  gap: 15px;
+  padding: 18px 21px;
+  margin-bottom: 12px;
+}
+.group-list {
+  display: grid;
+  gap: 12px;
+}
+.group-card {
+  display: flex;
+  align-items: center;
+  gap: 15px;
+  padding: 16px 21px;
+}

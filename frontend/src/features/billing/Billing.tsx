@@ -481,17 +481,13 @@ function PaymentModal({ charge, onClose, onSaved }: { charge: Charge; onClose: (
   function submit(event: React.FormEvent) {
     event.preventDefault();
     void run(
-      async () => {
-        await api.createPayment({
+      () =>
+        api.createPayment({
           chargeId: charge.id,
           method: data.method,
           amountCents: Math.round(Number(data.amount) * 100),
           reference: data.reference || undefined
-        });
-        const payments = await api.payments(charge.id);
-        const received = payments.reduce((total, payment) => total + payment.amountCents, 0);
-        if (received >= charge.amountCents) await api.updateChargeStatus(charge.id, "PAID");
-      },
+        }),
       { onSuccess: onSaved, errorMessage: "Não foi possível registar o pagamento." }
     );
   }

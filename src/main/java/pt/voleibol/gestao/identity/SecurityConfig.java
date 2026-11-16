@@ -26,6 +26,8 @@ import org.springframework.security.oauth2.server.resource.authentication.JwtAut
 import org.springframework.security.oauth2.server.resource.authentication.JwtGrantedAuthoritiesConverter;
 import org.springframework.security.web.SecurityFilterChain;
 
+import pt.voleibol.gestao.shared.Role;
+
 /**
  * Autenticação por JWT próprio (HS256) assinado pela aplicação, validado como resource server.
  * O segredo é partilhado entre emissão e validação, o que serve um monólito; se o token passar a ser
@@ -105,7 +107,7 @@ class SecurityConfig {
                                 "/api/v1/auth/mfa/enrollment/confirm").permitAll()
                         .requestMatchers("/api/v1/auth/invitations/accept", "/api/v1/auth/password/forgot",
                                 "/api/v1/auth/password/reset").permitAll()
-                        .requestMatchers("/api/v1/users/**").hasAnyRole("ADMIN", "DIRECAO")
+                        .requestMatchers("/api/v1/users/**").hasAnyRole(Role.codes(Role.MANAGERS).toArray(String[]::new))
                         .anyRequest().authenticated())
                 .oauth2ResourceServer(oauth2 -> oauth2
                         .jwt(jwt -> jwt.jwtAuthenticationConverter(jwtAuthenticationConverter)));

@@ -11,6 +11,7 @@ import org.junit.jupiter.api.Test;
 import org.springframework.dao.DuplicateKeyException;
 
 
+import pt.voleibol.gestao.shared.AuditLog;
 import pt.voleibol.gestao.shared.CurrentUser;
 import pt.voleibol.gestao.shared.Role;
 import pt.voleibol.gestao.shared.Rules;
@@ -39,7 +40,7 @@ class AthleteServiceUnitTest {
     @Test
     void importCsvAceitaLinhasValidasEIgnoraLinhasInvalidas() throws Exception {
         AthleteRepository repository = mock(AthleteRepository.class);
-        AthleteService service = new AthleteService(repository, null, null);
+        AthleteService service = new AthleteService(repository, null, null, mock(AuditLog.class));
         TenantContext.set(TENANT);
 
         when(repository.licenseExists(eq(TENANT), anyString(), eq(null)))
@@ -69,7 +70,7 @@ class AthleteServiceUnitTest {
     @Test
     void importCsvTambemAceitaBufferedReader() throws Exception {
         AthleteRepository repository = mock(AthleteRepository.class);
-        AthleteService service = new AthleteService(repository, null, null);
+        AthleteService service = new AthleteService(repository, null, null, mock(AuditLog.class));
         TenantContext.set(TENANT);
         doNothing().when(repository).insert(any(), eq(TENANT), any(AthleteRepository.Data.class), eq(ACTOR));
 

@@ -1,0 +1,10 @@
+/* Financeiro: indicadores e valores com sinal. */
+.billing-stats {
+  margin-bottom: 20px;
+}
+.amount-in strong {
+  color: #3e9363;
+}
+.amount-out strong {
+  color: #bf5135;
+}

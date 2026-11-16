@@ -1,7 +1,7 @@
 package pt.voleibol.gestao.billing;
 
+import java.time.Clock;
 import java.time.YearMonth;
-import java.time.ZoneId;
 import java.util.List;
 import java.util.UUID;
 
@@ -25,19 +25,20 @@ import pt.voleibol.gestao.tenancy.TenantContext;
 class ChargeGenerator {
 
     private static final Logger log = LoggerFactory.getLogger(ChargeGenerator.class);
-    private static final ZoneId LISBOA = ZoneId.of("Europe/Lisbon");
 
     private final JdbcClient jdbc;
     private final BillingService billing;
+    private final Clock clock;
 
-    ChargeGenerator(JdbcClient jdbc, BillingService billing) {
+    ChargeGenerator(JdbcClient jdbc, BillingService billing, Clock clock) {
         this.jdbc = jdbc;
         this.billing = billing;
+        this.clock = clock;
     }
 
     @Scheduled(cron = "0 0 2 1 * *")
     public void generateMonthlyCharges() {
-        YearMonth period = YearMonth.now(LISBOA);
+        YearMonth period = YearMonth.now(clock);
         List<UUID> tenants = jdbc.sql("SELECT id FROM tenant").query(UUID.class).list();
         for (UUID tenantId : tenants) {
             try {

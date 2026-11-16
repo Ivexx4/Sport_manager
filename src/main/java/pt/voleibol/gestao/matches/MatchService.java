@@ -1,8 +1,8 @@
 package pt.voleibol.gestao.matches;
 
+import java.time.Clock;
 import java.time.Instant;
 import java.time.LocalDateTime;
-import java.time.ZoneId;
 import java.time.format.DateTimeFormatter;
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -16,6 +16,7 @@ import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.server.ResponseStatusException;
 
 import pt.voleibol.gestao.notifications.EmailSender;
+import pt.voleibol.gestao.shared.AuditLog;
 import pt.voleibol.gestao.shared.CurrentUser;
 import pt.voleibol.gestao.shared.Db;
 import pt.voleibol.gestao.shared.Role;
@@ -25,7 +26,6 @@ import pt.voleibol.gestao.teams.TeamAccess;
 @Service
 class MatchService {
 
-    private static final ZoneId LISBOA = ZoneId.of("Europe/Lisbon");
     private static final DateTimeFormatter MATCH_DATE_FORMAT = DateTimeFormatter.ofPattern("dd/MM/yyyy HH:mm");
 
     record MatchView(UUID id, UUID teamId, String competition, String opponent, String location, UUID courtId,
@@ -42,12 +42,17 @@ class MatchService {
     private final JdbcClient jdbc;
     private final TeamAccess teamAccess;
     private final EmailSender emailSender;
+    private final AuditLog audit;
+    private final Clock clock;
 
-    MatchService(MatchRepository matches, JdbcClient jdbc, TeamAccess teamAccess, EmailSender emailSender) {
+    MatchService(MatchRepository matches, JdbcClient jdbc, TeamAccess teamAccess, EmailSender emailSender,
+                 AuditLog audit, Clock clock) {
         this.matches = matches;
         this.jdbc = jdbc;
         this.teamAccess = teamAccess;
         this.emailSender = emailSender;
+        this.audit = audit;
+        this.clock = clock;
     }
 
     // --- matches ---
@@ -83,7 +88,7 @@ class MatchService {
         matches.insert(id, tenantId, teamId, competition, opponent.trim(), location, courtId, matchDate,
                 isHome == null ? true : isHome,
                 Rules.parse(MatchStatus.class, status, "Estado", MatchStatus.DEFAULT).name(), user.id());
-        matches.audit(tenantId, user.id(), "MATCH_CREATED", id);
+        audit.record(tenantId, user.id(), "MATCH_CREATED", "match", id);
         return matchView(matches.findById(tenantId, id).orElseThrow(MatchService::matchNotFound));
     }
 
@@ -105,7 +110,7 @@ class MatchService {
                         : Rules.parse(MatchStatus.class, status, "Estado").name())) {
             throw matchNotFound();
         }
-        matches.audit(tenantId, user.id(), "MATCH_UPDATED", id);
+        audit.record(tenantId, user.id(), "MATCH_UPDATED", "match", id);
         return matchView(matches.findById(tenantId, id).orElseThrow(MatchService::matchNotFound));
     }
 
@@ -116,7 +121,7 @@ class MatchService {
         teamAccess.requireVisible(tenantId, row.teamId(), user);
         Rules.requireWritable(user);
         if (!matches.anonymize(tenantId, id)) throw matchNotFound();
-        matches.audit(tenantId, user.id(), "MATCH_ANONYMIZED", id);
+        audit.record(tenantId, user.id(), "MATCH_ANONYMIZED", "match", id);
     }
 
     // --- set scores ---
@@ -138,7 +143,7 @@ class MatchService {
         Rules.requireWritable(user);
         if (setNumber <= 0) throw Rules.badRequest("Número de set inválido");
         matches.upsertSetScore(tenantId, matchId, setNumber, ourPoints, opponentPoints, user.id());
-        matches.audit(tenantId, user.id(), "MATCH_SET_SCORE_SET", matchId);
+        audit.record(tenantId, user.id(), "MATCH_SET_SCORE_SET", "match", matchId);
     }
 
     @Transactional
@@ -148,7 +153,7 @@ class MatchService {
         teamAccess.requireVisible(tenantId, row.teamId(), user);
         Rules.requireWritable(user);
         if (!matches.deleteSetScore(tenantId, matchId, setNumber)) throw Rules.notFound("Set não encontrado");
-        matches.audit(tenantId, user.id(), "MATCH_SET_SCORE_REMOVED", matchId);
+        audit.record(tenantId, user.id(), "MATCH_SET_SCORE_REMOVED", "match", matchId);
     }
 
     // --- call ups ---
@@ -172,7 +177,7 @@ class MatchService {
         if (!teamAccess.athleteOnTeam(tenantId, row.teamId(), athleteId)) throw Rules.badRequest("Atleta não pertence à equipa");
         if (matches.callUpExists(tenantId, matchId, athleteId)) throw Rules.conflict("Atleta já convocado");
         matches.insertCallUp(tenantId, matchId, athleteId, user.id());
-        matches.audit(tenantId, user.id(), "MATCH_CALLUP_ADDED", matchId);
+        audit.record(tenantId, user.id(), "MATCH_CALLUP_ADDED", "match", matchId);
         notifyCallUp(tenantId, row, athleteId);
     }
 
@@ -183,7 +188,7 @@ class MatchService {
         teamAccess.requireVisible(tenantId, row.teamId(), user);
         Rules.requireWritable(user);
         if (!matches.deleteCallUp(tenantId, matchId, athleteId)) throw Rules.notFound("Convocatória não encontrada");
-        matches.audit(tenantId, user.id(), "MATCH_CALLUP_REMOVED", matchId);
+        audit.record(tenantId, user.id(), "MATCH_CALLUP_REMOVED", "match", matchId);
     }
 
     @Transactional
@@ -198,7 +203,7 @@ class MatchService {
         String resp = response == null ? null : response.trim().toUpperCase(java.util.Locale.ROOT);
         if (resp != null && Rules.find(CallUpResponse.class, resp).isEmpty()) throw Rules.badRequest("Resposta inválida");
         matches.updateCallUpResponse(tenantId, matchId, athleteId, resp, resp == null ? null : Instant.now());
-        matches.audit(tenantId, user.id(), "MATCH_CALLUP_RESPONDED", matchId);
+        audit.record(tenantId, user.id(), "MATCH_CALLUP_RESPONDED", "match", matchId);
     }
 
     // --- helpers ---
@@ -234,7 +239,7 @@ class MatchService {
         String teamName = jdbc.sql("SELECT name FROM team WHERE tenant_id = :t AND id = :id")
                 .param("t", tenantId).param("id", match.teamId())
                 .query(String.class).optional().orElse("equipa");
-        String quando = MATCH_DATE_FORMAT.format(LocalDateTime.ofInstant(match.matchDate(), LISBOA));
+        String quando = MATCH_DATE_FORMAT.format(LocalDateTime.ofInstant(match.matchDate(), clock.getZone()));
         String local = match.isHome() ? "Casa" : "Fora";
         if (match.location() != null && !match.location().isBlank()) local += " (" + match.location() + ")";
         String competicao = match.competition() == null || match.competition().isBlank()

@@ -3,8 +3,6 @@ package pt.voleibol.gestao.teams;
 import java.util.List;
 import java.util.UUID;
 
-import org.springframework.security.core.annotation.AuthenticationPrincipal;
-import org.springframework.security.oauth2.jwt.Jwt;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.RequestMapping;
@@ -26,12 +24,12 @@ class AgeGroupController {
     }
 
     @GetMapping
-    List<AgeGroupService.AgeGroupView> list(@AuthenticationPrincipal Jwt jwt) {
-        return ageGroupService.list(CurrentUser.of(jwt));
+    List<AgeGroupService.AgeGroupView> list(CurrentUser user) {
+        return ageGroupService.list(user);
     }
 
     @GetMapping("/{ageGroupId}")
-    AgeGroupService.AgeGroupView get(@AuthenticationPrincipal Jwt jwt, @PathVariable UUID ageGroupId) {
-        return ageGroupService.get(CurrentUser.of(jwt), ageGroupId);
+    AgeGroupService.AgeGroupView get(CurrentUser user, @PathVariable UUID ageGroupId) {
+        return ageGroupService.get(user, ageGroupId);
     }
 }

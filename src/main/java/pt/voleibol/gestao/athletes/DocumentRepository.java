@@ -119,10 +119,6 @@ class DocumentRepository {
                 .param("tenant", tenantId).param("id", athleteId));
     }
 
-    void audit(UUID tenantId, UUID actorId, String action, UUID entityId) {
-        Db.audit(jdbc, tenantId, actorId, action, "document", entityId);
-    }
-
     private static DocumentRow map(java.sql.ResultSet rs, int rowNum) throws java.sql.SQLException {
         return new DocumentRow(Db.uuid(rs, "id"), Db.uuid(rs, "athlete_id"), rs.getString("type"),
                 rs.getString("file_name"), rs.getString("file_url"), Db.date(rs, "valid_until"),

@@ -342,10 +342,6 @@ class TeamRepository {
                 .query((rs, i) -> mapEligibility(rs, "plantel da equipa")).list();
     }
 
-    void audit(UUID tenantId, UUID actorId, String action, UUID teamId) {
-        Db.audit(jdbc, tenantId, actorId, action, "team", teamId);
-    }
-
     private static TeamRow map(java.sql.ResultSet rs, int rowNum) throws java.sql.SQLException {
         return new TeamRow(Db.uuid(rs, "id"), rs.getString("name"), rs.getString("status"), Db.uuid(rs, "season_id"),
                 Db.uuid(rs, "age_group_id"), Db.instant(rs, "created_at"),

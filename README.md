@@ -836,6 +836,11 @@ O workflow `.github/workflows/ci.yml` tem quatro jobs:
 | `image`         | depois dos testes                               | valida o `Dockerfile` em pull requests; em `master` publica `ghcr.io/<owner>/<repo>:<sha>` e `:staging` no GHCR                |
 | `deploy-staging`| só em `master`                                  | depois de `image` e `frontend`; por SSH, atualiza a stack Docker Compose no servidor e espera pelos healthchecks; falha com os logs se a app não ficar saudável |
 
+O deploy de staging está desligado por omissão: o job `deploy-staging` fica *skipped* enquanto não
+existir a variável de repositório `STAGING_ENABLED` com o valor `true`. Para o ligar, criar essa
+variável em *Settings > Secrets and variables > Actions > Variables* e configurar no environment
+`staging` os secrets e variables que o passo de validação exige (tabelas abaixo).
+
 A imagem é multi-stage (`Dockerfile`): build com Maven/JDK 25 e runtime `eclipse-temurin:25-jre-alpine`, com
 utilizador sem privilégios e healthcheck em `/api/v1/ping`. A tag `:<sha>` é imutável e é a usada no deploy;
 `:staging` aponta sempre para a última versão de `master`.

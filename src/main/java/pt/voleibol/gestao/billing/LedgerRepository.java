@@ -39,10 +39,6 @@ class LedgerRepository {
                 .param("t", tenantId).param("id", id).update() == 1;
     }
 
-    void audit(UUID tenantId, UUID actorId, String action, UUID entityId) {
-        Db.audit(jdbc, tenantId, actorId, action, "ledger_entry", entityId);
-    }
-
     private static Row map(java.sql.ResultSet rs, int n) throws java.sql.SQLException {
         return new Row(Db.uuid(rs, "id"), rs.getString("type"), rs.getString("category"),
                 rs.getLong("amount_cents"), Db.date(rs, "entry_date"),

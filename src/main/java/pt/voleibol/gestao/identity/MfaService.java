@@ -25,6 +25,7 @@ import org.springframework.security.oauth2.jwt.NimbusJwtDecoder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import pt.voleibol.gestao.shared.AuditLog;
 import pt.voleibol.gestao.shared.Role;
 import pt.voleibol.gestao.shared.Rules;
 
@@ -80,6 +81,7 @@ class MfaService {
     private final JwtEncoder jwtEncoder;
     private final JwtProperties jwtProperties;
     private final MfaProperties properties;
+    private final AuditLog audit;
     /**
      * Descodificador próprio: o descodificador dos tokens de acesso recusa o claim {@code purpose},
      * e é isso que impede usar um desafio como se fosse um token de sessão.
@@ -87,12 +89,14 @@ class MfaService {
     private final NimbusJwtDecoder challengeDecoder;
 
     MfaService(MfaRepository repository, PasswordEncoder passwordEncoder, JwtEncoder jwtEncoder,
-               SecretKey jwtSecretKey, JwtProperties jwtProperties, MfaProperties properties) {
+               SecretKey jwtSecretKey, JwtProperties jwtProperties, MfaProperties properties,
+               AuditLog audit) {
         this.repository = repository;
         this.passwordEncoder = passwordEncoder;
         this.jwtEncoder = jwtEncoder;
         this.jwtProperties = jwtProperties;
         this.properties = properties;
+        this.audit = audit;
         this.challengeDecoder = NimbusJwtDecoder.withSecretKey(jwtSecretKey)
                 .macAlgorithm(MacAlgorithm.HS256)
                 .build();
@@ -145,7 +149,7 @@ class MfaService {
         if (!repository.startEnrollment(userId, secret)) {
             throw Rules.conflict("Não foi possível iniciar a inscrição do MFA");
         }
-        repository.audit(tenantId, userId, "MFA_ENROLLMENT_STARTED");
+        audit.record(tenantId, userId, "MFA_ENROLLMENT_STARTED");
         return new Enrollment(secret, otpauthUri(state.email(), secret));
     }
 
@@ -161,14 +165,14 @@ class MfaService {
         OptionalLong step = Totp.verify(found.get().secret(), code, Instant.now().getEpochSecond(),
                 properties.timeStepSkew());
         if (step.isEmpty() || !repository.activate(userId)) {
-            repository.audit(tenantId, userId, "MFA_ENROLLMENT_FAILED");
+            audit.record(tenantId, userId, "MFA_ENROLLMENT_FAILED");
             return Optional.empty();
         }
         // O código que confirmou a inscrição também não pode ser reapresentado no login seguinte.
         repository.acceptStep(userId, step.getAsLong());
 
         List<String> codes = issueRecoveryCodes(userId);
-        repository.audit(tenantId, userId, "MFA_ENROLLED");
+        audit.record(tenantId, userId, "MFA_ENROLLED");
         return Optional.of(new Activation(codes));
     }
 
@@ -177,10 +181,10 @@ class MfaService {
     boolean verify(UUID tenantId, UUID userId, String code) {
         Optional<MfaRepository.State> found = repository.findState(userId);
         if (found.isEmpty() || !found.get().enabled() || !codeAccepted(userId, found.get(), code)) {
-            repository.audit(tenantId, userId, "MFA_VERIFICATION_FAILED");
+            audit.record(tenantId, userId, "MFA_VERIFICATION_FAILED");
             return false;
         }
-        repository.audit(tenantId, userId, "MFA_VERIFIED");
+        audit.record(tenantId, userId, "MFA_VERIFIED");
         return true;
     }
 
@@ -192,12 +196,12 @@ class MfaService {
         if (account.isEmpty() || state.isEmpty() || !state.get().enabled()
                 || !passwordMatches(password, account.get().passwordHash())
                 || !codeAccepted(userId, state.get(), code)) {
-            repository.audit(tenantId, userId, "MFA_DISABLE_FAILED");
+            audit.record(tenantId, userId, "MFA_DISABLE_FAILED");
             return false;
         }
         repository.clear(userId);
         repository.deleteRecoveryCodes(userId);
-        repository.audit(tenantId, userId, "MFA_DISABLED");
+        audit.record(tenantId, userId, "MFA_DISABLED");
         return true;
     }
 

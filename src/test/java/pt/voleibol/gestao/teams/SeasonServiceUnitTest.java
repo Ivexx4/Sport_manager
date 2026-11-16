@@ -16,6 +16,7 @@ import org.springframework.dao.DuplicateKeyException;
 import org.springframework.http.HttpStatus;
 import org.springframework.web.server.ResponseStatusException;
 
+import pt.voleibol.gestao.shared.AuditLog;
 import pt.voleibol.gestao.shared.CurrentUser;
 import pt.voleibol.gestao.shared.Role;
 import pt.voleibol.gestao.tenancy.TenantContext;
@@ -35,7 +36,8 @@ class SeasonServiceUnitTest {
 
     @Test
     void validaAcessoTenantEPeriodo() {
-        SeasonService service = new SeasonService(mock(SeasonRepository.class), mock(SeasonEligibility.class));
+        SeasonService service = new SeasonService(mock(SeasonRepository.class), mock(SeasonEligibility.class),
+                mock(AuditLog.class));
         assertStatus(() -> service.list(user()), HttpStatus.FORBIDDEN);
         TenantContext.set(TENANT);
         assertStatus(() -> service.create(user(Role.ATLETA), "x", null, null, null), HttpStatus.FORBIDDEN);
@@ -50,7 +52,7 @@ class SeasonServiceUnitTest {
         SeasonRepository repository = mock(SeasonRepository.class);
         when(repository.nameExists(TENANT, "Nova", null)).thenReturn(false);
         when(repository.findById(eq(TENANT), any())).thenReturn(Optional.of(ROW));
-        SeasonService service = new SeasonService(repository, mock(SeasonEligibility.class));
+        SeasonService service = new SeasonService(repository, mock(SeasonEligibility.class), mock(AuditLog.class));
 
         assertThat(service.create(user(Role.ADMIN), " Nova ", null, null, null).name()).isEqualTo("2025/26");
         verify(repository).insert(any(), eq(TENANT), argThat(d -> d.isActive() && d.name().equals("Nova")), eq(ACTOR));
@@ -67,7 +69,7 @@ class SeasonServiceUnitTest {
         TenantContext.set(TENANT);
         SeasonRepository repository = mock(SeasonRepository.class);
         when(repository.findById(TENANT, ID)).thenReturn(Optional.of(ROW));
-        SeasonService service = new SeasonService(repository, mock(SeasonEligibility.class));
+        SeasonService service = new SeasonService(repository, mock(SeasonEligibility.class), mock(AuditLog.class));
 
         when(repository.nameExists(TENANT, "Atualizada", ID)).thenReturn(false);
         when(repository.update(eq(TENANT), eq(ID), any())).thenReturn(true);
@@ -94,7 +96,8 @@ class SeasonServiceUnitTest {
         SeasonRepository repository = mock(SeasonRepository.class);
         when(repository.list(TENANT)).thenReturn(java.util.List.of(ROW));
         when(repository.findById(TENANT, ID)).thenReturn(Optional.empty());
-        SeasonService service = new SeasonService(repository, mock(SeasonEligibility.class));
+        AuditLog audit = mock(AuditLog.class);
+        SeasonService service = new SeasonService(repository, mock(SeasonEligibility.class), audit);
 
         assertThat(service.list(user(Role.ATLETA))).hasSize(1);
         assertStatus(() -> service.get(user(Role.ATLETA), ID), HttpStatus.NOT_FOUND);
@@ -102,7 +105,7 @@ class SeasonServiceUnitTest {
         assertStatus(() -> service.delete(user(Role.ADMIN), ID), HttpStatus.NOT_FOUND);
         when(repository.anonymize(TENANT, ID)).thenReturn(true);
         service.delete(user(Role.ADMIN), ID);
-        verify(repository).audit(TENANT, ACTOR, "SEASON_ANONYMIZED", ID);
+        verify(audit).record(TENANT, ACTOR, "SEASON_ANONYMIZED", "season", ID);
     }
 
     private static CurrentUser user(Role... roles) {

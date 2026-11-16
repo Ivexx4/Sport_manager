@@ -1,0 +1,32 @@
+/* Base: tipografia, reset e utilitários de texto. */
+:root {
+  font-family: "DM Sans", sans-serif;
+  color: #17243b;
+  background: #f7f8fa;
+  font-synthesis: none;
+}
+* {
+  box-sizing: border-box;
+}
+body {
+  margin: 0;
+  min-width: 320px;
+}
+button,
+input,
+select {
+  font: inherit;
+}
+button {
+  cursor: pointer;
+}
+.muted {
+  color: #8490a0;
+  margin: 0;
+  font-size: 13px;
+}
+.error-text {
+  color: #cf5e3a;
+  margin: 0;
+  font-size: 11px;
+}

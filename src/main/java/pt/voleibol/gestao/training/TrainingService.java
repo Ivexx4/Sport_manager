@@ -8,6 +8,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.server.ResponseStatusException;
 
+import pt.voleibol.gestao.shared.AuditLog;
 import pt.voleibol.gestao.shared.CurrentUser;
 import pt.voleibol.gestao.shared.Rules;
 import pt.voleibol.gestao.teams.TeamAccess;
@@ -28,11 +29,14 @@ class TrainingService {
     private final VenueRepository venues;
     private final TrainingSessionRepository sessions;
     private final TeamAccess teamAccess;
+    private final AuditLog audit;
 
-    TrainingService(VenueRepository venues, TrainingSessionRepository sessions, TeamAccess teamAccess) {
+    TrainingService(VenueRepository venues, TrainingSessionRepository sessions, TeamAccess teamAccess,
+                    AuditLog audit) {
         this.venues = venues;
         this.sessions = sessions;
         this.teamAccess = teamAccess;
+        this.audit = audit;
     }
 
     // --- venues ---
@@ -58,7 +62,7 @@ class TrainingService {
         if (venues.nameExists(tenantId, normalized, null)) throw Rules.conflict("Já existe um local com este nome");
         UUID id = UUID.randomUUID();
         venues.insert(id, tenantId, normalized, address, user.id());
-        venues.audit(tenantId, user.id(), "VENUE_CREATED", id);
+        audit.record(tenantId, user.id(), "VENUE_CREATED", "venue", id);
         return venueView(venues.findById(tenantId, id).orElseThrow(TrainingService::venueNotFound));
     }
 
@@ -70,7 +74,7 @@ class TrainingService {
         String normalized = Rules.requiredText(name);
         if (venues.nameExists(tenantId, normalized, id)) throw Rules.conflict("Já existe um local com este nome");
         if (!venues.update(tenantId, id, normalized, address)) throw venueNotFound();
-        venues.audit(tenantId, user.id(), "VENUE_UPDATED", id);
+        audit.record(tenantId, user.id(), "VENUE_UPDATED", "venue", id);
         return venueView(venues.findById(tenantId, id).orElseThrow(TrainingService::venueNotFound));
     }
 
@@ -79,7 +83,7 @@ class TrainingService {
         UUID tenantId = Rules.tenant();
         Rules.requireManager(user);
         if (!venues.anonymize(tenantId, id)) throw venueNotFound();
-        venues.audit(tenantId, user.id(), "VENUE_ANONYMIZED", id);
+        audit.record(tenantId, user.id(), "VENUE_ANONYMIZED", "venue", id);
     }
 
     // --- sessions ---
@@ -114,7 +118,7 @@ class TrainingService {
         UUID id = UUID.randomUUID();
         sessions.insert(id, tenantId, teamId, courtId, startTime, endTime, recurrence, notes,
                 Rules.parse(TrainingStatus.class, status, "Estado", TrainingStatus.DEFAULT).name(), user.id());
-        sessions.audit(tenantId, user.id(), "TRAINING_SESSION_CREATED", id);
+        audit.record(tenantId, user.id(), "TRAINING_SESSION_CREATED", "training_session", id);
         return sessionView(sessions.findById(tenantId, id).orElseThrow(TrainingService::sessionNotFound));
     }
 
@@ -137,7 +141,7 @@ class TrainingService {
                         : Rules.parse(TrainingStatus.class, status, "Estado").name())) {
             throw sessionNotFound();
         }
-        sessions.audit(tenantId, user.id(), "TRAINING_SESSION_UPDATED", id);
+        audit.record(tenantId, user.id(), "TRAINING_SESSION_UPDATED", "training_session", id);
         return sessionView(sessions.findById(tenantId, id).orElseThrow(TrainingService::sessionNotFound));
     }
 
@@ -149,7 +153,7 @@ class TrainingService {
         teamAccess.requireVisible(tenantId, row.teamId(), user);
         Rules.requireWritable(user);
         if (!sessions.anonymize(tenantId, id)) throw sessionNotFound();
-        sessions.audit(tenantId, user.id(), "TRAINING_SESSION_ANONYMIZED", id);
+        audit.record(tenantId, user.id(), "TRAINING_SESSION_ANONYMIZED", "training_session", id);
     }
 
     // --- attendance ---
@@ -176,7 +180,7 @@ class TrainingService {
         if (!teamAccess.athleteOnTeam(tenantId, row.teamId(), athleteId)) throw Rules.badRequest("Atleta não pertence à equipa");
         String st = Rules.parse(AttendanceStatus.class, status, "Estado de presença", AttendanceStatus.DEFAULT).name();
         sessions.upsertAttendance(tenantId, sessionId, athleteId, st, justification, user.id());
-        sessions.audit(tenantId, user.id(), "ATTENDANCE_SET", sessionId);
+        audit.record(tenantId, user.id(), "ATTENDANCE_SET", "training_session", sessionId);
     }
 
     @Transactional
@@ -187,7 +191,7 @@ class TrainingService {
         teamAccess.requireVisible(tenantId, row.teamId(), user);
         Rules.requireWritable(user);
         if (!sessions.deleteAttendance(tenantId, sessionId, athleteId)) throw Rules.notFound("Presença não encontrada");
-        sessions.audit(tenantId, user.id(), "ATTENDANCE_REMOVED", sessionId);
+        audit.record(tenantId, user.id(), "ATTENDANCE_REMOVED", "training_session", sessionId);
     }
 
     // --- helpers ---

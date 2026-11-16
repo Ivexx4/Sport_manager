@@ -17,6 +17,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.server.ResponseStatusException;
 
+import pt.voleibol.gestao.shared.AuditLog;
 import pt.voleibol.gestao.shared.CurrentUser;
 import pt.voleibol.gestao.shared.Role;
 import pt.voleibol.gestao.shared.Rules;
@@ -40,14 +41,17 @@ class AccountService {
     private final PasswordEncoder passwordEncoder;
     private final EmailSender emailSender;
     private final String webUrlTemplate;
+    private final AuditLog audit;
 
     AccountService(AccountRepository accounts, AuthRepository auth, PasswordEncoder passwordEncoder,
-                   EmailSender emailSender, @Value("${app.links.web-url-template}") String webUrlTemplate) {
+                   EmailSender emailSender, @Value("${app.links.web-url-template}") String webUrlTemplate,
+                   AuditLog audit) {
         this.accounts = accounts;
         this.auth = auth;
         this.passwordEncoder = passwordEncoder;
         this.emailSender = emailSender;
         this.webUrlTemplate = webUrlTemplate;
+        this.audit = audit;
     }
 
     // --- convites ---
@@ -71,7 +75,7 @@ class AccountService {
         String rawToken = OpaqueTokens.newToken();
         accounts.insertInvitation(tenantId, mail, name.trim(), String.join(",", codes),
                 OpaqueTokens.hash(rawToken), inviter.id(), Instant.now().plus(INVITATION_TTL));
-        auth.audit(tenantId, inviter.id(), "USER_INVITED");
+        audit.record(tenantId, inviter.id(), "USER_INVITED");
 
         AccountRepository.TenantInfo tenant = accounts.findTenant(tenantId).orElseThrow();
         String link = link(tenant.slug(), "/accept-invitation", rawToken);
@@ -115,7 +119,7 @@ class AccountService {
         if (!accounts.markInvitationAccepted(tenantId, invitation.id())) throw invalidLink();
         Arrays.stream(invitation.roles().split(","))
                 .forEach(role -> accounts.upsertMembership(tenantId, userId, role, invitation.invitedBy()));
-        auth.audit(tenantId, userId, "INVITATION_ACCEPTED");
+        audit.record(tenantId, userId, "INVITATION_ACCEPTED");
     }
 
     // --- recuperação de password ---
@@ -139,7 +143,7 @@ class AccountService {
 
         String rawToken = OpaqueTokens.newToken();
         accounts.insertResetToken(tenantId, userId, OpaqueTokens.hash(rawToken), Instant.now().plus(RESET_TTL));
-        auth.audit(tenantId, userId, "PASSWORD_RESET_REQUESTED");
+        audit.record(tenantId, userId, "PASSWORD_RESET_REQUESTED");
 
         AccountRepository.TenantInfo tenant = accounts.findTenant(tenantId).orElseThrow();
         String body = """
@@ -168,7 +172,7 @@ class AccountService {
         }
         accounts.invalidateResetTokens(tenantId, token.userId());
         auth.revokeAllForUser(tenantId, token.userId());
-        auth.audit(tenantId, token.userId(), "PASSWORD_RESET");
+        audit.record(tenantId, token.userId(), "PASSWORD_RESET");
     }
 
     /** Devolve false se a password atual estiver errada (o controlador responde 400, e a tentativa fica auditada). */
@@ -180,7 +184,7 @@ class AccountService {
         boolean currentOk = !hash.isBlank() && PasswordPolicy.fitsBcrypt(currentPassword)
                 && passwordEncoder.matches(currentPassword, hash);
         if (!currentOk) {
-            auth.audit(tenantId, userId, "PASSWORD_CHANGE_FAILED");
+            audit.record(tenantId, userId, "PASSWORD_CHANGE_FAILED");
             return false;
         }
         requireValidPassword(newPassword, null);
@@ -188,7 +192,7 @@ class AccountService {
 
         if (!accounts.setPassword(userId, passwordEncoder.encode(newPassword))) throw Rules.forbidden();
         auth.revokeAllForUser(tenantId, userId);
-        auth.audit(tenantId, userId, "PASSWORD_CHANGED");
+        audit.record(tenantId, userId, "PASSWORD_CHANGED");
         return true;
     }
 
@@ -220,7 +224,7 @@ class AccountService {
             throw Rules.conflict("O clube tem de manter pelo menos um administrador ativo");
         accounts.disableAllMemberships(tenantId, targetUserId);
         auth.revokeAllForUser(tenantId, targetUserId);
-        auth.audit(tenantId, actor.id(), "MEMBER_DISABLED");
+        audit.record(tenantId, actor.id(), "MEMBER_DISABLED");
     }
 
     @Transactional
@@ -241,7 +245,7 @@ class AccountService {
         }
         if (!accounts.removeRole(tenantId, targetUserId, target.name())) throw Rules.notFound();
         if (auth.findActiveRoles(tenantId, targetUserId).isEmpty()) auth.revokeAllForUser(tenantId, targetUserId);
-        auth.audit(tenantId, actor.id(), "MEMBER_ROLE_REMOVED");
+        audit.record(tenantId, actor.id(), "MEMBER_ROLE_REMOVED");
     }
 
     // --- auxiliares ---

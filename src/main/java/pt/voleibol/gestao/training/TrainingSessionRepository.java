@@ -133,10 +133,6 @@ class TrainingSessionRepository {
                 .update() == 1;
     }
 
-    void audit(UUID tenantId, UUID actorId, String action, UUID entityId) {
-        Db.audit(jdbc, tenantId, actorId, action, "training_session", entityId);
-    }
-
     private static SessionRow mapSession(java.sql.ResultSet rs, int rowNum) throws java.sql.SQLException {
         return new SessionRow(Db.uuid(rs, "id"), Db.uuid(rs, "team_id"), Db.uuid(rs, "court_id"),
                 Db.instant(rs, "start_time"), Db.instant(rs, "end_time"), rs.getString("recurrence"),

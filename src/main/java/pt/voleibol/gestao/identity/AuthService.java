@@ -16,6 +16,7 @@ import org.springframework.security.oauth2.jwt.JwtEncoderParameters;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import pt.voleibol.gestao.shared.AuditLog;
 import pt.voleibol.gestao.shared.Role;
 import pt.voleibol.gestao.shared.Rules;
 
@@ -47,16 +48,18 @@ class AuthService {
     private final PasswordEncoder passwordEncoder;
     private final JwtEncoder jwtEncoder;
     private final JwtProperties properties;
+    private final AuditLog audit;
     /** Hash de uma password que ninguém conhece: mantém o tempo de resposta quando o email não existe. */
     private final String dummyHash;
 
     AuthService(AuthRepository repository, MfaService mfaService, PasswordEncoder passwordEncoder,
-                JwtEncoder jwtEncoder, JwtProperties properties) {
+                JwtEncoder jwtEncoder, JwtProperties properties, AuditLog audit) {
         this.repository = repository;
         this.mfaService = mfaService;
         this.passwordEncoder = passwordEncoder;
         this.jwtEncoder = jwtEncoder;
         this.properties = properties;
+        this.audit = audit;
         this.dummyHash = passwordEncoder.encode(OpaqueTokens.newToken());
     }
 
@@ -77,20 +80,20 @@ class AuthService {
 
         if (roles.isEmpty()) {
             // Mesma resposta para email desconhecido, password errada ou sem papel neste clube.
-            repository.audit(tenantId, user.map(AuthRepository.UserRow::id).orElse(null), "LOGIN_FAILED");
+            audit.record(tenantId, user.map(AuthRepository.UserRow::id).orElse(null), "LOGIN_FAILED");
             return Optional.empty();
         }
 
         UUID userId = user.get().id();
         Optional<MfaService.Challenge> challenge = mfaService.gate(tenantId, userId, roles);
         if (challenge.isPresent()) {
-            repository.audit(tenantId, userId,
+            audit.record(tenantId, userId,
                     challenge.get().flow() == MfaService.Flow.ENROLL ? "MFA_ENROLLMENT_REQUIRED"
                             : "MFA_CHALLENGE_ISSUED");
             return Optional.of(new LoginOutcome(null, challenge.get()));
         }
 
-        repository.audit(tenantId, userId, "LOGIN_SUCCESS");
+        audit.record(tenantId, userId, "LOGIN_SUCCESS");
         return Optional.of(new LoginOutcome(issueTokens(tenantId, userId, roles), null));
     }
 
@@ -106,7 +109,7 @@ class AuthService {
         Set<Role> roles = Role.fromAll(repository.findActiveRoles(tenantId, userId));
         if (roles.isEmpty() || !mfaService.verify(tenantId, userId, code)) return Optional.empty();
 
-        repository.audit(tenantId, userId, "LOGIN_SUCCESS");
+        audit.record(tenantId, userId, "LOGIN_SUCCESS");
         return Optional.of(issueTokens(tenantId, userId, roles));
     }
 
@@ -124,7 +127,7 @@ class AuthService {
         Optional<MfaService.Activation> activation = mfaService.confirmEnrollment(tenantId, userId, code);
         if (activation.isEmpty()) return Optional.empty();
 
-        repository.audit(tenantId, userId, "LOGIN_SUCCESS");
+        audit.record(tenantId, userId, "LOGIN_SUCCESS");
         return Optional.of(new Enrollment(issueTokens(tenantId, userId, roles),
                 activation.get().recoveryCodes()));
     }
@@ -148,7 +151,7 @@ class AuthService {
         boolean usedAlready = token.revoked() || !repository.revokeIfActive(tenantId, token.id());
         if (usedAlready) {
             repository.revokeAllForUser(tenantId, token.userId());
-            repository.audit(tenantId, token.userId(), "REFRESH_TOKEN_REUSE");
+            audit.record(tenantId, token.userId(), "REFRESH_TOKEN_REUSE");
             return Optional.empty();
         }
         if (token.expiresAt().isBefore(Instant.now())) return Optional.empty();
@@ -163,7 +166,7 @@ class AuthService {
     void logout(String rawRefreshToken) {
         UUID tenantId = Rules.tenant();
         repository.findRefreshToken(tenantId, OpaqueTokens.hash(rawRefreshToken)).ifPresent(token -> {
-            if (repository.revokeIfActive(tenantId, token.id())) repository.audit(tenantId, token.userId(), "LOGOUT");
+            if (repository.revokeIfActive(tenantId, token.id())) audit.record(tenantId, token.userId(), "LOGOUT");
         });
     }
 

@@ -1,0 +1,74 @@
+/* Atletas: barra de pesquisa e células de pessoa. */
+.toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin: -12px 0 15px;
+}
+.search-box {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  background: white;
+  border: 1px solid #e4e8ee;
+  border-radius: 7px;
+  color: #8e9aaa;
+  padding: 0 12px;
+  width: 300px;
+}
+.search-box input {
+  border: 0;
+  outline: 0;
+  padding: 10px 0;
+  width: 100%;
+  font-size: 12px;
+}
+.toolbar-count {
+  color: #8995a4;
+  font-size: 11px;
+}
+.person-cell {
+  display: flex;
+  align-items: center;
+  gap: 11px;
+}
+.person-cell small {
+  display: block;
+  color: #9aa5b2;
+  font-size: 10px;
+  margin-top: 3px;
+}
+.person-avatar {
+  display: grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  border-radius: 9px;
+  background: #f7dfd4;
+  color: #c45c36;
+  font-size: 10px;
+  font-weight: 700;
+}
+.upload-box {
+  border: 1px dashed #cbd4df;
+  border-radius: 9px;
+  padding: 30px;
+  display: grid;
+  place-items: center;
+  gap: 8px;
+  color: #e86a33;
+  position: relative;
+}
+.upload-box strong {
+  color: #33435a;
+  font-size: 13px;
+}
+.upload-box small {
+  color: #929eac;
+}
+.upload-box input {
+  position: absolute;
+  inset: 0;
+  opacity: 0;
+  cursor: pointer;
+}

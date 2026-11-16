@@ -180,6 +180,67 @@ class BillingFlowTest extends FlowTestSupport {
         assertThat(contarAuditoria("LEDGER_ENTRY_ANONYMIZED")).isPositive();
     }
 
+    // --- pagamentos ---
+
+    @Test
+    void pagamentoParcialMantemCobrancaPendente() throws Exception {
+        String admin = acesso(HOST_A, ADMIN);
+        // COBRANCA_A vale 5000 e já tem um pagamento semeado de 1000.
+        assertThat(contar("SELECT count(*) FROM charge WHERE id = ? AND status = 'PENDING'", COBRANCA_A))
+                .isEqualTo(1);
+        int antes = contar("SELECT count(*) FROM audit_log WHERE action = 'CHARGE_STATUS_UPDATED'"
+                + " AND entity_id = ?", COBRANCA_A);
+
+        mvc.perform(post("/api/v1/payments")
+                        .header("Authorization", "Bearer " + admin).with(host(HOST_A))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"chargeId\":\"" + COBRANCA_A + "\",\"amountCents\":1500,"
+                                + "\"method\":\"CASH\"}"))
+                .andExpect(status().isCreated());
+
+        // 1000 + 1500 = 2500 < 5000: continua pendente.
+        assertThat(contar("SELECT count(*) FROM payment WHERE charge_id = ?", COBRANCA_A)).isEqualTo(2);
+        assertThat(contar("SELECT count(*) FROM charge WHERE id = ? AND status = 'PENDING'", COBRANCA_A))
+                .isEqualTo(1);
+        assertThat(contar("SELECT count(*) FROM audit_log WHERE action = 'CHARGE_STATUS_UPDATED'"
+                + " AND entity_id = ?", COBRANCA_A)).isEqualTo(antes);
+    }
+
+    @Test
+    void pagamentoTotalMarcaCobrancaPaga() throws Exception {
+        String admin = acesso(HOST_A, ADMIN);
+        // COBRANCA_OUTRA vale 5000 e não tem pagamentos semeados.
+        int antes = contar("SELECT count(*) FROM audit_log WHERE action = 'CHARGE_STATUS_UPDATED'"
+                + " AND entity_id = ?", COBRANCA_OUTRA);
+
+        mvc.perform(post("/api/v1/payments")
+                        .header("Authorization", "Bearer " + admin).with(host(HOST_A))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"chargeId\":\"" + COBRANCA_OUTRA + "\",\"amountCents\":5000,"
+                                + "\"method\":\"TRANSFER\"}"))
+                .andExpect(status().isCreated());
+
+        assertThat(contar("SELECT count(*) FROM charge WHERE id = ? AND status = 'PAID'", COBRANCA_OUTRA))
+                .isEqualTo(1);
+        String pagas = mvc.perform(get("/api/v1/charges").param("status", "PAID")
+                        .header("Authorization", "Bearer " + admin).with(host(HOST_A)))
+                .andExpect(status().isOk()).andReturn().getResponse().getContentAsString();
+        assertThat(ids(pagas)).contains(COBRANCA_OUTRA);
+        assertThat(contar("SELECT count(*) FROM audit_log WHERE action = 'CHARGE_STATUS_UPDATED'"
+                + " AND entity_id = ?", COBRANCA_OUTRA)).isEqualTo(antes + 1);
+
+        // Recebido mais do que o valor em dívida: a cobrança já está paga e não volta a transitar.
+        mvc.perform(post("/api/v1/payments")
+                        .header("Authorization", "Bearer " + admin).with(host(HOST_A))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"chargeId\":\"" + COBRANCA_OUTRA + "\",\"amountCents\":500}"))
+                .andExpect(status().isCreated());
+        assertThat(contar("SELECT count(*) FROM charge WHERE id = ? AND status = 'PAID'", COBRANCA_OUTRA))
+                .isEqualTo(1);
+        assertThat(contar("SELECT count(*) FROM audit_log WHERE action = 'CHARGE_STATUS_UPDATED'"
+                + " AND entity_id = ?", COBRANCA_OUTRA)).isEqualTo(antes + 1);
+    }
+
     // --- geração automática ---
 
     @Test

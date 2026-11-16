@@ -11,6 +11,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.server.ResponseStatusException;
 
+import pt.voleibol.gestao.shared.AuditLog;
 import pt.voleibol.gestao.shared.CurrentUser;
 import pt.voleibol.gestao.shared.Rules;
 
@@ -27,10 +28,12 @@ class SeasonService {
 
     private final SeasonRepository seasons;
     private final SeasonEligibility eligibility;
+    private final AuditLog audit;
 
-    SeasonService(SeasonRepository seasons, SeasonEligibility eligibility) {
+    SeasonService(SeasonRepository seasons, SeasonEligibility eligibility, AuditLog audit) {
         this.seasons = seasons;
         this.eligibility = eligibility;
+        this.audit = audit;
     }
 
     @Transactional(readOnly = true)
@@ -68,7 +71,7 @@ class SeasonService {
         } catch (DuplicateKeyException e) {
             throw Rules.conflict("Já existe uma época com este nome");
         }
-        seasons.audit(tenantId, user.id(), "SEASON_CREATED", id);
+        audit.record(tenantId, user.id(), "SEASON_CREATED", "season", id);
         return view(seasons.findById(tenantId, id).orElseThrow(SeasonService::notFound));
     }
 
@@ -102,7 +105,7 @@ class SeasonService {
         // Mudar a data de referência recalcula a idade de todos os atletas da época: a validação corre
         // depois da escrita, dentro da transação, e desfaz a alteração.
         if (referenceChanged) eligibility.requireSeasonStillValid(tenantId, seasonId);
-        seasons.audit(tenantId, user.id(), "SEASON_UPDATED", seasonId);
+        audit.record(tenantId, user.id(), "SEASON_UPDATED", "season", seasonId);
         return view(seasons.findById(tenantId, seasonId).orElseThrow(SeasonService::notFound));
     }
 
@@ -113,7 +116,7 @@ class SeasonService {
         // Remoção não destrutiva: marca a época como não ativa e anonimiza, preservando as equipas
         // associadas para histórico.
         if (!seasons.anonymize(tenantId, seasonId)) throw notFound();
-        seasons.audit(tenantId, user.id(), "SEASON_ANONYMIZED", seasonId);
+        audit.record(tenantId, user.id(), "SEASON_ANONYMIZED", "season", seasonId);
     }
 
     // --- auxiliares ---

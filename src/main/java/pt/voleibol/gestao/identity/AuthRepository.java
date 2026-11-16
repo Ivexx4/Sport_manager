@@ -105,8 +105,4 @@ class AuthRepository {
                 .param("tenant", tenantId).param("user", userId)
                 .update();
     }
-
-    void audit(UUID tenantId, UUID userId, String action) {
-        Db.audit(jdbc, tenantId, userId, action, "session", userId);
-    }
 }

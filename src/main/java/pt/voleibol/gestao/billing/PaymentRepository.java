@@ -24,16 +24,20 @@ class PaymentRepository {
                 """).param("t", tenantId).param("c", chargeId).query(PaymentRepository::map).list();
     }
 
+    /** Total já recebido para a cobrança (os pagamentos anonimizados não contam). */
+    long sumAmount(UUID tenantId, UUID chargeId) {
+        return jdbc.sql("""
+                SELECT COALESCE(SUM(amount_cents), 0) FROM payment
+                WHERE tenant_id = :t AND charge_id = :c AND anonymized_at IS NULL
+                """).param("t", tenantId).param("c", chargeId).query(Long.class).single();
+    }
+
     void insert(UUID id, UUID tenantId, UUID chargeId, String method, long amountCents, String reference, UUID actorId) {
         jdbc.sql("""
                 INSERT INTO payment (id, tenant_id, charge_id, method, amount_cents, reference, created_by)
                 VALUES (:id,:t,:c,:m,:amount,:ref,:actor)
                 """).param("id", id).param("t", tenantId).param("c", chargeId).param("m", method)
                 .param("amount", amountCents).param("ref", reference).param("actor", actorId).update();
-    }
-
-    void audit(UUID tenantId, UUID actorId, String action, UUID entityId) {
-        Db.audit(jdbc, tenantId, actorId, action, "payment", entityId);
     }
 
     private static Row map(java.sql.ResultSet rs, int n) throws java.sql.SQLException {

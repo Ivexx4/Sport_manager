@@ -84,10 +84,6 @@ class VenueRepository {
                 .update() == 1;
     }
 
-    void audit(UUID tenantId, UUID actorId, String action, UUID entityId) {
-        Db.audit(jdbc, tenantId, actorId, action, "venue", entityId);
-    }
-
     private static VenueRow map(java.sql.ResultSet rs, int rowNum) throws java.sql.SQLException {
         return new VenueRow(Db.uuid(rs, "id"), rs.getString("name"), rs.getString("address"),
                 Db.instant(rs, "created_at"), Db.instant(rs, "updated_at"));

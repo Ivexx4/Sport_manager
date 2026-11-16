@@ -12,8 +12,6 @@ import java.util.UUID;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
-import org.springframework.security.core.annotation.AuthenticationPrincipal;
-import org.springframework.security.oauth2.jwt.Jwt;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
@@ -120,28 +118,28 @@ class MfaController {
     // --- gestão do MFA da própria conta (com sessão) ---
 
     @GetMapping
-    StatusResponse status(@AuthenticationPrincipal Jwt jwt) {
-        MfaService.Status status = mfaService.status(CurrentUser.of(jwt).id());
+    StatusResponse status(CurrentUser user) {
+        MfaService.Status status = mfaService.status(user.id());
         return new StatusResponse(status.enabled(), status.pending(), status.recoveryCodesLeft());
     }
 
     /** Início da inscrição opcional, para quem já tem sessão (por exemplo, um TREINADOR). */
     @PostMapping("/setup")
-    SetupResponse setup(@AuthenticationPrincipal Jwt jwt) {
-        return SetupResponse.from(mfaService.startEnrollment(Rules.tenant(), CurrentUser.of(jwt).id()));
+    SetupResponse setup(CurrentUser user) {
+        return SetupResponse.from(mfaService.startEnrollment(Rules.tenant(), user.id()));
     }
 
     @PostMapping("/activate")
-    ActivationResponse activate(@AuthenticationPrincipal Jwt jwt, @Valid @RequestBody ActivateRequest request) {
+    ActivationResponse activate(CurrentUser user, @Valid @RequestBody ActivateRequest request) {
         MfaService.Activation activation = mfaService
-                .confirmEnrollment(Rules.tenant(), CurrentUser.of(jwt).id(), request.code())
+                .confirmEnrollment(Rules.tenant(), user.id(), request.code())
                 .orElseThrow(() -> Rules.badRequest("Código inválido ou inscrição não iniciada"));
         return new ActivationResponse(activation.recoveryCodes());
     }
 
     @PostMapping("/disable")
-    ResponseEntity<Void> disable(@AuthenticationPrincipal Jwt jwt, @Valid @RequestBody DisableRequest request) {
-        if (!mfaService.disable(Rules.tenant(), CurrentUser.of(jwt).id(), request.password(), request.code())) {
+    ResponseEntity<Void> disable(CurrentUser user, @Valid @RequestBody DisableRequest request) {
+        if (!mfaService.disable(Rules.tenant(), user.id(), request.password(), request.code())) {
             throw Rules.forbidden("Password ou código inválido");
         }
         return ResponseEntity.noContent().build();

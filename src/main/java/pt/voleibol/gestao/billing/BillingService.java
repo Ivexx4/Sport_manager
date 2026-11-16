@@ -1,16 +1,16 @@
 package pt.voleibol.gestao.billing;
 
+import java.time.Clock;
 import java.time.LocalDate;
 import java.time.YearMonth;
-import java.time.ZoneId;
 import java.time.format.DateTimeParseException;
-import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
 
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import pt.voleibol.gestao.shared.AuditLog;
 import pt.voleibol.gestao.shared.CurrentUser;
 import pt.voleibol.gestao.shared.Role;
 import pt.voleibol.gestao.shared.Rules;
@@ -45,14 +45,21 @@ class BillingService {
     private final ChargeRepository charges;
     private final PaymentRepository payments;
     private final LedgerRepository ledger;
+    private final AuditLog audit;
+    private final Clock clock;
+    /** Planeamento da geração automática: colaborador interno, com as mesmas dependências. */
+    private final ChargePlanner planner;
 
-    BillingService(FeePlanRepository feePlans, ChargeRepository charges, PaymentRepository payments, LedgerRepository ledger) {
+    BillingService(FeePlanRepository feePlans, ChargeRepository charges, PaymentRepository payments,
+                   LedgerRepository ledger, AuditLog audit, Clock clock) {
         this.feePlans = feePlans;
         this.charges = charges;
         this.payments = payments;
         this.ledger = ledger;
+        this.audit = audit;
+        this.clock = clock;
+        this.planner = new ChargePlanner(feePlans, charges, audit, clock);
     }
-
 
     private static void requireAmount(long amountCents) {
         if (amountCents < 0) throw Rules.badRequest("Valor inválido");
@@ -66,17 +73,20 @@ class BillingService {
     }
 
     @Transactional
-    FeePlanView createFeePlan(CurrentUser user, String name, UUID seasonId, UUID ageGroupId, long amountCents, String periodicity) {
+    FeePlanView createFeePlan(CurrentUser user, CreateFeePlanCommand command) {
         Rules.requireAny(user, Role.BILLING);
         UUID t = Rules.tenant();
-        String normalizedName = Rules.requiredText(name);
-        requireAmount(amountCents);
-        String period = Rules.parse(FeePeriodicity.class, periodicity, "Periodicidade", FeePeriodicity.DEFAULT).name();
+        String normalizedName = Rules.requiredText(command.name());
+        requireAmount(command.amountCents());
+        String period = Rules.parse(FeePeriodicity.class, command.periodicity(), "Periodicidade",
+                FeePeriodicity.DEFAULT).name();
         if (feePlans.nameExists(t, normalizedName, null)) throw Rules.conflict("Já existe um plano com este nome");
         UUID id = UUID.randomUUID();
-        feePlans.insert(id, t, normalizedName, seasonId, ageGroupId, amountCents, period, user.id());
-        feePlans.audit(t, user.id(), "FEE_PLAN_CREATED", id);
-        return new FeePlanView(id, normalizedName, seasonId, ageGroupId, amountCents, period);
+        feePlans.insert(id, t, normalizedName, command.seasonId(), command.ageGroupId(), command.amountCents(),
+                period, user.id());
+        audit.record(t, user.id(), "FEE_PLAN_CREATED", "fee_plan", id);
+        return new FeePlanView(id, normalizedName, command.seasonId(), command.ageGroupId(),
+                command.amountCents(), period);
     }
 
     @Transactional
@@ -84,7 +94,7 @@ class BillingService {
         Rules.requireAny(user, Role.BILLING);
         UUID t = Rules.tenant();
         if (!feePlans.anonymize(t, id)) throw Rules.notFound("Plano não encontrado");
-        feePlans.audit(t, user.id(), "FEE_PLAN_ANONYMIZED", id);
+        audit.record(t, user.id(), "FEE_PLAN_ANONYMIZED", "fee_plan", id);
     }
 
     @Transactional(readOnly = true)
@@ -96,31 +106,35 @@ class BillingService {
     }
 
     @Transactional
-    PromotionView createPromotion(CurrentUser user, UUID athleteId, UUID feePlanId,
-                                  long amountCents, LocalDate validFrom, LocalDate validTo, String reason,
-                                  String applicationScope, String billingPeriod) {
+    PromotionView createPromotion(CurrentUser user, CreatePromotionCommand command) {
         Rules.requireAny(user, Role.BILLING);
         UUID t = Rules.tenant();
-        requireAmount(amountCents);
-        if (validFrom == null || (validTo != null && validTo.isBefore(validFrom))) throw Rules.badRequest("Período da promoção inválido");
-        String scope = Rules.parse(PromotionScope.class, applicationScope, "Âmbito da promoção",
+        requireAmount(command.amountCents());
+        LocalDate validFrom = command.validFrom();
+        LocalDate validTo = command.validTo();
+        if (validFrom == null || (validTo != null && validTo.isBefore(validFrom)))
+            throw Rules.badRequest("Período da promoção inválido");
+        String scope = Rules.parse(PromotionScope.class, command.applicationScope(), "Âmbito da promoção",
                 PromotionScope.DEFAULT).name();
-        if (PromotionScope.SINGLE.name().equals(scope) && (billingPeriod == null || billingPeriod.isBlank()))
+        boolean single = PromotionScope.SINGLE.name().equals(scope);
+        String billingPeriod = single ? command.billingPeriod() : null;
+        if (single && (billingPeriod == null || billingPeriod.isBlank()))
             throw Rules.badRequest("Período obrigatório para promoção de pagamento único");
-        if (PromotionScope.SINGLE.name().equals(scope)) {
+        if (single) {
             try {
                 YearMonth.parse(billingPeriod);
             } catch (DateTimeParseException ex) {
                 throw Rules.badRequest("Período de pagamento inválido");
             }
         }
-        if (!charges.athleteExists(t, athleteId)) throw Rules.notFound("Atleta não encontrado");
-        if (feePlanId != null && feePlans.findById(t, feePlanId).isEmpty()) throw Rules.notFound("Plano não encontrado");
+        if (!charges.athleteExists(t, command.athleteId())) throw Rules.notFound("Atleta não encontrado");
+        if (command.feePlanId() != null && feePlans.findById(t, command.feePlanId()).isEmpty())
+            throw Rules.notFound("Plano não encontrado");
         UUID id = UUID.randomUUID();
-        feePlans.insertPromotion(id, t, athleteId, feePlanId, amountCents, validFrom, validTo, reason,
-                scope, PromotionScope.SINGLE.name().equals(scope) ? billingPeriod : null, user.id());
-        return new PromotionView(id, athleteId, feePlanId, amountCents, validFrom, validTo, reason, true,
-                scope, PromotionScope.SINGLE.name().equals(scope) ? billingPeriod : null);
+        feePlans.insertPromotion(id, t, command.athleteId(), command.feePlanId(), command.amountCents(),
+                validFrom, validTo, command.reason(), scope, billingPeriod, user.id());
+        return new PromotionView(id, command.athleteId(), command.feePlanId(), command.amountCents(), validFrom,
+                validTo, command.reason(), true, scope, billingPeriod);
     }
 
     @Transactional
@@ -140,30 +154,33 @@ class BillingService {
     }
 
     @Transactional
-    ChargeView createCharge(CurrentUser user, UUID athleteId, UUID guardianId, UUID feePlanId, long amountCents, LocalDate dueDate, String status) {
+    ChargeView createCharge(CurrentUser user, CreateChargeCommand command) {
         Rules.requireAny(user, Role.BILLING);
         UUID t = Rules.tenant();
-        requireAmount(amountCents);
-        if (dueDate == null) throw Rules.badRequest("Data de vencimento obrigatória");
-        String chargeStatus = Rules.parse(ChargeStatus.class, status, "Estado", ChargeStatus.DEFAULT).name();
-        if (!charges.athleteExists(t, athleteId)) throw Rules.notFound("Atleta não encontrado");
-        if (guardianId != null && !charges.guardianExists(t, guardianId)) throw Rules.notFound("Encarregado não encontrado");
+        requireAmount(command.amountCents());
+        if (command.dueDate() == null) throw Rules.badRequest("Data de vencimento obrigatória");
+        String chargeStatus = Rules.parse(ChargeStatus.class, command.status(), "Estado", ChargeStatus.DEFAULT).name();
+        if (!charges.athleteExists(t, command.athleteId())) throw Rules.notFound("Atleta não encontrado");
+        if (command.guardianId() != null && !charges.guardianExists(t, command.guardianId()))
+            throw Rules.notFound("Encarregado não encontrado");
         String billingPeriod = null;
-        if (feePlanId != null) {
-            FeePlanRepository.Row plan = feePlans.findById(t, feePlanId)
+        if (command.feePlanId() != null) {
+            FeePlanRepository.Row plan = feePlans.findById(t, command.feePlanId())
                     .orElseThrow(() -> Rules.notFound("Plano não encontrado"));
             if (FeePeriodicity.ONE_TIME.name().equals(plan.periodicity()))
                 billingPeriod = FeePeriodicity.ONE_TIME.name();
         }
         UUID id = UUID.randomUUID();
         try {
-            charges.insert(id, t, athleteId, guardianId, feePlanId, amountCents, dueDate, chargeStatus, billingPeriod, user.id());
+            charges.insert(id, t, command.athleteId(), command.guardianId(), command.feePlanId(),
+                    command.amountCents(), command.dueDate(), chargeStatus, billingPeriod, user.id());
         } catch (org.springframework.dao.DuplicateKeyException e) {
             if (FeePeriodicity.ONE_TIME.name().equals(billingPeriod)) throw Rules.conflict("Esta taxa já foi registada para o atleta");
             throw e;
         }
-        charges.audit(t, user.id(), "CHARGE_CREATED", id);
-        return new ChargeView(id, athleteId, guardianId, feePlanId, amountCents, dueDate, chargeStatus, billingPeriod);
+        audit.record(t, user.id(), "CHARGE_CREATED", "charge", id);
+        return new ChargeView(id, command.athleteId(), command.guardianId(), command.feePlanId(),
+                command.amountCents(), command.dueDate(), chargeStatus, billingPeriod);
     }
 
     // --- geração automática a partir dos planos ---
@@ -171,7 +188,7 @@ class BillingService {
     @Transactional
     GenerateView generateCharges(CurrentUser user, String period, UUID feePlanId, boolean dryRun) {
         Rules.requireAny(user, Role.BILLING);
-        return generate(Rules.tenant(), user.id(), parsePeriod(period), feePlanId, dryRun);
+        return planner.generate(Rules.tenant(), user.id(), parsePeriod(period), feePlanId, dryRun);
     }
 
     /**
@@ -180,108 +197,16 @@ class BillingService {
      */
     @Transactional
     GenerateView generateChargesForTenant(UUID tenantId, YearMonth period, UUID feePlanId) {
-        return generate(tenantId, null, period, feePlanId, false);
+        return planner.generate(tenantId, null, period, feePlanId, false);
     }
 
-    private GenerateView generate(UUID tenantId, UUID actorId, YearMonth period, UUID feePlanId, boolean dryRun) {
-        List<FeePlanRepository.Row> plans;
-        if (feePlanId == null) plans = feePlans.list(tenantId); else {
-            plans = List.of(feePlans.findById(tenantId, feePlanId)
-                    .orElseThrow(() -> Rules.notFound("Plano não encontrado")));
-        }
-        LocalDate today = LocalDate.now(ZoneId.of("Europe/Lisbon"));
-        int created = 0;
-        int skipped = 0;
-        for (FeePlanRepository.Row plan : plans) {
-            LocalDate periodDate = period.atDay(1);
-            if (!plan.active()) continue;
-            FeePeriodicity periodicity = Rules.find(FeePeriodicity.class, plan.periodicity())
-                    .orElse(FeePeriodicity.DEFAULT);
-            if (!periodicity.recurring()) continue; // ONE_TIME não gera cobranças automáticas
-            if (plan.seasonId() == null
-                    && ((plan.effectiveFrom() != null && periodDate.isBefore(plan.effectiveFrom()))
-                    || (plan.effectiveTo() != null && periodDate.isAfter(plan.effectiveTo())))) {
-                continue;
-            }
-            for (YearMonth chargePeriod : periodsFor(plan, tenantId, period)) {
-                LocalDate chargePeriodDate = chargePeriod.atDay(1);
-                if ((plan.effectiveFrom() != null && chargePeriodDate.isBefore(plan.effectiveFrom()))
-                        || (plan.effectiveTo() != null && chargePeriodDate.isAfter(plan.effectiveTo()))) {
-                    continue;
-                }
-                String billingPeriod = billingPeriod(periodicity, chargePeriod);
-                if (billingPeriod == null) continue;
-                LocalDate dueDate = dueDate(periodicity, chargePeriod);
-                for (ChargeRepository.Target target : charges.findTargets(tenantId, plan.seasonId(), plan.ageGroupId())) {
-                    UUID guardianId = isMinor(target.birthDate(), today) ? target.guardianId() : null;
-                    if (dryRun) {
-                        if (charges.generatedExists(tenantId, plan.id(), target.athleteId(), billingPeriod)) skipped++; else {
-                            created++;
-                        }
-                        continue;
-                    }
-                    UUID id = UUID.randomUUID();
-                    long amountCents = feePlans.overrideAmount(tenantId, target.athleteId(), plan.id(), dueDate, billingPeriod)
-                            .orElse(plan.amountCents());
-                    if (charges.insertGenerated(id, tenantId, target.athleteId(), guardianId, plan.id(),
-                            amountCents, dueDate, billingPeriod, actorId)) {
-                        charges.audit(tenantId, actorId, "CHARGE_GENERATED", id);
-                        created++;
-                    } else {
-                        skipped++;
-                    }
-                }
-            }
-        }
-        return new GenerateView(period.toString(), created, skipped);
-    }
-
-    private List<YearMonth> periodsFor(FeePlanRepository.Row plan, UUID tenantId, YearMonth requested) {
-        if (plan.seasonId() == null) return List.of(requested);
-        FeePlanRepository.SeasonWindow window = feePlans.seasonWindow(tenantId, plan.seasonId()).orElse(null);
-        if (window == null || window.startDate() == null || window.endDate() == null) return List.of(requested);
-        YearMonth first = YearMonth.from(window.startDate());
-        YearMonth last = YearMonth.from(window.endDate());
-        List<YearMonth> periods = new ArrayList<>();
-        for (YearMonth current = first; !current.isAfter(last); current = current.plusMonths(1)) {
-            periods.add(current);
-        }
-        return periods;
-    }
-
-    private static YearMonth parsePeriod(String period) {
-        if (period == null || period.isBlank()) return YearMonth.now(ZoneId.of("Europe/Lisbon"));
+    private YearMonth parsePeriod(String period) {
+        if (period == null || period.isBlank()) return YearMonth.now(clock);
         try {
             return YearMonth.parse(period.trim());
         } catch (DateTimeParseException e) {
             throw Rules.badRequest("Período inválido (use AAAA-MM)");
         }
-    }
-
-    /**
-     * Período canónico para o plano, ou {@code null} se este plano não é cobrado nesse mês.
-     */
-    private static String billingPeriod(FeePeriodicity periodicity, YearMonth period) {
-        return switch (periodicity) {
-            case MONTHLY -> period.toString();
-            case QUARTERLY -> period.getMonthValue() % 3 == 1
-                    ? period.getYear() + "-Q" + ((period.getMonthValue() - 1) / 3 + 1) : null;
-            case YEARLY -> period.getMonthValue() == 1 ? String.valueOf(period.getYear()) : null;
-            case ONE_TIME -> null; // cobrado uma vez, fora da geração automática
-        };
-    }
-
-    private static LocalDate dueDate(FeePeriodicity periodicity, YearMonth period) {
-        return switch (periodicity) {
-            case QUARTERLY -> YearMonth.of(period.getYear(),
-                    ((period.getMonthValue() - 1) / 3) * 3 + 1).atDay(10);
-            case YEARLY -> YearMonth.of(period.getYear(), 1).atDay(10);
-            default -> period.atDay(10);
-        };
-    }
-
-    private static boolean isMinor(LocalDate birthDate, LocalDate today) {
-        return birthDate != null && birthDate.plusYears(18).isAfter(today);
     }
 
     @Transactional
@@ -290,7 +215,7 @@ class BillingService {
         UUID t = Rules.tenant();
         String normalizedStatus = Rules.parse(ChargeStatus.class, status, "Estado").name();
         if (!charges.updateStatus(t, id, normalizedStatus)) throw Rules.notFound("Cobrança não encontrada");
-        charges.audit(t, user.id(), "CHARGE_STATUS_UPDATED", id);
+        audit.record(t, user.id(), "CHARGE_STATUS_UPDATED", "charge", id);
     }
 
     @Transactional
@@ -298,7 +223,7 @@ class BillingService {
         Rules.requireAny(user, Role.BILLING);
         UUID t = Rules.tenant();
         if (!charges.anonymize(t, id)) throw Rules.notFound("Cobrança não encontrada");
-        charges.audit(t, user.id(), "CHARGE_ANONYMIZED", id);
+        audit.record(t, user.id(), "CHARGE_ANONYMIZED", "charge", id);
     }
 
     // --- payments ---
@@ -316,11 +241,17 @@ class BillingService {
         UUID t = Rules.tenant();
         requireAmount(amountCents);
         String paymentMethod = Rules.parse(PaymentMethod.class, method, "Método", PaymentMethod.DEFAULT).name();
-        if (charges.findById(t, chargeId).isEmpty()) throw Rules.notFound("Cobrança não encontrada");
+        ChargeRepository.Row charge = charges.findById(t, chargeId)
+                .orElseThrow(() -> Rules.notFound("Cobrança não encontrada"));
         UUID id = UUID.randomUUID();
         payments.insert(id, t, chargeId, paymentMethod, amountCents, reference, user.id());
-        payments.audit(t, user.id(), "PAYMENT_CREATED", id);
-        // mark charge paid if fully paid? simple: leave status
+        audit.record(t, user.id(), "PAYMENT_CREATED", "payment", id);
+        // Recebido o valor em dívida, a cobrança passa a PAID na mesma transação (até lá, fica como está).
+        if (!ChargeStatus.PAID.name().equals(charge.status())
+                && payments.sumAmount(t, chargeId) >= charge.amountCents()
+                && charges.updateStatus(t, chargeId, ChargeStatus.PAID.name())) {
+            audit.record(t, user.id(), "CHARGE_STATUS_UPDATED", "charge", chargeId);
+        }
         return new PaymentView(id, chargeId, paymentMethod, amountCents, reference, java.time.Instant.now());
     }
 
@@ -341,7 +272,7 @@ class BillingService {
         if (entryDate == null) throw Rules.badRequest("Data obrigatória");
         UUID id = UUID.randomUUID();
         ledger.insert(id, t, normalizedType, category.trim(), amountCents, entryDate, description, user.id());
-        ledger.audit(t, user.id(), "LEDGER_ENTRY_CREATED", id);
+        audit.record(t, user.id(), "LEDGER_ENTRY_CREATED", "ledger_entry", id);
         return new LedgerView(id, normalizedType, category.trim(), amountCents, entryDate, description);
     }
 
@@ -350,6 +281,6 @@ class BillingService {
         Rules.requireAny(user, Role.BILLING);
         UUID t = Rules.tenant();
         if (!ledger.anonymize(t, id)) throw Rules.notFound("Lançamento não encontrado");
-        ledger.audit(t, user.id(), "LEDGER_ENTRY_ANONYMIZED", id);
+        audit.record(t, user.id(), "LEDGER_ENTRY_ANONYMIZED", "ledger_entry", id);
     }
 }

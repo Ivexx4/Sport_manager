@@ -281,10 +281,6 @@ class AthleteRepository {
         return (userId == null ? spec : spec.param("user", userId)).update() == 1;
     }
 
-    void audit(UUID tenantId, UUID actorId, String action, UUID athleteId) {
-        Db.audit(jdbc, tenantId, actorId, action, "athlete", athleteId);
-    }
-
     private static AthleteRow map(java.sql.ResultSet rs, int rowNum) throws java.sql.SQLException {
         return new AthleteRow(Db.uuid(rs, "id"), rs.getString("full_name"), Db.date(rs, "birth_date"),
                 rs.getString("gender"), rs.getString("nif"), rs.getString("email"),

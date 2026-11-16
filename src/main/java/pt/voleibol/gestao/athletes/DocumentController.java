@@ -9,8 +9,6 @@ import java.util.UUID;
 
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
-import org.springframework.security.core.annotation.AuthenticationPrincipal;
-import org.springframework.security.oauth2.jwt.Jwt;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -36,29 +34,29 @@ class DocumentController {
     }
 
     @GetMapping("/athletes/{athleteId}/documents")
-    List<DocumentService.DocumentView> list(@AuthenticationPrincipal Jwt jwt, @PathVariable UUID athleteId) {
-        return service.list(CurrentUser.of(jwt), athleteId);
+    List<DocumentService.DocumentView> list(CurrentUser user, @PathVariable UUID athleteId) {
+        return service.list(user, athleteId);
     }
 
     @PostMapping("/athletes/{athleteId}/documents")
-    ResponseEntity<DocumentService.DocumentView> create(@AuthenticationPrincipal Jwt jwt,
+    ResponseEntity<DocumentService.DocumentView> create(CurrentUser user,
                                                         @PathVariable UUID athleteId,
                                                         @Valid @RequestBody DocumentRequest request) {
-        DocumentService.DocumentView created = service.create(CurrentUser.of(jwt), athleteId,
+        DocumentService.DocumentView created = service.create(user, athleteId,
                 request.type(), request.fileName(), request.fileUrl(), request.validUntil());
         return ResponseEntity.status(HttpStatus.CREATED).body(created);
     }
 
     @PutMapping("/documents/{documentId}")
-    DocumentService.DocumentView update(@AuthenticationPrincipal Jwt jwt, @PathVariable UUID documentId,
+    DocumentService.DocumentView update(CurrentUser user, @PathVariable UUID documentId,
                                         @Valid @RequestBody DocumentRequest request) {
-        return service.update(CurrentUser.of(jwt), documentId, request.type(),
+        return service.update(user, documentId, request.type(),
                 request.fileName(), request.fileUrl(), request.validUntil());
     }
 
     @DeleteMapping("/documents/{documentId}")
-    ResponseEntity<Void> delete(@AuthenticationPrincipal Jwt jwt, @PathVariable UUID documentId) {
-        service.delete(CurrentUser.of(jwt), documentId);
+    ResponseEntity<Void> delete(CurrentUser user, @PathVariable UUID documentId) {
+        service.delete(user, documentId);
         return ResponseEntity.noContent().build();
     }
 }

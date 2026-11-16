@@ -1,0 +1,124 @@
+/* Adaptações para ecrãs estreitos: menu deslizante, grelhas e tabelas. */
+@media (max-width: 900px) {
+  .sidebar {
+    position: fixed;
+    inset: 0 auto 0 0;
+    transform: translateX(-100%);
+    transition: transform 0.2s;
+    box-shadow: 10px 0 30px #10233f30;
+  }
+  .sidebar.is-open {
+    transform: translateX(0);
+  }
+  .sidebar-overlay {
+    position: fixed;
+    inset: 0;
+    background: #10233f55;
+    border: 0;
+    z-index: 10;
+  }
+  .mobile-only {
+    display: block;
+  }
+  .topbar {
+    padding: 0 20px;
+    gap: 15px;
+  }
+  .breadcrumb {
+    flex: 1;
+  }
+  .content-wrap {
+    padding: 30px 22px 50px;
+  }
+  .stat-grid {
+    grid-template-columns: repeat(2, 1fr);
+  }
+  .two-col {
+    grid-template-columns: 1fr;
+  }
+  .cards-grid {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}
+@media (max-width: 600px) {
+  .login-page {
+    display: block;
+  }
+  .login-art {
+    min-height: 220px;
+    padding: 24px;
+  }
+  .login-message {
+    top: 98px;
+    left: 24px;
+  }
+  .login-message h1 {
+    font-size: 37px;
+  }
+  .login-message p:not(.eyebrow),
+  .ball-decoration {
+    display: none;
+  }
+  .login-panel {
+    padding: 35px 24px;
+  }
+  .login-card > .brand {
+    display: none;
+  }
+  .page-heading {
+    display: block;
+  }
+  .heading-actions {
+    margin-top: 18px;
+    flex-wrap: wrap;
+  }
+  .welcome-card {
+    padding: 24px;
+    min-height: 260px;
+  }
+  .welcome-graphic {
+    position: absolute;
+    right: -70px;
+    bottom: -70px;
+    opacity: 0.6;
+  }
+  .stat-grid {
+    gap: 8px;
+  }
+  .stat-card {
+    padding: 13px;
+    min-height: 120px;
+  }
+  .cards-grid {
+    grid-template-columns: 1fr;
+  }
+  .toolbar {
+    display: block;
+  }
+  .search-box {
+    width: 100%;
+  }
+  .toolbar-count {
+    display: block;
+    margin-top: 9px;
+  }
+  .table-panel {
+    overflow-x: auto;
+  }
+  table {
+    min-width: 650px;
+  }
+  .season-card {
+    padding: 14px;
+  }
+  .season-groups {
+    padding-right: 10px;
+    padding-left: 10px;
+  }
+  .form-grid {
+    grid-template-columns: 1fr;
+  }
+  .topbar-actions {
+    display: none;
+  }
+}
