@@ -7,7 +7,6 @@ import java.util.Set;
 import java.util.UUID;
 
 import org.springframework.dao.DuplicateKeyException;
-import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.server.ResponseStatusException;
@@ -112,10 +111,8 @@ class SeasonService {
     // --- auxiliares ---
 
     private static void requireValidPeriod(LocalDate startDate, LocalDate endDate) {
-        if (startDate != null && endDate != null && endDate.isBefore(startDate)) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
-                    "A data de fim não pode ser anterior à data de início");
-        }
+        if (startDate != null && endDate != null && endDate.isBefore(startDate))
+            throw Rules.badRequest("A data de fim não pode ser anterior à data de início");
     }
 
     private static LocalDate defaultCutoff(LocalDate cutoffDate) {

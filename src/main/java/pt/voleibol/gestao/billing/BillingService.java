@@ -125,10 +125,7 @@ class BillingService {
             }
         }
         if (!charges.athleteExists(t, athleteId)) throw Rules.notFound("Atleta não encontrado");
-        if (feePlanId != null) {
-            feePlans.findById(t, feePlanId)
-                    .orElseThrow(() -> Rules.notFound("Plano não encontrado"));
-        }
+        if (feePlanId != null && feePlans.findById(t, feePlanId).isEmpty()) throw Rules.notFound("Plano não encontrado");
         UUID id = UUID.randomUUID();
         feePlans.insertPromotion(id, t, athleteId, feePlanId, amountCents, validFrom, validTo, reason,
                 scope, "SINGLE".equals(scope) ? billingPeriod : null, actorId);

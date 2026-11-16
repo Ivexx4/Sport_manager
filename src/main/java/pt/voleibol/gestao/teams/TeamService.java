@@ -9,7 +9,6 @@ import java.util.Set;
 import java.util.UUID;
 
 import org.springframework.dao.DuplicateKeyException;
-import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.server.ResponseStatusException;
@@ -168,14 +167,8 @@ class TeamService {
         if (!teams.athleteExists(tenantId, athleteId)) throw Rules.notFound("Atleta não encontrado");
         if (teams.rosterExists(tenantId, teamId, athleteId)) throw Rules.conflict("Este atleta já pertence à equipa");
         TeamRepository.TeamRow team = teams.findById(tenantId, teamId).orElseThrow(TeamService::notFound);
-        if (team.seasonId() == null) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
-                    "A equipa não está associada a uma época");
-        }
-        if (team.ageGroupId() == null) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
-                    "A equipa não está associada a um escalão");
-        }
+        if (team.seasonId() == null) throw Rules.badRequest("A equipa não está associada a uma época");
+        if (team.ageGroupId() == null) throw Rules.badRequest("A equipa não está associada a um escalão");
         SeasonRepository.SeasonRow season = seasons.findById(tenantId, team.seasonId())
                 .orElseThrow(SeasonService::notFound);
         AgeGroupRepository.AgeGroupRow ageGroup = ageGroups.findById(tenantId, team.ageGroupId())
@@ -199,32 +192,23 @@ class TeamService {
     private AgeGroupRepository.AgeGroupRow resolveRegistrationGroup(
             UUID tenantId, SeasonRepository.SeasonRow season, UUID athleteId, LocalDate birthDate,
             UUID requestedGroupId) {
-        List<AgeGroupRepository.AgeGroupRow> groups = ageGroups.listBySeason(tenantId, season.id());
+        List<AgeGroupRepository.AgeGroupRow> groups = ageGroups.list(tenantId);
         int age = ageAt(birthDate, season);
-        if (requestedGroupId == null && (age >= 19 && age <= 21 || age > 35)) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
-                    "É obrigatório indicar o escalão de inscrição para este atleta");
-        }
+        if (requestedGroupId == null && (age >= 19 && age <= 21 || age > 35))
+            throw Rules.badRequest("É obrigatório indicar o escalão de inscrição para este atleta");
         AgeGroupRepository.AgeGroupRow selected = requestedGroupId == null
                 ? groups.stream().filter(g -> eligible(age, g))
                     .findFirst()
                     .or(() -> groups.stream().filter(g -> teams.promotionExists(
                             tenantId, season.id(), g.id(), athleteId)).findFirst())
-                    .orElseThrow(() -> new ResponseStatusException(HttpStatus.BAD_REQUEST,
-                            "Não foi possível determinar o escalão de inscrição"))
+                    .orElseThrow(() -> Rules.badRequest("Não foi possível determinar o escalão de inscrição"))
                 : groups.stream().filter(g -> g.id().equals(requestedGroupId)).findFirst()
-                    .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND,
-                            "Escalão de inscrição não encontrado"));
-        if (age < selected.minAge()) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
-                    "O atleta não pode ser inscrito num escalão inferior");
-        }
+                    .orElseThrow(() -> Rules.notFound("Escalão de inscrição não encontrado"));
+        if (age < selected.minAge()) throw Rules.badRequest("O atleta não pode ser inscrito num escalão inferior");
         if (selected.maxAge() != null && age > selected.maxAge()
                 && !(age >= 19 && "Seniores".equalsIgnoreCase(selected.name()))
-                && !teams.promotionExists(tenantId, season.id(), selected.id(), athleteId)) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
-                    "A inscrição em escalão superior exige autorização");
-        }
+                && !teams.promotionExists(tenantId, season.id(), selected.id(), athleteId))
+            throw Rules.badRequest("A inscrição em escalão superior exige autorização");
         return selected;
     }
 
@@ -249,16 +233,11 @@ class TeamService {
                                  AgeGroupRepository.AgeGroupRow ageGroup, UUID athleteId, LocalDate birthDate) {
         int age = ageAt(birthDate, season);
         if (isEligibleForSeniors(season, ageGroup, birthDate)) return;
-        if (age < ageGroup.minAge()) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
-                    "Proibido atuar em escalão inferior conforme regulamento FPV");
-        }
-        if (ageGroup.maxAge() != null && age > ageGroup.maxAge()) {
-            if (!teams.promotionExists(tenantId, season.id(), ageGroup.id(), athleteId)) {
-                throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
-                        "Subida de escalão excepcional não autorizada pela época");
-            }
-        }
+        if (age < ageGroup.minAge())
+            throw Rules.badRequest("Proibido atuar em escalão inferior conforme regulamento FPV");
+        if (ageGroup.maxAge() != null && age > ageGroup.maxAge()
+                && !teams.promotionExists(tenantId, season.id(), ageGroup.id(), athleteId))
+            throw Rules.badRequest("Subida de escalão excepcional não autorizada pela época");
     }
 
     static boolean isEligibleForSeniors(SeasonRepository.SeasonRow season,
@@ -291,7 +270,6 @@ class TeamService {
     private void requireReferences(UUID tenantId, UUID seasonId, UUID ageGroupId) {
         if (seasonId != null && !teams.seasonExists(tenantId, seasonId)) throw Rules.notFound("Época não encontrada");
         if (ageGroupId != null && !teams.ageGroupExists(tenantId, ageGroupId)) throw Rules.notFound("Escalão não encontrado");
-        if (ageGroupId != null) ageGroups.findById(tenantId, ageGroupId).orElseThrow(AgeGroupService::notFound);
     }
 
     private static String validStaffRole(String role) {

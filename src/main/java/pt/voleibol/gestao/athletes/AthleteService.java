@@ -12,7 +12,6 @@ import java.util.Set;
 import java.util.UUID;
 
 import org.springframework.dao.DuplicateKeyException;
-import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.server.ResponseStatusException;
@@ -51,14 +50,9 @@ class AthleteService {
     private final AthleteRepository athletes;
     private final ChargeRepository charges;
 
-    @Autowired
     AthleteService(AthleteRepository athletes, ChargeRepository charges) {
         this.athletes = athletes;
         this.charges = charges;
-    }
-
-    AthleteService(AthleteRepository athletes) {
-        this(athletes, null);
     }
 
     @Transactional(readOnly = true)

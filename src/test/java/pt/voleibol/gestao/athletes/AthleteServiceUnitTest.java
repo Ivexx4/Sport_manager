@@ -37,7 +37,7 @@ class AthleteServiceUnitTest {
     @Test
     void importCsvAceitaLinhasValidasEIgnoraLinhasInvalidas() throws Exception {
         AthleteRepository repository = mock(AthleteRepository.class);
-        AthleteService service = new AthleteService(repository);
+        AthleteService service = new AthleteService(repository, null);
         TenantContext.set(TENANT);
 
         when(repository.licenseExists(eq(TENANT), anyString(), eq(null)))
@@ -67,7 +67,7 @@ class AthleteServiceUnitTest {
     @Test
     void importCsvTambemAceitaBufferedReader() throws Exception {
         AthleteRepository repository = mock(AthleteRepository.class);
-        AthleteService service = new AthleteService(repository);
+        AthleteService service = new AthleteService(repository, null);
         TenantContext.set(TENANT);
         doNothing().when(repository).insert(any(), eq(TENANT), any(AthleteRepository.Data.class), eq(ACTOR));
 

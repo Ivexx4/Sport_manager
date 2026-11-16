@@ -18,6 +18,9 @@ public final class Rules {
     /** Papéis que gerem o clube. */
     public static final Set<String> MANAGERS = Set.of("ADMIN", "DIRECAO");
 
+    /** Papéis com acesso à gestão desportiva, além dos gestores do clube. */
+    public static final Set<String> SPORT = Set.of("TREINADOR", "ATLETA", "ENCARREGADO");
+
     private Rules() {
     }
 
@@ -53,6 +56,11 @@ public final class Rules {
 
     public static boolean isManager(Set<String> roles) {
         return roles.stream().anyMatch(MANAGERS::contains);
+    }
+
+    /** Gestor do clube ou papel desportivo: quem pode ver a operação desportiva. */
+    public static boolean isSport(Set<String> roles) {
+        return isManager(roles) || roles.stream().anyMatch(SPORT::contains);
     }
 
     /** Exige que o ator tenha pelo menos um dos papéis indicados. */

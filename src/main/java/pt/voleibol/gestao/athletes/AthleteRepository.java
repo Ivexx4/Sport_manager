@@ -11,6 +11,7 @@ import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.stereotype.Repository;
 
 import pt.voleibol.gestao.shared.Db;
+import pt.voleibol.gestao.shared.Rules;
 
 /**
  * Acesso a dados dos atletas. Todas as leituras passam pela política de visibilidade do ator
@@ -119,7 +120,7 @@ class AthleteRepository {
     private static JdbcClient.StatementSpec scoped(JdbcClient.StatementSpec spec, UUID tenantId,
                                                    UUID athleteId, UUID actorId, Set<String> roles,
                                                    boolean writable) {
-        boolean manager = roles.contains("ADMIN") || roles.contains("DIRECAO");
+        boolean manager = Rules.isManager(roles);
         boolean all = writable ? manager : manager || roles.contains("FINANCEIRO");
         JdbcClient.StatementSpec result = spec.param("tenant", tenantId)
                 .param("all", all).param("trainer", roles.contains("TREINADOR"))

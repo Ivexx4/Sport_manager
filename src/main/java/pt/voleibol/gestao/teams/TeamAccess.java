@@ -81,10 +81,7 @@ public class TeamAccess {
      */
     public void requireVisible(UUID tenantId, UUID teamId, UUID actorId, Set<String> roles) {
         if (visible(tenantId, teamId, actorId, roles)) return;
-        if (Rules.isManager(roles) || roles.contains("TREINADOR")
-                || roles.contains("ATLETA") || roles.contains("ENCARREGADO")) {
-            throw Rules.notFound("Equipa não encontrada");
-        }
+        if (Rules.isSport(roles)) throw Rules.notFound("Equipa não encontrada");
         throw Rules.forbidden();
     }
 }

@@ -90,9 +90,7 @@ class TrainingService {
     @Transactional(readOnly = true)
     List<SessionView> listSessions(UUID actorId, Set<String> roles, UUID teamId) {
         UUID tenantId = Rules.tenant();
-        boolean writer = Rules.isManager(roles) || roles.contains("TREINADOR");
-        boolean athleteOrGuardian = roles.contains("ATLETA") || roles.contains("ENCARREGADO");
-        if (!writer && !athleteOrGuardian) throw Rules.forbidden();
+        if (!Rules.isSport(roles)) throw Rules.forbidden();
         if (teamId != null) teamAccess.requireVisible(tenantId, teamId, actorId, roles);
         return sessions.list(tenantId, teamId).stream()
                 .filter(s -> teamAccess.visible(tenantId, s.teamId(), actorId, roles))

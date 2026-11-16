@@ -110,15 +110,6 @@ class TrainingSessionRepository {
                 .list();
     }
 
-    boolean attendanceExists(UUID tenantId, UUID sessionId, UUID athleteId) {
-        return Db.exists(jdbc.sql("""
-                        SELECT EXISTS (
-                            SELECT 1 FROM attendance
-                            WHERE tenant_id = :tenant AND session_id = :session AND athlete_id = :athlete)
-                        """)
-                .param("tenant", tenantId).param("session", sessionId).param("athlete", athleteId));
-    }
-
     void upsertAttendance(UUID tenantId, UUID sessionId, UUID athleteId, String status, String justification,
                           UUID actorId) {
         jdbc.sql("""

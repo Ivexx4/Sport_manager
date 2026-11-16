@@ -34,10 +34,6 @@ class AgeGroupRepository {
                 .query(AgeGroupRepository::map).list();
     }
 
-    List<AgeGroupRow> listBySeason(UUID ignoredTenantId, UUID ignoredSeasonId) {
-        return list(ignoredTenantId);
-    }
-
     Optional<AgeGroupRow> findById(UUID ignoredTenantId, UUID ageGroupId) {
         return jdbc.sql(SELECT + " WHERE g.id = :id")
                 .param("id", ageGroupId)

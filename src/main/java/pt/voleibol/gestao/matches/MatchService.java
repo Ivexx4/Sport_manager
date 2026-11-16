@@ -55,9 +55,7 @@ class MatchService {
     @Transactional(readOnly = true)
     List<MatchView> listMatches(UUID actorId, Set<String> roles, UUID teamId) {
         UUID tenantId = Rules.tenant();
-        boolean allowed = Rules.isManager(roles) || roles.contains("TREINADOR")
-                || roles.contains("ATLETA") || roles.contains("ENCARREGADO");
-        if (!allowed) throw Rules.forbidden();
+        if (!Rules.isSport(roles)) throw Rules.forbidden();
         if (teamId != null) teamAccess.requireVisible(tenantId, teamId, actorId, roles);
         return matches.list(tenantId, teamId).stream()
                 .filter(m -> teamAccess.visible(tenantId, m.teamId(), actorId, roles))

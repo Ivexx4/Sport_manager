@@ -150,8 +150,9 @@ public class ChargeRepository {
                 .param("t", tenantId).param("id", id).param("s", status).update() == 1;
     }
 
-    public int cancelFutureRecurring(UUID tenantId, UUID athleteId, LocalDate withdrawalDate) {
-        return jdbc.sql("""
+    /** Cancela as cobranças recorrentes ainda pendentes a partir do mês seguinte à desistência. */
+    public void cancelFutureRecurring(UUID tenantId, UUID athleteId, LocalDate withdrawalDate) {
+        jdbc.sql("""
                         UPDATE charge c
                         SET status = 'CANCELLED', updated_at = now()
                         FROM fee_plan p
