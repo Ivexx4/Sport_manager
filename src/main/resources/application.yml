@@ -19,6 +19,12 @@ spring:
     hibernate:
       ddl-auto: none   # o esquema é gerido só pelo Flyway
 
+  # Erros da API em RFC 9457 (application/problem+json). Os controladores têm o seu próprio
+  # ApiExceptionHandler; este interruptor garante o mesmo formato nos erros tratados pelo Spring MVC.
+  mvc:
+    problemdetails:
+      enabled: true
+
 app:
   security:
     jwt:
