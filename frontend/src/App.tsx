@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { authStore } from "./api";
+import { ToastProvider } from "./components";
 import { Login } from "./features/auth/Login";
 import { Shell } from "./layout/Shell";
 
@@ -21,16 +22,19 @@ export function App() {
     return () => window.removeEventListener("gestao:session-expired", handleExpired);
   }, []);
 
-  if (!authenticated) {
-    return (
-      <Login
-        onLogin={() => {
-          setSessionMessage("");
-          setAuthenticated(true);
-        }}
-        message={sessionMessage}
-      />
-    );
-  }
-  return <Shell onLogout={logout} />;
+  return (
+    <ToastProvider>
+      {authenticated ? (
+        <Shell onLogout={logout} />
+      ) : (
+        <Login
+          onLogin={() => {
+            setSessionMessage("");
+            setAuthenticated(true);
+          }}
+          message={sessionMessage}
+        />
+      )}
+    </ToastProvider>
+  );
 }

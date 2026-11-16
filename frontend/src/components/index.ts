@@ -5,3 +5,4 @@ export { Modal } from "./Modal";
 export { ModalActions } from "./ModalActions";
 export { PageHeader } from "./PageHeader";
 export { Stat } from "./Stat";
+export { ToastProvider, useToast, type ToastApi } from "./ToastProvider";

@@ -1,12 +1,13 @@
 import { useEffect, useState } from "react";
 import { Activity, BookOpen, CreditCard, Plus, ShieldCheck } from "lucide-react";
 import { api, type Athlete, type Charge, type FeePlan, type LedgerEntry } from "../../api";
-import { Empty, Modal, ModalActions, PageHeader, Stat } from "../../components";
+import { Empty, Modal, ModalActions, PageHeader, Stat, useToast } from "../../components";
+import { useSubmit } from "../../hooks/useSubmit";
 import { formatDate, formatMoney } from "../../lib/format";
-import type { ReportError, ShowToast } from "../../types";
 
 /** Quotas, pagamentos e movimentos do clube. */
-export function Billing({ showToast, canManage }: { showToast: ShowToast; canManage: boolean }) {
+export function Billing({ canManage }: { canManage: boolean }) {
+  const toast = useToast();
   const [plans, setPlans] = useState<FeePlan[]>([]);
   const [athletes, setAthletes] = useState<Athlete[]>([]);
   const [charges, setCharges] = useState<Charge[]>([]);
@@ -33,7 +34,7 @@ export function Billing({ showToast, canManage }: { showToast: ShowToast; canMan
       }
       setCharges(currentCharges);
     } catch {
-      showToast({ kind: "error", message: "Não foi possível carregar o financeiro." });
+      toast.error("Não foi possível carregar o financeiro.");
     }
   }
 
@@ -54,9 +55,9 @@ export function Billing({ showToast, canManage }: { showToast: ShowToast; canMan
     try {
       await api.updateChargeStatus(charge.id, "PAID");
       await load();
-      showToast({ kind: "success", message: "Cobrança marcada como paga." });
+      toast.success("Cobrança marcada como paga.");
     } catch {
-      showToast({ kind: "error", message: "Não foi possível atualizar a cobrança." });
+      toast.error("Não foi possível atualizar a cobrança.");
     }
   }
 
@@ -205,9 +206,8 @@ export function Billing({ showToast, canManage }: { showToast: ShowToast; canMan
           onSaved={() => {
             setModal(null);
             load();
-            showToast({ kind: "success", message: "Plano de quotas criado." });
+            toast.success("Plano de quotas criado.");
           }}
-          onError={message => showToast({ kind: "error", message })}
         />
       )}
       {modal === "charge" && (
@@ -218,9 +218,8 @@ export function Billing({ showToast, canManage }: { showToast: ShowToast; canMan
           onSaved={() => {
             setModal(null);
             load();
-            showToast({ kind: "success", message: "Taxa registada." });
+            toast.success("Taxa registada.");
           }}
-          onError={message => showToast({ kind: "error", message })}
         />
       )}
       {modal === "generate" && (
@@ -230,12 +229,8 @@ export function Billing({ showToast, canManage }: { showToast: ShowToast; canMan
           onSaved={result => {
             setModal(null);
             load();
-            showToast({
-              kind: "success",
-              message: `${result.created} cobranças criadas (${result.skipped} já existentes).`
-            });
+            toast.success(`${result.created} cobranças criadas (${result.skipped} já existentes).`);
           }}
-          onError={message => showToast({ kind: "error", message })}
         />
       )}
       {modal === "ledger" && (
@@ -244,9 +239,8 @@ export function Billing({ showToast, canManage }: { showToast: ShowToast; canMan
           onSaved={() => {
             setModal(null);
             load();
-            showToast({ kind: "success", message: "Lançamento registado." });
+            toast.success("Lançamento registado.");
           }}
-          onError={message => showToast({ kind: "error", message })}
         />
       )}
       {paymentCharge && (
@@ -256,42 +250,29 @@ export function Billing({ showToast, canManage }: { showToast: ShowToast; canMan
           onSaved={() => {
             setPaymentCharge(null);
             load();
-            showToast({ kind: "success", message: "Pagamento registado." });
+            toast.success("Pagamento registado.");
           }}
-          onError={message => showToast({ kind: "error", message })}
         />
       )}
     </section>
   );
 }
 
-function FeePlanModal({
-  onClose,
-  onSaved,
-  onError
-}: {
-  onClose: () => void;
-  onSaved: () => void;
-  onError: ReportError;
-}) {
+function FeePlanModal({ onClose, onSaved }: { onClose: () => void; onSaved: () => void }) {
+  const { saving, submit: run } = useSubmit();
   const [data, setData] = useState({ name: "", amount: "", periodicity: "MONTHLY" });
-  const [saving, setSaving] = useState(false);
 
-  async function submit(event: React.FormEvent) {
+  function submit(event: React.FormEvent) {
     event.preventDefault();
-    setSaving(true);
-    try {
-      await api.createFeePlan({
-        name: data.name,
-        amountCents: Math.round(Number(data.amount) * 100),
-        periodicity: data.periodicity
-      });
-      onSaved();
-    } catch {
-      onError("Não foi possível criar o plano de quotas.");
-    } finally {
-      setSaving(false);
-    }
+    void run(
+      () =>
+        api.createFeePlan({
+          name: data.name,
+          amountCents: Math.round(Number(data.amount) * 100),
+          periodicity: data.periodicity
+        }),
+      { onSuccess: onSaved, errorMessage: "Não foi possível criar o plano de quotas." }
+    );
   }
 
   return (
@@ -343,44 +324,39 @@ function ChargeModal({
   athletes,
   plans,
   onClose,
-  onSaved,
-  onError
+  onSaved
 }: {
   athletes: Athlete[];
   plans: FeePlan[];
   onClose: () => void;
   onSaved: () => void;
-  onError: ReportError;
 }) {
+  const toast = useToast();
+  const { saving, submit: run } = useSubmit();
   const [data, setData] = useState({
     athleteId: athletes[0]?.id ?? "",
     feePlanId: plans[0]?.id ?? "",
     dueDate: new Date().toISOString().slice(0, 10)
   });
-  const [saving, setSaving] = useState(false);
 
-  async function submit(event: React.FormEvent) {
+  function submit(event: React.FormEvent) {
     event.preventDefault();
     const plan = plans.find(item => item.id === data.feePlanId);
     if (!plan) {
-      onError("Cria primeiro um plano do tipo taxa única.");
+      toast.error("Cria primeiro um plano do tipo taxa única.");
       return;
     }
-    setSaving(true);
-    try {
-      await api.createCharge({
-        athleteId: data.athleteId,
-        feePlanId: plan.id,
-        amountCents: plan.amountCents,
-        dueDate: data.dueDate,
-        status: "PENDING"
-      });
-      onSaved();
-    } catch {
-      onError("Não foi possível registar a taxa.");
-    } finally {
-      setSaving(false);
-    }
+    void run(
+      () =>
+        api.createCharge({
+          athleteId: data.athleteId,
+          feePlanId: plan.id,
+          amountCents: plan.amountCents,
+          dueDate: data.dueDate,
+          status: "PENDING"
+        }),
+      { onSuccess: onSaved, errorMessage: "Não foi possível registar a taxa." }
+    );
   }
 
   return (
@@ -445,32 +421,28 @@ function ChargeModal({
 function GenerateChargesModal({
   plans,
   onClose,
-  onSaved,
-  onError
+  onSaved
 }: {
   plans: FeePlan[];
   onClose: () => void;
   onSaved: (result: { created: number; skipped: number }) => void;
-  onError: ReportError;
 }) {
+  const toast = useToast();
+  const { saving, submit: run } = useSubmit();
   const [period, setPeriod] = useState(new Date().toISOString().slice(0, 7));
   const [feePlanId, setFeePlanId] = useState("");
   const [dryRun, setDryRun] = useState(false);
-  const [saving, setSaving] = useState(false);
 
-  async function submit(event: React.FormEvent) {
+  function submit(event: React.FormEvent) {
     event.preventDefault();
-    setSaving(true);
-    try {
-      const result = await api.generateCharges({ period, feePlanId: feePlanId || undefined, dryRun });
-      if (dryRun) {
-        onError(`Simulação: seriam criadas ${result.created} cobranças e ignoradas ${result.skipped}.`);
-      } else onSaved(result);
-    } catch {
-      onError("Não foi possível gerar as cobranças.");
-    } finally {
-      setSaving(false);
-    }
+    void run(() => api.generateCharges({ period, feePlanId: feePlanId || undefined, dryRun }), {
+      onSuccess: result => {
+        if (dryRun) {
+          toast.error(`Simulação: seriam criadas ${result.created} cobranças e ignoradas ${result.skipped}.`);
+        } else onSaved(result);
+      },
+      errorMessage: "Não foi possível gerar as cobranças."
+    });
   }
 
   return (
@@ -502,39 +474,26 @@ function GenerateChargesModal({
   );
 }
 
-function PaymentModal({
-  charge,
-  onClose,
-  onSaved,
-  onError
-}: {
-  charge: Charge;
-  onClose: () => void;
-  onSaved: () => void;
-  onError: ReportError;
-}) {
+function PaymentModal({ charge, onClose, onSaved }: { charge: Charge; onClose: () => void; onSaved: () => void }) {
+  const { saving, submit: run } = useSubmit();
   const [data, setData] = useState({ method: "CASH", amount: (charge.amountCents / 100).toFixed(2), reference: "" });
-  const [saving, setSaving] = useState(false);
 
-  async function submit(event: React.FormEvent) {
+  function submit(event: React.FormEvent) {
     event.preventDefault();
-    setSaving(true);
-    try {
-      await api.createPayment({
-        chargeId: charge.id,
-        method: data.method,
-        amountCents: Math.round(Number(data.amount) * 100),
-        reference: data.reference || undefined
-      });
-      const payments = await api.payments(charge.id);
-      const received = payments.reduce((total, payment) => total + payment.amountCents, 0);
-      if (received >= charge.amountCents) await api.updateChargeStatus(charge.id, "PAID");
-      onSaved();
-    } catch {
-      onError("Não foi possível registar o pagamento.");
-    } finally {
-      setSaving(false);
-    }
+    void run(
+      async () => {
+        await api.createPayment({
+          chargeId: charge.id,
+          method: data.method,
+          amountCents: Math.round(Number(data.amount) * 100),
+          reference: data.reference || undefined
+        });
+        const payments = await api.payments(charge.id);
+        const received = payments.reduce((total, payment) => total + payment.amountCents, 0);
+        if (received >= charge.amountCents) await api.updateChargeStatus(charge.id, "PAID");
+      },
+      { onSuccess: onSaved, errorMessage: "Não foi possível registar o pagamento." }
+    );
   }
 
   return (
@@ -580,15 +539,8 @@ function PaymentModal({
   );
 }
 
-function LedgerModal({
-  onClose,
-  onSaved,
-  onError
-}: {
-  onClose: () => void;
-  onSaved: () => void;
-  onError: ReportError;
-}) {
+function LedgerModal({ onClose, onSaved }: { onClose: () => void; onSaved: () => void }) {
+  const { saving, submit: run } = useSubmit();
   const [data, setData] = useState({
     type: "EXPENSE",
     category: "",
@@ -596,19 +548,13 @@ function LedgerModal({
     entryDate: new Date().toISOString().slice(0, 10),
     description: ""
   });
-  const [saving, setSaving] = useState(false);
 
-  async function submit(event: React.FormEvent) {
+  function submit(event: React.FormEvent) {
     event.preventDefault();
-    setSaving(true);
-    try {
-      await api.createLedgerEntry({ ...data, amountCents: Math.round(Number(data.amount) * 100) });
-      onSaved();
-    } catch {
-      onError("Não foi possível registar o lançamento.");
-    } finally {
-      setSaving(false);
-    }
+    void run(() => api.createLedgerEntry({ ...data, amountCents: Math.round(Number(data.amount) * 100) }), {
+      onSuccess: onSaved,
+      errorMessage: "Não foi possível registar o lançamento."
+    });
   }
 
   return (

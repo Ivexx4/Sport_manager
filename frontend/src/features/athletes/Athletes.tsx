@@ -1,12 +1,13 @@
 import { useEffect, useState } from "react";
 import { ChevronRight, FileText, Plus, Search, Users } from "lucide-react";
 import { api, type Athlete } from "../../api";
-import { Empty, Loading, Modal, ModalActions, PageHeader } from "../../components";
+import { Empty, Loading, Modal, ModalActions, PageHeader, useToast } from "../../components";
+import { useSubmit } from "../../hooks/useSubmit";
 import { formatDate } from "../../lib/format";
-import type { ReportError, ShowToast } from "../../types";
 
 /** Plantel do clube: pesquisa, importação CSV e ficha do atleta. */
-export function Athletes({ showToast }: { showToast: ShowToast }) {
+export function Athletes() {
+  const toast = useToast();
   const [athletes, setAthletes] = useState<Athlete[]>([]);
   const [total, setTotal] = useState(0);
   const [query, setQuery] = useState("");
@@ -21,7 +22,7 @@ export function Athletes({ showToast }: { showToast: ShowToast }) {
       setAthletes(page.items);
       setTotal(page.total);
     } catch {
-      showToast({ kind: "error", message: "Não foi possível carregar os atletas." });
+      toast.error("Não foi possível carregar os atletas.");
     } finally {
       setLoading(false);
     }
@@ -116,9 +117,8 @@ export function Athletes({ showToast }: { showToast: ShowToast }) {
           onSaved={() => {
             setModal(null);
             load();
-            showToast({ kind: "success", message: "Atleta criado com sucesso." });
+            toast.success("Atleta criado com sucesso.");
           }}
-          onError={message => showToast({ kind: "error", message })}
         />
       )}
       {modal === "import" && (
@@ -127,9 +127,8 @@ export function Athletes({ showToast }: { showToast: ShowToast }) {
           onImported={count => {
             setModal(null);
             load();
-            showToast({ kind: "success", message: `${count} atletas importados com sucesso.` });
+            toast.success(`${count} atletas importados com sucesso.`);
           }}
-          onError={message => showToast({ kind: "error", message })}
         />
       )}
       {selected && (
@@ -139,9 +138,8 @@ export function Athletes({ showToast }: { showToast: ShowToast }) {
           onDeleted={() => {
             setSelected(null);
             load();
-            showToast({ kind: "success", message: "Atleta removido com sucesso." });
+            toast.success("Atleta removido com sucesso.");
           }}
-          onError={message => showToast({ kind: "error", message })}
         />
       )}
     </section>
@@ -151,27 +149,20 @@ export function Athletes({ showToast }: { showToast: ShowToast }) {
 function AthleteDetails({
   athlete,
   onClose,
-  onDeleted,
-  onError
+  onDeleted
 }: {
   athlete: Athlete;
   onClose: () => void;
   onDeleted: () => void;
-  onError: ReportError;
 }) {
-  const [deleting, setDeleting] = useState(false);
+  const { saving: deleting, submit } = useSubmit();
 
-  async function remove() {
+  function remove() {
     if (!window.confirm(`Remover ${athlete.fullName}? Esta ação anonimiza os dados do atleta.`)) return;
-    setDeleting(true);
-    try {
-      await api.deleteAthlete(athlete.id);
-      onDeleted();
-    } catch {
-      onError("Não foi possível remover o atleta.");
-    } finally {
-      setDeleting(false);
-    }
+    void submit(() => api.deleteAthlete(athlete.id), {
+      onSuccess: onDeleted,
+      errorMessage: "Não foi possível remover o atleta."
+    });
   }
 
   return (
@@ -206,15 +197,8 @@ function AthleteDetails({
   );
 }
 
-function AthleteModal({
-  onClose,
-  onSaved,
-  onError
-}: {
-  onClose: () => void;
-  onSaved: () => void;
-  onError: ReportError;
-}) {
+function AthleteModal({ onClose, onSaved }: { onClose: () => void; onSaved: () => void }) {
+  const { saving, submit } = useSubmit();
   const [data, setData] = useState({
     fullName: "",
     birthDate: "",
@@ -223,25 +207,19 @@ function AthleteModal({
     phone: "",
     licenseNumber: ""
   });
-  const [saving, setSaving] = useState(false);
   const update = (key: string, value: string) => setData(previous => ({ ...previous, [key]: value }));
 
-  async function submit(event: React.FormEvent) {
+  function onSubmit(event: React.FormEvent) {
     event.preventDefault();
-    setSaving(true);
-    try {
-      await api.createAthlete({ ...data, status: "ACTIVE" });
-      onSaved();
-    } catch {
-      onError("Não foi possível criar o atleta.");
-    } finally {
-      setSaving(false);
-    }
+    void submit(() => api.createAthlete({ ...data, status: "ACTIVE" }), {
+      onSuccess: onSaved,
+      errorMessage: "Não foi possível criar o atleta."
+    });
   }
 
   return (
     <Modal title="Novo atleta" onClose={onClose}>
-      <form className="stack" onSubmit={submit}>
+      <form className="stack" onSubmit={onSubmit}>
         <div className="form-grid">
           <label>
             Nome completo
@@ -282,34 +260,22 @@ function AthleteModal({
   );
 }
 
-function ImportModal({
-  onClose,
-  onImported,
-  onError
-}: {
-  onClose: () => void;
-  onImported: (count: number) => void;
-  onError: ReportError;
-}) {
+function ImportModal({ onClose, onImported }: { onClose: () => void; onImported: (count: number) => void }) {
+  const { saving, submit } = useSubmit();
   const [file, setFile] = useState<File | null>(null);
-  const [saving, setSaving] = useState(false);
 
-  async function submit(event: React.FormEvent) {
+  function onSubmit(event: React.FormEvent) {
     event.preventDefault();
     if (!file) return;
-    setSaving(true);
-    try {
-      onImported((await api.importAthletes(file)).imported);
-    } catch {
-      onError("Não foi possível importar o ficheiro CSV.");
-    } finally {
-      setSaving(false);
-    }
+    void submit(() => api.importAthletes(file), {
+      onSuccess: result => onImported(result.imported),
+      errorMessage: "Não foi possível importar o ficheiro CSV."
+    });
   }
 
   return (
     <Modal title="Importar atletas" onClose={onClose}>
-      <form className="stack" onSubmit={submit}>
+      <form className="stack" onSubmit={onSubmit}>
         <div className="upload-box">
           <FileText size={28} />
           <strong>{file ? file.name : "Escolhe um ficheiro CSV"}</strong>

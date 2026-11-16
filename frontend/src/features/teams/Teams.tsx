@@ -1,11 +1,12 @@
 import { useEffect, useState } from "react";
 import { Activity, ChevronRight, Plus, Users } from "lucide-react";
 import { api, type AgeGroup, type Season, type Team, type TeamStaff } from "../../api";
-import { Empty, Modal, ModalActions, PageHeader } from "../../components";
-import type { ReportError, ShowToast } from "../../types";
+import { Empty, Modal, ModalActions, PageHeader, useToast } from "../../components";
+import { useSubmit } from "../../hooks/useSubmit";
 
 /** Equipas do clube e a composição de cada uma (staff e plantel). */
-export function Teams({ showToast, canManage }: { showToast: ShowToast; canManage: boolean }) {
+export function Teams({ canManage }: { canManage: boolean }) {
+  const toast = useToast();
   const [teams, setTeams] = useState<Team[]>([]);
   const [seasons, setSeasons] = useState<Season[]>([]);
   const [groups, setGroups] = useState<AgeGroup[]>([]);
@@ -19,7 +20,7 @@ export function Teams({ showToast, canManage }: { showToast: ShowToast; canManag
       setSeasons(clubSeasons);
       setGroups(ageGroups);
     } catch {
-      showToast({ kind: "error", message: "Não foi possível carregar as equipas." });
+      toast.error("Não foi possível carregar as equipas.");
     }
   }
 
@@ -83,9 +84,8 @@ export function Teams({ showToast, canManage }: { showToast: ShowToast; canManag
           onSaved={() => {
             setModal(false);
             load();
-            showToast({ kind: "success", message: "Equipa criada com sucesso." });
+            toast.success("Equipa criada com sucesso.");
           }}
-          onError={message => showToast({ kind: "error", message })}
         />
       )}
       {selected && (
@@ -93,24 +93,14 @@ export function Teams({ showToast, canManage }: { showToast: ShowToast; canManag
           team={selected}
           season={seasons.find(item => item.id === selected.seasonId)}
           onClose={() => setSelected(null)}
-          onError={message => showToast({ kind: "error", message })}
         />
       )}
     </section>
   );
 }
 
-function TeamDetails({
-  team,
-  season,
-  onClose,
-  onError
-}: {
-  team: Team;
-  season?: Season;
-  onClose: () => void;
-  onError: ReportError;
-}) {
+function TeamDetails({ team, season, onClose }: { team: Team; season?: Season; onClose: () => void }) {
+  const toast = useToast();
   const [roster, setRoster] = useState<{ athleteId: string; fullName: string; status: string }[]>([]);
   const [staff, setStaff] = useState<TeamStaff[]>([]);
 
@@ -120,7 +110,7 @@ function TeamDetails({
         setRoster(athleteList);
         setStaff(coaches);
       })
-      .catch(() => onError("Não foi possível carregar o plantel e os treinadores."));
+      .catch(() => toast.error("Não foi possível carregar o plantel e os treinadores."));
   }, [team.id]);
 
   return (
@@ -167,39 +157,32 @@ function TeamModal({
   seasons,
   groups,
   onClose,
-  onSaved,
-  onError
+  onSaved
 }: {
   seasons: Season[];
   groups: AgeGroup[];
   onClose: () => void;
   onSaved: () => void;
-  onError: ReportError;
 }) {
+  const { saving, submit } = useSubmit();
   const [data, setData] = useState({ name: "", seasonId: seasons[0]?.id ?? "", ageGroupId: "", status: "ACTIVE" });
-  const [saving, setSaving] = useState(false);
   const availableGroups = groups;
 
   function updateSeason(seasonId: string) {
     setData(previous => ({ ...previous, seasonId, ageGroupId: "" }));
   }
 
-  async function submit(event: React.FormEvent) {
+  function onSubmit(event: React.FormEvent) {
     event.preventDefault();
-    setSaving(true);
-    try {
-      await api.createTeam(data);
-      onSaved();
-    } catch {
-      onError("Não foi possível criar a equipa.");
-    } finally {
-      setSaving(false);
-    }
+    void submit(() => api.createTeam(data), {
+      onSuccess: onSaved,
+      errorMessage: "Não foi possível criar a equipa."
+    });
   }
 
   return (
     <Modal title="Nova equipa" onClose={onClose}>
-      <form className="stack" onSubmit={submit}>
+      <form className="stack" onSubmit={onSubmit}>
         <label>
           Nome da equipa
           <input

@@ -1,12 +1,13 @@
 import { useEffect, useState } from "react";
 import { BookOpen, ChevronRight, Plus, ShieldCheck, Users } from "lucide-react";
 import { api, type AgeGroup, type Athlete, type Promotion, type Season } from "../../api";
-import { Empty, Modal, ModalActions, PageHeader } from "../../components";
+import { Empty, Modal, ModalActions, PageHeader, useToast } from "../../components";
+import { useSubmit } from "../../hooks/useSubmit";
 import { formatDate } from "../../lib/format";
-import type { ReportError, ShowToast } from "../../types";
 
 /** Épocas, catálogo de escalões e autorizações de subida de escalão. */
-export function Seasons({ showToast, canManage }: { showToast: ShowToast; canManage: boolean }) {
+export function Seasons({ canManage }: { canManage: boolean }) {
+  const toast = useToast();
   const [seasons, setSeasons] = useState<Season[]>([]);
   const [groups, setGroups] = useState<AgeGroup[]>([]);
   const [selectedSeasonId, setSelectedSeasonId] = useState("");
@@ -20,7 +21,7 @@ export function Seasons({ showToast, canManage }: { showToast: ShowToast; canMan
       setSeasons(seasonList);
       setGroups(ageGroups);
     } catch {
-      showToast({ kind: "error", message: "Não foi possível carregar as épocas." });
+      toast.error("Não foi possível carregar as épocas.");
     }
   }
 
@@ -38,7 +39,7 @@ export function Seasons({ showToast, canManage }: { showToast: ShowToast; canMan
       setPromotions(items);
       setAthletes(page.items);
     } catch {
-      showToast({ kind: "error", message: "Não foi possível carregar as autorizações de escalão." });
+      toast.error("Não foi possível carregar as autorizações de escalão.");
     }
   }
 
@@ -59,12 +60,9 @@ export function Seasons({ showToast, canManage }: { showToast: ShowToast; canMan
     try {
       await api.setPromotionStatus(selectedSeasonId, promotion.id, status);
       await loadPromotions();
-      showToast({ kind: "success", message: status === "ACTIVE" ? "Autorização reativada." : "Autorização revogada." });
+      toast.success(status === "ACTIVE" ? "Autorização reativada." : "Autorização revogada.");
     } catch (error) {
-      showToast({
-        kind: "error",
-        message: error instanceof Error ? error.message : "Não foi possível alterar a autorização."
-      });
+      toast.error(error instanceof Error ? error.message : "Não foi possível alterar a autorização.");
     }
   }
 
@@ -199,9 +197,8 @@ export function Seasons({ showToast, canManage }: { showToast: ShowToast; canMan
           onSaved={() => {
             setModal(null);
             load();
-            showToast({ kind: "success", message: "Época criada com sucesso." });
+            toast.success("Época criada com sucesso.");
           }}
-          onError={message => showToast({ kind: "error", message })}
         />
       )}
       {modal === "promotion" && (
@@ -213,48 +210,34 @@ export function Seasons({ showToast, canManage }: { showToast: ShowToast; canMan
           onSaved={() => {
             setModal(null);
             loadPromotions();
-            showToast({ kind: "success", message: "Autorização concedida." });
+            toast.success("Autorização concedida.");
           }}
-          onError={message => showToast({ kind: "error", message })}
         />
       )}
     </section>
   );
 }
 
-function SeasonModal({
-  onClose,
-  onSaved,
-  onError
-}: {
-  onClose: () => void;
-  onSaved: () => void;
-  onError: ReportError;
-}) {
+function SeasonModal({ onClose, onSaved }: { onClose: () => void; onSaved: () => void }) {
+  const { saving, submit } = useSubmit();
   const [data, setData] = useState({
     name: "",
     startDate: "",
     endDate: "",
     cutoffDate: `${new Date().getFullYear() + 1}-01-01`
   });
-  const [saving, setSaving] = useState(false);
 
-  async function submit(event: React.FormEvent) {
+  function onSubmit(event: React.FormEvent) {
     event.preventDefault();
-    setSaving(true);
-    try {
-      await api.createSeason({ ...data, isActive: true });
-      onSaved();
-    } catch {
-      onError("Não foi possível criar a época.");
-    } finally {
-      setSaving(false);
-    }
+    void submit(() => api.createSeason({ ...data, isActive: true }), {
+      onSuccess: onSaved,
+      errorMessage: "Não foi possível criar a época."
+    });
   }
 
   return (
     <Modal title="Nova época" onClose={onClose}>
-      <form className="stack" onSubmit={submit}>
+      <form className="stack" onSubmit={onSubmit}>
         <label>
           Nome da época
           <input
@@ -303,41 +286,35 @@ function PromotionModal({
   athletes,
   groups,
   onClose,
-  onSaved,
-  onError
+  onSaved
 }: {
   seasonId: string;
   athletes: Athlete[];
   groups: AgeGroup[];
   onClose: () => void;
   onSaved: () => void;
-  onError: ReportError;
 }) {
+  const { saving, submit } = useSubmit();
   const [data, setData] = useState({ athleteId: athletes[0]?.id ?? "", ageGroupId: "", reason: "" });
-  const [saving, setSaving] = useState(false);
 
-  async function submit(event: React.FormEvent) {
+  function onSubmit(event: React.FormEvent) {
     event.preventDefault();
-    setSaving(true);
-    try {
-      await api.grantPromotion(seasonId, {
-        athleteId: data.athleteId,
-        ageGroupId: data.ageGroupId,
-        reason: data.reason.trim() || undefined
-      });
-      onSaved();
-    } catch (error) {
-      onError(error instanceof Error ? error.message : "Não foi possível conceder a autorização.");
-    } finally {
-      setSaving(false);
-    }
+    void submit(
+      () =>
+        api.grantPromotion(seasonId, {
+          athleteId: data.athleteId,
+          ageGroupId: data.ageGroupId,
+          reason: data.reason.trim() || undefined
+        }),
+      { onSuccess: onSaved, errorMessage: "Não foi possível conceder a autorização." }
+    );
   }
 
   const blocked = !seasonId || !data.athleteId || !data.ageGroupId;
 
   return (
     <Modal title="Nova autorização de escalão" onClose={onClose}>
-      <form className="stack" onSubmit={submit}>
+      <form className="stack" onSubmit={onSubmit}>
         <label>
           Atleta
           <select

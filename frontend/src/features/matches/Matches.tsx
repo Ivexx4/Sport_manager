@@ -1,12 +1,13 @@
 import { useEffect, useState } from "react";
 import { Plus, Swords } from "lucide-react";
 import { api, type Match, type Team } from "../../api";
-import { Empty, Modal, ModalActions, PageHeader } from "../../components";
+import { Empty, Modal, ModalActions, PageHeader, useToast } from "../../components";
+import { useSubmit } from "../../hooks/useSubmit";
 import { formatDate, formatTime } from "../../lib/format";
-import type { ReportError, ShowToast } from "../../types";
 
 /** Jogos do clube e respetivas convocatórias. */
-export function Matches({ showToast, canManage }: { showToast: ShowToast; canManage: boolean }) {
+export function Matches({ canManage }: { canManage: boolean }) {
+  const toast = useToast();
   const [matches, setMatches] = useState<Match[]>([]);
   const [teams, setTeams] = useState<Team[]>([]);
   const [modal, setModal] = useState(false);
@@ -17,7 +18,7 @@ export function Matches({ showToast, canManage }: { showToast: ShowToast; canMan
       setMatches(items);
       setTeams(clubTeams);
     } catch {
-      showToast({ kind: "error", message: "Não foi possível carregar os jogos." });
+      toast.error("Não foi possível carregar os jogos.");
     }
   }
 
@@ -79,26 +80,16 @@ export function Matches({ showToast, canManage }: { showToast: ShowToast; canMan
           onSaved={() => {
             setModal(false);
             load();
-            showToast({ kind: "success", message: "Jogo criado com sucesso." });
+            toast.success("Jogo criado com sucesso.");
           }}
-          onError={message => showToast({ kind: "error", message })}
         />
       )}
     </section>
   );
 }
 
-function MatchModal({
-  teams,
-  onClose,
-  onSaved,
-  onError
-}: {
-  teams: Team[];
-  onClose: () => void;
-  onSaved: () => void;
-  onError: ReportError;
-}) {
+function MatchModal({ teams, onClose, onSaved }: { teams: Team[]; onClose: () => void; onSaved: () => void }) {
+  const { saving, submit: run } = useSubmit();
   const [data, setData] = useState({
     teamId: teams[0]?.id ?? "",
     opponent: "",
@@ -107,24 +98,19 @@ function MatchModal({
     matchDate: "",
     isHome: "true"
   });
-  const [saving, setSaving] = useState(false);
 
-  async function submit(event: React.FormEvent) {
+  function submit(event: React.FormEvent) {
     event.preventDefault();
-    setSaving(true);
-    try {
-      await api.createMatch({
-        ...data,
-        matchDate: new Date(data.matchDate).toISOString(),
-        isHome: data.isHome === "true",
-        status: "SCHEDULED"
-      });
-      onSaved();
-    } catch {
-      onError("Não foi possível criar o jogo.");
-    } finally {
-      setSaving(false);
-    }
+    void run(
+      () =>
+        api.createMatch({
+          ...data,
+          matchDate: new Date(data.matchDate).toISOString(),
+          isHome: data.isHome === "true",
+          status: "SCHEDULED"
+        }),
+      { onSuccess: onSaved, errorMessage: "Não foi possível criar o jogo." }
+    );
   }
 
   return (

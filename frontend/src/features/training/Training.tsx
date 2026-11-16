@@ -1,12 +1,13 @@
 import { useEffect, useState } from "react";
 import { CalendarDays, Plus } from "lucide-react";
 import { api, type Team, type TrainingSession } from "../../api";
-import { Empty, Modal, ModalActions, PageHeader } from "../../components";
+import { Empty, Modal, ModalActions, PageHeader, useToast } from "../../components";
+import { useSubmit } from "../../hooks/useSubmit";
 import { formatDateTime, formatTime } from "../../lib/format";
-import type { ReportError, ShowToast } from "../../types";
 
 /** Calendário de treinos do clube. */
-export function Training({ showToast, canManage }: { showToast: ShowToast; canManage: boolean }) {
+export function Training({ canManage }: { canManage: boolean }) {
+  const toast = useToast();
   const [sessions, setSessions] = useState<TrainingSession[]>([]);
   const [teams, setTeams] = useState<Team[]>([]);
   const [modal, setModal] = useState(false);
@@ -17,7 +18,7 @@ export function Training({ showToast, canManage }: { showToast: ShowToast; canMa
       setSessions(items);
       setTeams(clubTeams);
     } catch {
-      showToast({ kind: "error", message: "Não foi possível carregar o calendário de treinos." });
+      toast.error("Não foi possível carregar o calendário de treinos.");
     }
   }
 
@@ -84,26 +85,16 @@ export function Training({ showToast, canManage }: { showToast: ShowToast; canMa
           onSaved={() => {
             setModal(false);
             load();
-            showToast({ kind: "success", message: "Treino agendado com sucesso." });
+            toast.success("Treino agendado com sucesso.");
           }}
-          onError={message => showToast({ kind: "error", message })}
         />
       )}
     </section>
   );
 }
 
-function TrainingModal({
-  teams,
-  onClose,
-  onSaved,
-  onError
-}: {
-  teams: Team[];
-  onClose: () => void;
-  onSaved: () => void;
-  onError: ReportError;
-}) {
+function TrainingModal({ teams, onClose, onSaved }: { teams: Team[]; onClose: () => void; onSaved: () => void }) {
+  const { saving, submit: run } = useSubmit();
   const [data, setData] = useState({
     teamId: teams[0]?.id ?? "",
     startTime: "",
@@ -111,24 +102,19 @@ function TrainingModal({
     recurrence: "",
     notes: ""
   });
-  const [saving, setSaving] = useState(false);
 
-  async function submit(event: React.FormEvent) {
+  function submit(event: React.FormEvent) {
     event.preventDefault();
-    setSaving(true);
-    try {
-      await api.createTrainingSession({
-        ...data,
-        startTime: new Date(data.startTime).toISOString(),
-        endTime: new Date(data.endTime).toISOString(),
-        status: "ACTIVE"
-      });
-      onSaved();
-    } catch {
-      onError("Não foi possível agendar o treino.");
-    } finally {
-      setSaving(false);
-    }
+    void run(
+      () =>
+        api.createTrainingSession({
+          ...data,
+          startTime: new Date(data.startTime).toISOString(),
+          endTime: new Date(data.endTime).toISOString(),
+          status: "ACTIVE"
+        }),
+      { onSuccess: onSaved, errorMessage: "Não foi possível agendar o treino." }
+    );
   }
 
   return (

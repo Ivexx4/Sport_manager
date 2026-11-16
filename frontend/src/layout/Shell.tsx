@@ -16,7 +16,7 @@ import {
   X
 } from "lucide-react";
 import { api, type Role } from "../api";
-import type { Toast, View } from "../types";
+import type { View } from "../types";
 import { Athletes } from "../features/athletes/Athletes";
 import { Billing } from "../features/billing/Billing";
 import { Matches } from "../features/matches/Matches";
@@ -35,12 +35,11 @@ const TITLES: Record<View, string> = {
   billing: "Quotas e financeiro"
 };
 
-/** Estrutura da aplicação autenticada: menu lateral, barra superior, ecrã ativo e notificações. */
+/** Estrutura da aplicação autenticada: menu lateral, barra superior e ecrã ativo. */
 export function Shell({ onLogout }: { onLogout: () => void }) {
   const [view, setView] = useState<View>("overview");
   const [roles, setRoles] = useState<Role[]>([]);
   const [mobileOpen, setMobileOpen] = useState(false);
-  const [toast, setToast] = useState<Toast | null>(null);
 
   useEffect(() => {
     api
@@ -48,13 +47,6 @@ export function Shell({ onLogout }: { onLogout: () => void }) {
       .then(me => setRoles(me.roles))
       .catch(onLogout);
   }, [onLogout]);
-
-  useEffect(() => {
-    if (toast) {
-      const timer = setTimeout(() => setToast(null), 4200);
-      return () => clearTimeout(timer);
-    }
-  }, [toast]);
 
   const canManage = roles.some(role => role === "ADMIN" || role === "DIRECAO");
   const canManageBilling = roles.some(role => role === "ADMIN" || role === "DIRECAO" || role === "FINANCEIRO");
@@ -167,20 +159,14 @@ export function Shell({ onLogout }: { onLogout: () => void }) {
         </header>
         <div className="content-wrap">
           {view === "overview" && <Overview onNavigate={setView} canManage={canManage} />}
-          {view === "athletes" && <Athletes showToast={setToast} />}
-          {view === "teams" && <Teams showToast={setToast} canManage={canManage} />}
-          {view === "seasons" && <Seasons showToast={setToast} canManage={canManage} />}
-          {view === "training" && <Training showToast={setToast} canManage={canManage} />}
-          {view === "matches" && <Matches showToast={setToast} canManage={canManage} />}
-          {view === "billing" && <Billing showToast={setToast} canManage={canManageBilling} />}
+          {view === "athletes" && <Athletes />}
+          {view === "teams" && <Teams canManage={canManage} />}
+          {view === "seasons" && <Seasons canManage={canManage} />}
+          {view === "training" && <Training canManage={canManage} />}
+          {view === "matches" && <Matches canManage={canManage} />}
+          {view === "billing" && <Billing canManage={canManageBilling} />}
         </div>
       </main>
-      {toast && (
-        <div className={`toast ${toast.kind}`}>
-          <span>{toast.kind === "success" ? "✓" : "!"}</span>
-          {toast.message}
-        </div>
-      )}
     </div>
   );
 }
