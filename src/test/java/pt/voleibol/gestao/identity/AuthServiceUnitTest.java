@@ -37,7 +37,7 @@ class AuthServiceUnitTest {
         when(encoder.encode(anyString())).thenReturn("dummy");
         when(encoder.matches(anyString(), anyString())).thenReturn(true);
         JwtEncoder jwt = mock(JwtEncoder.class);
-        AuthService service = new AuthService(repository, encoder, jwt,
+        AuthService service = new AuthService(repository, mock(MfaService.class), encoder, jwt,
                 new JwtProperties("secret", "issuer", Duration.ofMinutes(5), Duration.ofDays(1)));
 
         assertThat(service.login("missing@example.test", "password")).isEmpty();
@@ -63,7 +63,7 @@ class AuthServiceUnitTest {
         when(repository.findActiveUserByEmail("user@example.test"))
                 .thenReturn(Optional.of(new AuthRepository.UserRow(USER, " ")));
         when(encoder.matches(anyString(), eq("dummy"))).thenReturn(true);
-        AuthService service = new AuthService(repository, encoder, mock(JwtEncoder.class),
+        AuthService service = new AuthService(repository, mock(MfaService.class), encoder, mock(JwtEncoder.class),
                 new JwtProperties("secret", "issuer", Duration.ofMinutes(5), Duration.ofDays(1)));
 
         assertThat(service.login("user@example.test", "a".repeat(100))).isEmpty();
@@ -83,7 +83,7 @@ class AuthServiceUnitTest {
         when(repository.findActiveRoles(TENANT, USER)).thenReturn(Set.of("ADMIN"));
         when(jwtEncoder.encode(any())).thenReturn(Jwt.withTokenValue("access")
                 .header("alg", "none").claim("sub", USER.toString()).build());
-        AuthService service = new AuthService(repository, encoder, jwtEncoder,
+        AuthService service = new AuthService(repository, mock(MfaService.class), encoder, jwtEncoder,
                 new JwtProperties("secret", "issuer", Duration.ofMinutes(5), Duration.ofDays(1)));
 
         assertThat(service.login("user@example.test", "password")).isPresent();

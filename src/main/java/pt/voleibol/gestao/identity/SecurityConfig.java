@@ -33,7 +33,7 @@ import org.springframework.security.web.SecurityFilterChain;
  */
 @Configuration
 @EnableMethodSecurity
-@EnableConfigurationProperties({JwtProperties.class, LoginRateLimitProperties.class})
+@EnableConfigurationProperties({JwtProperties.class, LoginRateLimitProperties.class, MfaProperties.class})
 class SecurityConfig {
 
     private static final int MIN_SECRET_BYTES = 32;
@@ -100,6 +100,9 @@ class SecurityConfig {
                         .requestMatchers("/api/v1/platform/**").permitAll()
                         .requestMatchers("/api/v1/auth/login", "/api/v1/auth/refresh",
                                 "/api/v1/auth/logout").permitAll()
+                        // Segundo passo do login: só o token de desafio (de curta duração) abre estas rotas.
+                        .requestMatchers("/api/v1/auth/mfa/verify", "/api/v1/auth/mfa/enrollment/setup",
+                                "/api/v1/auth/mfa/enrollment/confirm").permitAll()
                         .requestMatchers("/api/v1/auth/invitations/accept", "/api/v1/auth/password/forgot",
                                 "/api/v1/auth/password/reset").permitAll()
                         .requestMatchers("/api/v1/users/**").hasAnyRole("ADMIN", "DIRECAO")

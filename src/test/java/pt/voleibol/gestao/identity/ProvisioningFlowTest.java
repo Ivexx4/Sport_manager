@@ -32,7 +32,8 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
  */
 @SpringBootTest(properties = {
         "app.platform.bootstrap-key=chave-de-teste",
-        "app.security.login-rate-limit.enabled=false"
+        "app.security.login-rate-limit.enabled=false",
+        "app.security.mfa.require-for-admins=false"
 })
 class ProvisioningFlowTest extends FlowTestSupport {
 

@@ -60,6 +60,19 @@ class TenantClaimValidatorTest {
         assertThat(validator.validate(jwt).hasErrors()).isTrue();
     }
 
+    @Test
+    void desafioDeMfaNaoServeComoTokenDeAcesso() {
+        TenantContext.set(CLUBE_A);
+        Jwt jwt = mock(Jwt.class);
+        when(jwt.getClaimAsString(TenantClaimValidator.CLAIM)).thenReturn(CLUBE_A.toString());
+        when(jwt.getClaimAsString(MfaService.PURPOSE_CLAIM)).thenReturn(MfaService.PURPOSE_VALUE);
+
+        OAuth2TokenValidatorResult result = validator.validate(jwt);
+
+        assertThat(result.hasErrors()).isTrue();
+        assertThat(result.getErrors()).extracting("errorCode").containsExactly("invalid_token");
+    }
+
     private static Jwt jwtWithClaim(String value) {
         Jwt jwt = mock(Jwt.class);
         when(jwt.getClaimAsString(TenantClaimValidator.CLAIM)).thenReturn(value);

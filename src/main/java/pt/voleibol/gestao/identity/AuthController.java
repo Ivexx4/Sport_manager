@@ -6,10 +6,8 @@ import jakarta.validation.constraints.Email;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.Size;
 
-import java.time.Duration;
 import java.util.List;
 import java.util.Optional;
-import java.util.UUID;
 
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
@@ -22,8 +20,6 @@ import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
-import pt.voleibol.gestao.tenancy.TenantContext;
-
 @RestController
 @RequestMapping("/api/v1/auth")
 class AuthController {
@@ -35,10 +31,16 @@ class AuthController {
     record RefreshRequest(@NotBlank @Size(max = 200) String refreshToken) {
     }
 
-    record TokenResponse(String accessToken, String refreshToken, String tokenType, long expiresIn) {
-        static TokenResponse from(AuthService.Tokens tokens) {
-            return new TokenResponse(tokens.accessToken(), tokens.refreshToken(), "Bearer",
-                    tokens.expiresInSeconds());
+    /**
+     * Resposta de um login que ainda não terminou. {@code mfaRequired} pede o código da aplicação
+     * autenticadora; {@code mfaEnrollmentRequired} pede a inscrição (o perfil exige MFA e a conta
+     * ainda não o tem). Em qualquer dos casos, a sessão só abre no passo seguinte.
+     */
+    record MfaChallengeResponse(boolean mfaRequired, boolean mfaEnrollmentRequired, String challengeToken,
+                                long expiresIn) {
+        static MfaChallengeResponse from(MfaService.Challenge challenge) {
+            return new MfaChallengeResponse(challenge.flow() == MfaService.Flow.VERIFY,
+                    challenge.flow() == MfaService.Flow.ENROLL, challenge.token(), challenge.expiresInSeconds());
         }
     }
 
@@ -46,40 +48,40 @@ class AuthController {
     }
 
     private final AuthService authService;
-    private final LoginRateLimiter loginRateLimiter;
-    private final ClientIpResolver clientIpResolver;
+    private final AuthThrottle throttle;
 
-    AuthController(AuthService authService, LoginRateLimiter loginRateLimiter,
-                   ClientIpResolver clientIpResolver) {
+    AuthController(AuthService authService, AuthThrottle throttle) {
         this.authService = authService;
-        this.loginRateLimiter = loginRateLimiter;
-        this.clientIpResolver = clientIpResolver;
+        this.throttle = throttle;
     }
 
     @PostMapping("/login")
-    ResponseEntity<TokenResponse> login(@Valid @RequestBody LoginRequest request,
-                                        HttpServletRequest httpRequest) {
-        UUID tenantId = TenantContext.current().orElse(null);
-        String clientIp = clientIpResolver.resolve(httpRequest);
+    ResponseEntity<?> login(@Valid @RequestBody LoginRequest request, HttpServletRequest httpRequest) {
+        Optional<ResponseEntity<Void>> blocked = throttle.blocked(httpRequest);
+        if (blocked.isPresent()) return blocked.get();
 
-        Optional<Duration> retryAfter = loginRateLimiter.retryAfter(tenantId, clientIp);
-        if (retryAfter.isPresent()) {
-            return ResponseEntity.status(HttpStatus.TOO_MANY_REQUESTS)
-                    .header(HttpHeaders.RETRY_AFTER, Long.toString(retryAfterSeconds(retryAfter.get())))
-                    .header(HttpHeaders.CACHE_CONTROL, "no-store")
-                    .build();
+        Optional<AuthService.LoginOutcome> outcome = authService.login(request.email(), request.password());
+        if (outcome.isEmpty()) {
+            throttle.record(httpRequest, false);
+            return ResponseEntity.status(HttpStatus.UNAUTHORIZED).build();
         }
 
-        Optional<AuthService.Tokens> tokens = authService.login(request.email(), request.password());
-        if (tokens.isPresent()) loginRateLimiter.recordSuccess(tenantId, clientIp); else {
-            loginRateLimiter.recordFailure(tenantId, clientIp);
+        AuthService.LoginOutcome result = outcome.get();
+        if (result.challenge() != null) {
+            // A password estava certa, mas a sessão ainda não começou: as tentativas continuam a
+            // contar (e são limpas) no segundo passo.
+            return ResponseEntity.ok().header(HttpHeaders.CACHE_CONTROL, "no-store")
+                    .body(MfaChallengeResponse.from(result.challenge()));
         }
-        return respond(tokens);
+        throttle.record(httpRequest, true);
+        return TokenResponse.ok(result.tokens());
     }
 
     @PostMapping("/refresh")
     ResponseEntity<TokenResponse> refresh(@Valid @RequestBody RefreshRequest request) {
-        return respond(authService.refresh(request.refreshToken()));
+        return authService.refresh(request.refreshToken())
+                .map(TokenResponse::ok)
+                .orElseGet(() -> ResponseEntity.status(HttpStatus.UNAUTHORIZED).build());
     }
 
     @PostMapping("/logout")
@@ -93,15 +95,5 @@ class AuthController {
         List<String> roles = jwt.getClaimAsStringList("roles");
         return new MeResponse(jwt.getSubject(), jwt.getClaimAsString(TenantClaimValidator.CLAIM),
                 roles == null ? List.of() : roles);
-    }
-
-    private static ResponseEntity<TokenResponse> respond(java.util.Optional<AuthService.Tokens> tokens) {
-        return tokens
-                .map(t -> ResponseEntity.ok().header("Cache-Control", "no-store").body(TokenResponse.from(t)))
-                .orElseGet(() -> ResponseEntity.status(HttpStatus.UNAUTHORIZED).build());
-    }
-
-    private static long retryAfterSeconds(Duration duration) {
-        return Math.max(1, (long) Math.ceil(duration.toMillis() / 1000.0));
     }
 }

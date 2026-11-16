@@ -292,10 +292,43 @@ Monólito modular com PostgreSQL e multitenancy por `tenant_id` + Row Level Secu
 
 | Endpoint                    | Descrição                                                                                                               |
 |-----------------------------|-------------------------------------------------------------------------------------------------------------------------|
-| `POST /api/v1/auth/login`   | `{email, password}` → `{accessToken, refreshToken, tokenType, expiresIn}`; `401` em falha, `429` após demasiadas falhas |
+| `POST /api/v1/auth/login`   | `{email, password}` → tokens; com MFA pede um segundo passo (ver abaixo); `401` em falha, `429` após demasiadas falhas |
 | `POST /api/v1/auth/refresh` | `{refreshToken}` → novo par de tokens (rotação: cada refresh token só serve uma vez)                                    |
 | `POST /api/v1/auth/logout`  | `{refreshToken}` → 204; revoga o refresh token                                                                          |
 | `GET /api/v1/auth/me`       | Utilizador, clube e papéis do token                                                                                     |
+
+O login devolve `{accessToken, refreshToken, tokenType, expiresIn}` quando a sessão fica concluída. Com autenticação
+multifator, devolve antes um desafio (sem tokens): `{mfaRequired, mfaEnrollmentRequired, challengeToken, expiresIn}`.
+
+### Autenticação multifator (TOTP)
+
+| Endpoint                                  | Quem              | Descrição                                                                                     |
+|-------------------------------------------|-------------------|-----------------------------------------------------------------------------------------------|
+| `POST /api/v1/auth/mfa/verify`            | público           | `{challengeToken, code}` → tokens; o `code` é TOTP de 6 dígitos ou um código de recuperação    |
+| `POST /api/v1/auth/mfa/enrollment/setup`  | público           | `{challengeToken}` → `{secret, otpauthUri}`; só com desafio de inscrição                      |
+| `POST /api/v1/auth/mfa/enrollment/confirm`| público           | `{challengeToken, code}` → tokens + `{recoveryCodes[]}`; os códigos só aparecem nesta resposta |
+| `GET /api/v1/auth/mfa`                    | autenticado       | `{enabled, pending, recoveryCodesLeft}` da própria conta                                      |
+| `POST /api/v1/auth/mfa/setup`             | autenticado       | `{secret, otpauthUri}`; início da inscrição opcional                                          |
+| `POST /api/v1/auth/mfa/activate`          | autenticado       | `{code}` → `{recoveryCodes[]}`; confirma a inscrição pendente                                 |
+| `POST /api/v1/auth/mfa/disable`           | autenticado       | `{password, code}` → 204; exige a password e um código válido                                 |
+
+- **Obrigatório para `ADMIN`:** por omissão (`app.security.mfa.require-for-admins`, `APP_SECURITY_MFA_REQUIRE_FOR_ADMINS`),
+  um `ADMIN` sem MFA recebe `mfaEnrollmentRequired: true` no login e só entra depois de inscrever e confirmar o
+  autenticador. Os restantes papéis entram normalmente e podem ativar o MFA quando quiserem.
+- **TOTP (RFC 6238):** 6 dígitos, passo de 30 s, HMAC-SHA1 e segredo de 160 bits em Base32 — compatível com Google
+  Authenticator, 1Password, Authy, etc. A verificação tolera um passo para cada lado (`APP_SECURITY_MFA_TIME_STEP_SKEW`)
+  e guarda em `app_user.mfa_last_used_step` o último passo aceite, pelo que o mesmo código não serve duas vezes.
+- **Desafio de login:** em vez de uma tabela de desafios, o login devolve um JWT de 5 minutos
+  (`APP_SECURITY_MFA_CHALLENGE_TTL`) assinado com a mesma chave, marcado com `purpose=mfa_challenge` e
+  `mfa_flow=VERIFY|ENROLL`, ligado ao `tenant_id` do clube. Não é um token de sessão: o validador de tokens de acesso
+  recusa qualquer token com `purpose`, e um desafio do clube A não serve no clube B.
+- **Códigos de recuperação:** 10 por omissão (`APP_SECURITY_MFA_RECOVERY_CODE_COUNT`), de uso único, guardados só como
+  hash SHA-256 em `mfa_recovery_code`. É uma tabela de plataforma (sem `tenant_id`/RLS) porque o MFA pertence à conta e
+  os códigos têm de servir em qualquer clube. Mostram-se uma única vez, ao ativar.
+- **Desativar:** exige a password **e** um código válido, para que uma sessão roubada não chegue para desligar o MFA.
+- **Tentativas:** os passos do MFA usam o mesmo limitador de força bruta do login (clube + IP), e o segundo passo é o
+  que limpa o contador. Todos os passos ficam em `audit_log` (`MFA_ENROLLMENT_REQUIRED`, `MFA_ENROLLMENT_STARTED`,
+  `MFA_ENROLLED`, `MFA_VERIFIED`, `MFA_VERIFICATION_FAILED`, `MFA_DISABLED`, `MFA_DISABLE_FAILED`).
 
 - **Access token:** JWT HS256 de 15 minutos, com `sub` (utilizador), `tenant_id` e `roles`. É validado pelo
   Spring Security como resource server, e o `tenant_id` tem de coincidir com o clube do subdomínio:
@@ -568,7 +601,7 @@ atual em `Europe/Lisbon`) para todos os planos ativos, ou apenas para `feePlanId
 
 ## Modelo de dados
 
-Todas as tabelas abaixo levam `tenant_id`, `id` (UUID), `created_at`, `updated_at` e `created_by`; as que não referem tenant (`tenant`, `app_user`) são geridas pela plataforma.
+Todas as tabelas abaixo levam `tenant_id`, `id` (UUID), `created_at`, `updated_at` e `created_by`; as que não referem tenant (`tenant`, `app_user`, `mfa_recovery_code`) são geridas pela plataforma.
 
 | Entidade | Campos principais | Relações |
 | :--- | :--- | :--- |
@@ -594,7 +627,8 @@ Todas as tabelas abaixo levam `tenant_id`, `id` (UUID), `created_at`, `updated_a
 | `charge` | athlete_id, guardian_id, fee_plan_id, valor, vencimento, estado, billing_period | 1:N com payment; período faturado garante idempotência |
 | `payment` | charge_id, método, valor, referência externa, data | reconciliação do agregador |
 | `ledger_entry` | tipo, categoria, valor, data, descrição | receitas e despesas do clube |
-| `audit_log` | utilizador, ação, entidade, antes/depois (JSONB), data | só de escrita |
+| `audit_log` | utilizador, ação, entidade, antes/depois (JSONB), data | só de escrita (não há endpoint de leitura) |
+| `mfa_recovery_code` | user_id, hash do código, usado em | códigos de recuperação de uso único (tabela de plataforma, sem RLS) |
 
 ### Regras de modelação:
 - Valores monetários em inteiros (cêntimos) ou `numeric(12,2)`, nunca `float`.
@@ -645,6 +679,11 @@ Os testes de integração precisam de Docker. Corre-se um PostgreSQL real com Te
   capturados em memória e os tokens saem dos links, como na vida real.
 - `LoginRateLimitFlowTest`: bloqueio por clube + IP ao fim de N falhas (`429` + `Retry-After`), independência
   entre clubes e entre IPs, reposição do contador por um login com sucesso e `X-Forwarded-For` ignorado por omissão.
+- `MfaFlowTest`: MFA contra PostgreSQL real com o segundo fator obrigatório para `ADMIN`. Cobre a inscrição forçada
+  no login (segredo + URI `otpauth://`, confirmação e códigos de recuperação), a recusa do token de desafio como
+  token de acesso, o desafio de um clube no outro (`401`), o login com MFA ativo, a proteção de repetição do mesmo
+  código, os códigos de recuperação de uso único, a ativação opcional por outro papel, a desativação com password
+  e código e os registos de auditoria (`audit_log` só de escrita, sem endpoint de leitura).
 - `ProvisioningFlowTest`: `POST /api/v1/platform/tenants` cria o clube e o primeiro `ADMIN` que entra logo;
   uma conta já existente é associada sem trocar a password; chave em falta/errada (`403`), slug repetido (`409`)
   e pedido inválido (`400`) não deixam clube criado.
@@ -690,8 +729,9 @@ Os testes de integração precisam de Docker. Corre-se um PostgreSQL real com Te
   **vários clubes** numa só chamada, e mantém os dados recentes/válidos e as mensagens `PENDING` da outbox.
 
 Os testes unitários (`LoginRateLimiterTest`, `ClientIpResolverTest`, `ProvisioningServiceTest`,
-`ExpiredDataPurgerUnitTest`) não precisam de Docker; os dois primeiros controlam o relógio para verificar a
-expiração do bloqueio sem esperar.
+`ExpiredDataPurgerUnitTest`, `TotpTest`, `TenantClaimValidatorTest`, `AuthServiceUnitTest`, `SecurityConfigTest`)
+não precisam de Docker; os dois primeiros controlam o relógio para verificar a expiração do bloqueio sem esperar,
+e o `TotpTest` confere os códigos com os vetores do RFC 6238.
 
 ### Cobertura de testes (JaCoCo)
 
@@ -722,7 +762,7 @@ Os limiares por omissão são **90% de linhas** e **70% de ramos** (`pom.xml`). 
 apenas medida e nunca falha o build; os valores podem ser trocados na linha de comandos
 (`-Djacoco.min.line=0.92 -Djacoco.min.branch=0.72`). A conta abrange `src/main/java` (exclui só `package-info`).
 
-No último levantamento a suite dava **93,3% de linhas** e **74,2% de ramos**. A maior lacuna está em
+No último levantamento a suite dava **92,5% de linhas** e **76,4% de ramos**. A maior lacuna está em
 `notifications` (`EmailOutboxDispatcher` e `SmtpMailTransport`), sem impacto nos restantes módulos,
 que ficam acima de 93% de linhas.
 
@@ -846,7 +886,9 @@ encarregados) e base mínima de equipas (staff e plantel), `V10` remoção não 
 documentos (`document.expiry_notified_at`), `V16` geração de cobranças (`charge.billing_period` e índice
 único parcial de idempotência), `V17` inscrições oficiais por atleta/época, `V18` modalidades,
 datas de corte, épocas automáticas e exceções de quotas, `V19` remoção em cascata das referências
-de escalão e `V20` promoções permanentes de atletas. Papéis em
+de escalão, `V20` promoções permanentes de atletas, `V21` catálogo FPV de escalões por idade, `V22`
+promoções associadas a pagamento, `V23` desistência do atleta e `V24` MFA por TOTP (`app_user.mfa_*` e
+`mfa_recovery_code`). Papéis em
 `docker/postgres-init/01-roles.sql`, também
 usado pelos testes (passwords `dev`, só para desenvolvimento; o `volei_migrator` tem `BYPASSRLS`).
 
@@ -868,7 +910,6 @@ Scripts de apoio em `scripts/`: `coverage.ps1` resume a cobertura JaCoCo por pac
 
 ## Por fazer
 
-- MFA para administradores (fase 0).
 - Módulo financeiro: backend e frontend entregues, com quotas recorrentes, taxas únicas por atleta,
   geração de cobranças, pagamentos, estados, mapa de pendentes e lançamentos contabilísticos. Falta a integração real com
   Multibanco/MB WAY (webhooks e reconciliação automática).

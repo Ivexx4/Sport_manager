@@ -34,6 +34,14 @@ app:
       block-duration: ${APP_LOGIN_RATE_LIMIT_BLOCK_DURATION:PT15M}
       # Só ativar atrás de um proxy de confiança que escreva X-Forwarded-For.
       trust-forwarded-headers: ${APP_LOGIN_RATE_LIMIT_TRUST_FORWARDED_HEADERS:false}
+    mfa:
+      # MFA por TOTP. Os ADMIN são obrigados a inscrever-se; as restantes contas podem ativá-lo.
+      require-for-admins: ${APP_SECURITY_MFA_REQUIRE_FOR_ADMINS:true}
+      # Validade do token de desafio devolvido pelo login (não é um token de sessão).
+      challenge-ttl: ${APP_SECURITY_MFA_CHALLENGE_TTL:PT5M}
+      # Passos TOTP aceites para cada lado, para tolerar relógios desalinhados (±30s por passo).
+      time-step-skew: ${APP_SECURITY_MFA_TIME_STEP_SKEW:1}
+      recovery-code-count: ${APP_SECURITY_MFA_RECOVERY_CODE_COUNT:10}
   links:
     # Endereço da aplicação web de cada clube, usado nos links dos e-mails ({slug} = subdomínio do clube).
     # A aplicação web tem de ter as rotas /accept-invitation e /reset-password, que recebem ?token=...

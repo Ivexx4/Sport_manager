@@ -29,7 +29,8 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
  */
 @SpringBootTest(properties = {
         "app.security.login-rate-limit.max-attempts=3",
-        "app.security.login-rate-limit.block-duration=PT2S"
+        "app.security.login-rate-limit.block-duration=PT2S",
+        "app.security.mfa.require-for-admins=false"
 })
 class LoginRateLimitFlowTest extends FlowTestSupport {
 

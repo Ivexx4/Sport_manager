@@ -1,6 +1,7 @@
 package pt.voleibol.gestao.identity;
 
 import java.time.Instant;
+import java.util.List;
 import java.util.Optional;
 import java.util.Set;
 import java.util.TreeSet;
@@ -22,6 +23,9 @@ import pt.voleibol.gestao.shared.Rules;
  *
  * <p>Os métodos devolvem vazio em vez de lançar exceções quando a autenticação falha: assim a
  * transação faz commit e o registo de auditoria da tentativa fica gravado.
+ *
+ * <p>Com MFA ativo, o login só fica completo depois do segundo fator: a password certa devolve um
+ * desafio, não tokens. Os tokens continuam a ser emitidos apenas aqui, para haver um único caminho.
  */
 @Service
 class AuthService {
@@ -29,16 +33,26 @@ class AuthService {
     record Tokens(String accessToken, String refreshToken, long expiresInSeconds) {
     }
 
+    /** Resultado do login: ou os tokens, ou o passo que ainda falta (desafio de MFA). */
+    record LoginOutcome(Tokens tokens, MfaService.Challenge challenge) {
+    }
+
+    /** Inscrição de MFA confirmada já durante o login: sessão aberta e códigos para guardar. */
+    record Enrollment(Tokens tokens, List<String> recoveryCodes) {
+    }
+
     private final AuthRepository repository;
+    private final MfaService mfaService;
     private final PasswordEncoder passwordEncoder;
     private final JwtEncoder jwtEncoder;
     private final JwtProperties properties;
     /** Hash de uma password que ninguém conhece: mantém o tempo de resposta quando o email não existe. */
     private final String dummyHash;
 
-    AuthService(AuthRepository repository, PasswordEncoder passwordEncoder, JwtEncoder jwtEncoder,
-                JwtProperties properties) {
+    AuthService(AuthRepository repository, MfaService mfaService, PasswordEncoder passwordEncoder,
+                JwtEncoder jwtEncoder, JwtProperties properties) {
         this.repository = repository;
+        this.mfaService = mfaService;
         this.passwordEncoder = passwordEncoder;
         this.jwtEncoder = jwtEncoder;
         this.properties = properties;
@@ -46,7 +60,7 @@ class AuthService {
     }
 
     @Transactional
-    Optional<Tokens> login(String email, String password) {
+    Optional<LoginOutcome> login(String email, String password) {
         UUID tenantId = Rules.tenant();
 
         Optional<AuthRepository.UserRow> user = repository.findActiveUserByEmail(email);
@@ -67,8 +81,51 @@ class AuthService {
         }
 
         UUID userId = user.get().id();
+        Optional<MfaService.Challenge> challenge = mfaService.gate(tenantId, userId, roles);
+        if (challenge.isPresent()) {
+            repository.audit(tenantId, userId,
+                    challenge.get().flow() == MfaService.Flow.ENROLL ? "MFA_ENROLLMENT_REQUIRED"
+                            : "MFA_CHALLENGE_ISSUED");
+            return Optional.of(new LoginOutcome(null, challenge.get()));
+        }
+
+        repository.audit(tenantId, userId, "LOGIN_SUCCESS");
+        return Optional.of(new LoginOutcome(issueTokens(tenantId, userId, roles), null));
+    }
+
+    /** Segundo fator do login, a partir do desafio emitido pelo {@link #login}. */
+    @Transactional
+    Optional<Tokens> verifyMfa(String rawChallenge, String code) {
+        UUID tenantId = Rules.tenant();
+        Optional<MfaService.Claims> claims = mfaService.parse(tenantId, rawChallenge);
+        if (claims.isEmpty() || claims.get().flow() != MfaService.Flow.VERIFY) return Optional.empty();
+
+        UUID userId = claims.get().userId();
+        // Os papéis são relidos: um acesso retirado entretanto já não dá sessão.
+        Set<String> roles = repository.findActiveRoles(tenantId, userId);
+        if (roles.isEmpty() || !mfaService.verify(tenantId, userId, code)) return Optional.empty();
+
         repository.audit(tenantId, userId, "LOGIN_SUCCESS");
         return Optional.of(issueTokens(tenantId, userId, roles));
+    }
+
+    /** Inscrição de MFA obrigatória (ADMIN) concluída dentro do login. */
+    @Transactional
+    Optional<Enrollment> confirmMfaEnrollment(String rawChallenge, String code) {
+        UUID tenantId = Rules.tenant();
+        Optional<MfaService.Claims> claims = mfaService.parse(tenantId, rawChallenge);
+        if (claims.isEmpty() || claims.get().flow() != MfaService.Flow.ENROLL) return Optional.empty();
+
+        UUID userId = claims.get().userId();
+        Set<String> roles = repository.findActiveRoles(tenantId, userId);
+        if (roles.isEmpty()) return Optional.empty();
+
+        Optional<MfaService.Activation> activation = mfaService.confirmEnrollment(tenantId, userId, code);
+        if (activation.isEmpty()) return Optional.empty();
+
+        repository.audit(tenantId, userId, "LOGIN_SUCCESS");
+        return Optional.of(new Enrollment(issueTokens(tenantId, userId, roles),
+                activation.get().recoveryCodes()));
     }
 
     /** Rotação: cada refresh token só serve uma vez. Reutilizar um já usado revoga toda a sessão. */

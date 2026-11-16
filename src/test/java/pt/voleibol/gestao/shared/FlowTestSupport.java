@@ -37,7 +37,11 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
  * Infraestrutura comum aos testes de ponta a ponta: PostgreSQL real, MockMvc com os filtros da
  * aplicação e os auxiliares de pedido e de semeadura usados por todos os domínios.
  */
-@SpringBootTest(properties = "app.security.login-rate-limit.enabled=false")
+@SpringBootTest(properties = {
+        "app.security.login-rate-limit.enabled=false",
+        // Os testes de domínio entram com ADMIN sem segundo fator; o MFA tem testes próprios (MfaFlowTest).
+        "app.security.mfa.require-for-admins=false"
+})
 @Testcontainers
 public abstract class FlowTestSupport {
 

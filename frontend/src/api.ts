@@ -7,6 +7,29 @@ export interface TokenResponse {
   expiresIn: number;
 }
 
+/** O login ainda não terminou: falta o código do autenticador ou a inscrição do MFA. */
+export interface MfaChallenge {
+  mfaRequired: boolean;
+  mfaEnrollmentRequired: boolean;
+  challengeToken: string;
+  expiresIn: number;
+}
+
+export type LoginResult = TokenResponse | MfaChallenge;
+
+export function isMfaChallenge(result: LoginResult): result is MfaChallenge {
+  return typeof (result as MfaChallenge).challengeToken === "string";
+}
+
+export interface MfaSetup {
+  secret: string;
+  otpauthUri: string;
+}
+
+export interface EnrollmentResult extends TokenResponse {
+  recoveryCodes: string[];
+}
+
 export interface ProvisionTenantResponse {
   tenantId: string;
   slug: string;
@@ -187,9 +210,42 @@ async function request<T>(path: string, init: RequestInit = {}, retry = true): P
   return response.json() as Promise<T>;
 }
 
+/**
+ * Pedidos do segundo passo do login: um 401 aqui significa "código errado", não "sessão expirada",
+ * por isso não passam pelo refresh automático nem limpam o armazenamento.
+ */
+async function challengeRequest<T>(path: string, body: unknown): Promise<T> {
+  const response = await fetch(`${API_BASE}${path}`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body)
+  });
+  if (response.status === 401) throw new Error("Código inválido ou expirado. Tenta novamente.");
+  if (!response.ok) throw new Error((await response.text()) || `Pedido falhou (${response.status})`);
+  return response.json() as Promise<T>;
+}
+
 export const api = {
-  login: (email: string, password: string) => request<TokenResponse>("/api/v1/auth/login", {
+  login: (email: string, password: string) => request<LoginResult>("/api/v1/auth/login", {
     method: "POST", body: JSON.stringify({ email, password })
+  }),
+  /** Segundo fator de uma conta com MFA ativo. */
+  mfaVerify: (challengeToken: string, code: string) =>
+    challengeRequest<TokenResponse>("/api/v1/auth/mfa/verify", { challengeToken, code }),
+  /** Início da inscrição obrigatória, antes de haver sessão. */
+  mfaEnrollmentSetup: (challengeToken: string) =>
+    challengeRequest<MfaSetup>("/api/v1/auth/mfa/enrollment/setup", { challengeToken }),
+  /** Confirma a inscrição e abre a sessão; os códigos de recuperação só aparecem aqui. */
+  mfaEnrollmentConfirm: (challengeToken: string, code: string) =>
+    challengeRequest<EnrollmentResult>("/api/v1/auth/mfa/enrollment/confirm", { challengeToken, code }),
+  /** Gestão do MFA da própria conta (com sessão). */
+  mfaStatus: () => request<{ enabled: boolean; pending: boolean; recoveryCodesLeft: number }>("/api/v1/auth/mfa"),
+  mfaSetup: () => request<MfaSetup>("/api/v1/auth/mfa/setup", { method: "POST" }),
+  mfaActivate: (code: string) => request<{ recoveryCodes: string[] }>("/api/v1/auth/mfa/activate", {
+    method: "POST", body: JSON.stringify({ code })
+  }),
+  mfaDisable: (password: string, code: string) => request<void>("/api/v1/auth/mfa/disable", {
+    method: "POST", body: JSON.stringify({ password, code })
   }),
   provisionTenant: (bootstrapKey: string, data: Record<string, unknown>) => request<ProvisionTenantResponse>("/api/v1/platform/tenants", {
     method: "POST",

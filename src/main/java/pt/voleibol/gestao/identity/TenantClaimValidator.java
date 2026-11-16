@@ -13,6 +13,9 @@ import pt.voleibol.gestao.tenancy.TenantContext;
 /**
  * Confirma que o token pertence ao clube do pedido: o claim tenant_id tem de ser igual ao tenant
  * resolvido pelo subdomínio. Um token do clube A, usado no subdomínio do clube B, é recusado.
+ *
+ * <p>Recusa também qualquer token marcado com {@code purpose}: são os desafios de MFA, assinados com
+ * a mesma chave mas destinados apenas a completar o login.
  */
 class TenantClaimValidator implements OAuth2TokenValidator<Jwt> {
 
@@ -20,6 +23,10 @@ class TenantClaimValidator implements OAuth2TokenValidator<Jwt> {
 
     @Override
     public OAuth2TokenValidatorResult validate(Jwt jwt) {
+        if (jwt.getClaimAsString(MfaService.PURPOSE_CLAIM) != null) {
+            return OAuth2TokenValidatorResult.failure(
+                    new OAuth2Error("invalid_token", "Este token não serve para autenticar pedidos", null));
+        }
         String claim = jwt.getClaimAsString(CLAIM);
         Optional<UUID> current = TenantContext.current();
         if (claim != null && current.isPresent() && current.get().toString().equals(claim)) return OAuth2TokenValidatorResult.success();
