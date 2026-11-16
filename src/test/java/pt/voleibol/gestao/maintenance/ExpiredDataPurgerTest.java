@@ -1,15 +1,12 @@
 package pt.voleibol.gestao.maintenance;
 
-import java.nio.charset.StandardCharsets;
 import java.sql.Connection;
-import java.sql.DriverManager;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
 import java.util.ArrayList;
-import java.util.Base64;
 import java.util.List;
 import java.util.UUID;
 
@@ -19,9 +16,8 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
-import org.testcontainers.junit.jupiter.Container;
-import org.testcontainers.junit.jupiter.Testcontainers;
-import org.testcontainers.postgresql.PostgreSQLContainer;
+
+import pt.voleibol.gestao.shared.TestDatabase;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -35,12 +31,10 @@ import static org.assertj.core.api.Assertions.assertThat;
         "app.maintenance.cleanup.enabled=true",
         "app.maintenance.cleanup.initial-delay=PT1H"
 })
-@Testcontainers
 class ExpiredDataPurgerTest {
 
-    @Container
-    static final PostgreSQLContainer POSTGRES = new PostgreSQLContainer("postgres:16-alpine")
-            .withInitScript("db/init/01-roles.sql");
+    /** Base exclusiva: a limpeza atravessa todos os clubes e as asserções olham para a tabela inteira. */
+    static final TestDatabase.Base BASE = TestDatabase.base(ExpiredDataPurgerTest.class);
 
     static final UUID TENANT_A = UUID.fromString("00000000-0000-0000-0000-00000000a101");
     static final UUID TENANT_B = UUID.fromString("00000000-0000-0000-0000-00000000b101");
@@ -49,13 +43,7 @@ class ExpiredDataPurgerTest {
 
     @DynamicPropertySource
     static void propriedades(DynamicPropertyRegistry registry) {
-        registry.add("spring.datasource.url", POSTGRES::getJdbcUrl);
-        registry.add("spring.datasource.username", () -> "volei_app");
-        registry.add("spring.datasource.password", () -> "dev");
-        registry.add("spring.flyway.user", () -> "volei_migrator");
-        registry.add("spring.flyway.password", () -> "dev");
-        registry.add("app.security.jwt.secret", () -> Base64.getEncoder().encodeToString(
-                "clave-de-teste-com-mais-de-32-bytes-ok!".getBytes(StandardCharsets.UTF_8)));
+        BASE.registar(registry);
     }
 
     @Autowired
@@ -183,7 +171,7 @@ class ExpiredDataPurgerTest {
     }
 
     private static Connection superuser() throws SQLException {
-        return DriverManager.getConnection(POSTGRES.getJdbcUrl(), POSTGRES.getUsername(), POSTGRES.getPassword());
+        return BASE.superuser();
     }
 
     private static void executar(Connection c, String sql, Object... params) throws SQLException {

@@ -5,11 +5,9 @@ import com.jayway.jsonpath.JsonPath;
 import java.nio.charset.StandardCharsets;
 import java.sql.Connection;
 import java.sql.Date;
-import java.sql.DriverManager;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.SQLException;
-import java.util.Base64;
 import java.util.List;
 import java.util.UUID;
 
@@ -23,10 +21,6 @@ import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.request.RequestPostProcessor;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 import org.springframework.web.context.WebApplicationContext;
-import org.testcontainers.junit.jupiter.Container;
-import org.testcontainers.junit.jupiter.Testcontainers;
-import org.testcontainers.postgresql.PostgreSQLContainer;
-
 import pt.voleibol.gestao.tenancy.TenantFilter;
 
 import static org.springframework.security.test.web.servlet.setup.SecurityMockMvcConfigurers.springSecurity;
@@ -42,28 +36,27 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
         // Os testes de domínio entram com ADMIN sem segundo fator; o MFA tem testes próprios (MfaFlowTest).
         "app.security.mfa.require-for-admins=false"
 })
-@Testcontainers
 public abstract class FlowTestSupport {
 
-    @Container
-    protected static final PostgreSQLContainer POSTGRES = new PostgreSQLContainer("postgres:16-alpine")
-            .withInitScript("db/init/01-roles.sql");
+    /**
+     * Base de dados desta classe de teste, definida pela subclasse no seu
+     * {@code @DynamicPropertySource} com {@link TestDatabase#base(Class)}: cada classe recebe uma
+     * base vazia e migrada pelo Flyway, pelo que os dados semeados por um teste não aparecem noutro.
+     */
+    protected static TestDatabase.Base BASE;
 
     protected static final String PASS = "palavra-passe-teste";
 
     /**
      * Propriedades da base de dados de teste. Cada classe de teste declara o seu próprio método
-     * {@code @DynamicPropertySource} que delega aqui: assim o contexto Spring (e o contentor) não
-     * são partilhados entre classes.
+     * {@code @DynamicPropertySource}, atribui ali o seu {@link #BASE} e delega aqui: assim o
+     * contexto Spring (e o esquema migrado) não são partilhados entre classes.
      */
     protected static void registarPropriedades(DynamicPropertyRegistry registry) {
-        registry.add("spring.datasource.url", POSTGRES::getJdbcUrl);
-        registry.add("spring.datasource.username", () -> "volei_app");
-        registry.add("spring.datasource.password", () -> "dev");
-        registry.add("spring.flyway.user", () -> "volei_migrator");
-        registry.add("spring.flyway.password", () -> "dev");
-        registry.add("app.security.jwt.secret", () -> Base64.getEncoder().encodeToString(
-                "clave-de-teste-com-mais-de-32-bytes-ok!".getBytes(StandardCharsets.UTF_8)));
+        if (BASE == null) {
+            throw new IllegalStateException("A classe de teste não definiu a sua base de dados (BASE)");
+        }
+        BASE.registar(registry);
     }
 
     @Autowired
@@ -80,10 +73,14 @@ public abstract class FlowTestSupport {
 
     @BeforeEach
     void prepararMockMvc() {
-        mvc = MockMvcBuilders.webAppContextSetup(context)
-                .addFilters(tenantFilter)
-                .apply(springSecurity())
-                .build();
+        // Construir o MockMvc (com a cadeia de filtros de segurança) é caro e não depende do teste:
+        // faz-se uma vez por classe, porque os métodos de uma classe correm em sequência.
+        if (mvc == null) {
+            mvc = MockMvcBuilders.webAppContextSetup(context)
+                    .addFilters(tenantFilter)
+                    .apply(springSecurity())
+                    .build();
+        }
         if (passwordHash == null) {
             passwordHash = passwordEncoder.encode(PASS);
         }
@@ -127,7 +124,7 @@ public abstract class FlowTestSupport {
     // --- base de dados ---
 
     protected static Connection superuser() throws SQLException {
-        return DriverManager.getConnection(POSTGRES.getJdbcUrl(), POSTGRES.getUsername(), POSTGRES.getPassword());
+        return BASE.superuser();
     }
 
     protected static void executar(Connection c, String sql, Object... params) throws SQLException {

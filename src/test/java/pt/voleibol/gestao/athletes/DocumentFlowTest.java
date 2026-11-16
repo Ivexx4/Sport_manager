@@ -16,6 +16,7 @@ import org.springframework.test.context.DynamicPropertySource;
 import org.springframework.test.web.servlet.ResultActions;
 
 import pt.voleibol.gestao.shared.FlowTestSupport;
+import pt.voleibol.gestao.shared.TestDatabase;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
@@ -33,6 +34,7 @@ class DocumentFlowTest extends FlowTestSupport {
 
     @DynamicPropertySource
     static void propriedades(DynamicPropertyRegistry registry) {
+        BASE = TestDatabase.base(DocumentFlowTest.class);
         registarPropriedades(registry);
     }
 

@@ -1,7 +1,6 @@
 package pt.voleibol.gestao.tenancy;
 
 import java.sql.Connection;
-import java.sql.DriverManager;
 import java.sql.PreparedStatement;
 import java.sql.SQLException;
 import java.util.List;
@@ -15,9 +14,8 @@ import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.support.TransactionTemplate;
-import org.testcontainers.junit.jupiter.Container;
-import org.testcontainers.junit.jupiter.Testcontainers;
-import org.testcontainers.postgresql.PostgreSQLContainer;
+
+import pt.voleibol.gestao.shared.TestDatabase;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -26,26 +24,18 @@ import static org.assertj.core.api.Assertions.assertThat;
  * e o valor não fica na ligação quando esta volta ao pool (pool de tamanho 1 para forçar a reutilização).
  */
 @SpringBootTest
-@Testcontainers
 class TenantTransactionManagerTest {
 
-    @Container
-    static final PostgreSQLContainer POSTGRES = new PostgreSQLContainer("postgres:16-alpine")
-            .withInitScript("db/init/01-roles.sql");
+    /** Base exclusiva: o pool de tamanho 1 exige uma base que mais nada esteja a usar. */
+    static final TestDatabase.Base BASE = TestDatabase.base(TenantTransactionManagerTest.class);
 
     static final UUID CLUBE_A = UUID.randomUUID();
     static final UUID CLUBE_B = UUID.randomUUID();
 
     @DynamicPropertySource
     static void propriedades(DynamicPropertyRegistry registry) {
-        registry.add("spring.datasource.url", POSTGRES::getJdbcUrl);
-        registry.add("spring.datasource.username", () -> "volei_app");
-        registry.add("spring.datasource.password", () -> "dev");
-        registry.add("spring.flyway.user", () -> "volei_migrator");
-        registry.add("spring.flyway.password", () -> "dev");
+        BASE.registar(registry);
         registry.add("spring.datasource.hikari.maximum-pool-size", () -> "1");
-        registry.add("app.security.jwt.secret", () -> java.util.Base64.getEncoder().encodeToString(
-                "clave-de-teste-com-mais-de-32-bytes-ok!".getBytes(java.nio.charset.StandardCharsets.UTF_8)));
     }
 
     @Autowired
@@ -56,7 +46,7 @@ class TenantTransactionManagerTest {
 
     /** Os tenants são dados da plataforma: a aplicação não os pode escrever, por isso usa-se o papel dono. */
     private void garantirTenants() throws SQLException {
-        try (Connection c = DriverManager.getConnection(POSTGRES.getJdbcUrl(), "volei_migrator", "dev");
+        try (Connection c = BASE.papel("volei_migrator");
              PreparedStatement ps = c.prepareStatement(
                      "INSERT INTO tenant (id, name, slug) VALUES (?, ?, ?), (?, ?, ?) ON CONFLICT DO NOTHING")) {
             ps.setObject(1, CLUBE_A);

@@ -1,7 +1,6 @@
 package pt.voleibol.gestao.tenancy;
 
 import java.sql.Connection;
-import java.sql.DriverManager;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.SQLException;
@@ -10,9 +9,8 @@ import java.util.UUID;
 import org.flywaydb.core.Flyway;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
-import org.testcontainers.junit.jupiter.Container;
-import org.testcontainers.junit.jupiter.Testcontainers;
-import org.testcontainers.postgresql.PostgreSQLContainer;
+
+import pt.voleibol.gestao.shared.TestDatabase;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -22,14 +20,12 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
  * Corre contra um PostgreSQL real, com o papel da aplicação (volei_app), sem passar pelo Spring,
  * para testar exatamente a defesa da base de dados.
  */
-@Testcontainers
 class TenantIsolationTest {
 
     private static final String RLS_VIOLATION = "42501";
 
-    @Container
-    static final PostgreSQLContainer POSTGRES = new PostgreSQLContainer("postgres:16-alpine")
-            .withInitScript("db/init/01-roles.sql");
+    /** Base exclusiva: as asserções contam as tabelas e os dados de toda a base. */
+    static final TestDatabase.Base BASE = TestDatabase.base(TenantIsolationTest.class);
 
     static final UUID CLUBE_A = UUID.randomUUID();
     static final UUID CLUBE_B = UUID.randomUUID();
@@ -43,7 +39,7 @@ class TenantIsolationTest {
     @BeforeAll
     static void prepararBaseDeDados() throws SQLException {
         Flyway.configure()
-                .dataSource(POSTGRES.getJdbcUrl(), "volei_migrator", "dev")
+                .dataSource(BASE.jdbcUrl(), "volei_migrator", TestDatabase.PAPEIS_PASSWORD)
                 .locations("classpath:db/migration")
                 .load()
                 .migrate();
@@ -201,7 +197,7 @@ class TenantIsolationTest {
     // --- auxiliares ---
 
     private static Connection connectAs(String user) throws SQLException {
-        return DriverManager.getConnection(POSTGRES.getJdbcUrl(), user, "dev");
+        return BASE.papel(user);
     }
 
     private static <T> T inTenant(UUID tenant, Work<T> work) throws SQLException {

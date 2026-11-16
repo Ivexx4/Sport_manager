@@ -1,7 +1,6 @@
 package pt.voleibol.gestao.identity;
 
 import java.sql.Connection;
-import java.sql.DriverManager;
 import java.sql.SQLException;
 import java.util.UUID;
 
@@ -15,6 +14,7 @@ import org.springframework.test.web.servlet.ResultActions;
 import org.springframework.test.web.servlet.request.MockHttpServletRequestBuilder;
 import org.springframework.test.web.servlet.request.RequestPostProcessor;
 import pt.voleibol.gestao.shared.FlowTestSupport;
+import pt.voleibol.gestao.shared.TestDatabase;
 
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
@@ -36,6 +36,7 @@ class LoginRateLimitFlowTest extends FlowTestSupport {
 
     @DynamicPropertySource
     static void propriedades(DynamicPropertyRegistry registry) {
+        BASE = TestDatabase.base(LoginRateLimitFlowTest.class);
         registarPropriedades(registry);
     }
 
@@ -138,8 +139,7 @@ class LoginRateLimitFlowTest extends FlowTestSupport {
 
     /** Dados da plataforma e dos clubes: inseridos com o superuser do contentor (ignora RLS). */
     private void semear() throws SQLException {
-        try (Connection c = DriverManager.getConnection(
-                POSTGRES.getJdbcUrl(), POSTGRES.getUsername(), POSTGRES.getPassword())) {
+        try (Connection c = superuser()) {
             executar(c, "INSERT INTO tenant (id, name, slug) VALUES (?, 'Clube Rate A', 'clube-rate-a') "
                     + "ON CONFLICT DO NOTHING", CLUBE_A);
             executar(c, "INSERT INTO tenant (id, name, slug) VALUES (?, 'Clube Rate B', 'clube-rate-b') "

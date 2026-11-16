@@ -24,6 +24,7 @@ import org.springframework.test.web.servlet.ResultActions;
 
 import pt.voleibol.gestao.notifications.EmailSender;
 import pt.voleibol.gestao.shared.FlowTestSupport;
+import pt.voleibol.gestao.shared.TestDatabase;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
@@ -39,6 +40,7 @@ class AccountFlowTest extends FlowTestSupport {
 
     @DynamicPropertySource
     static void propriedades(DynamicPropertyRegistry registry) {
+        BASE = TestDatabase.base(AccountFlowTest.class);
         registarPropriedades(registry);
     }
 

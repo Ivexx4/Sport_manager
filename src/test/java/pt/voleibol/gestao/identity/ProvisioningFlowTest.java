@@ -17,6 +17,7 @@ import org.springframework.test.web.servlet.MvcResult;
 import org.springframework.test.web.servlet.ResultActions;
 import org.springframework.test.web.servlet.request.MockHttpServletRequestBuilder;
 import pt.voleibol.gestao.shared.FlowTestSupport;
+import pt.voleibol.gestao.shared.TestDatabase;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
@@ -39,6 +40,7 @@ class ProvisioningFlowTest extends FlowTestSupport {
 
     @DynamicPropertySource
     static void propriedades(DynamicPropertyRegistry registry) {
+        BASE = TestDatabase.base(ProvisioningFlowTest.class);
         registarPropriedades(registry);
     }
 
