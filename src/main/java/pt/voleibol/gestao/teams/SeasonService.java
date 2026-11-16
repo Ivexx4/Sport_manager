@@ -4,7 +4,6 @@ import java.time.Instant;
 import java.time.LocalDate;
 import java.util.List;
 import java.util.Objects;
-import java.util.Set;
 import java.util.UUID;
 
 import org.springframework.dao.DuplicateKeyException;
@@ -12,6 +11,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.server.ResponseStatusException;
 
+import pt.voleibol.gestao.shared.CurrentUser;
 import pt.voleibol.gestao.shared.Rules;
 
 /**
@@ -34,29 +34,29 @@ class SeasonService {
     }
 
     @Transactional(readOnly = true)
-    List<SeasonView> list(UUID actorId, Set<String> roles) {
-        Rules.requireMember(roles);
+    List<SeasonView> list(CurrentUser user) {
+        Rules.requireMember(user);
         UUID tenantId = Rules.tenant();
         return seasons.list(tenantId).stream().map(SeasonService::view).toList();
     }
 
     @Transactional(readOnly = true)
-    SeasonView get(UUID actorId, Set<String> roles, UUID seasonId) {
-        Rules.requireMember(roles);
+    SeasonView get(CurrentUser user, UUID seasonId) {
+        Rules.requireMember(user);
         return view(seasons.findById(Rules.tenant(), seasonId).orElseThrow(SeasonService::notFound));
     }
 
     @Transactional
-    SeasonView create(UUID actorId, Set<String> roles, String name, LocalDate startDate,
+    SeasonView create(CurrentUser user, String name, LocalDate startDate,
                       LocalDate endDate, Boolean isActive) {
-        return create(actorId, roles, name, startDate, endDate, null, isActive);
+        return create(user, name, startDate, endDate, null, isActive);
     }
 
     @Transactional
-    SeasonView create(UUID actorId, Set<String> roles, String name, LocalDate startDate,
+    SeasonView create(CurrentUser user, String name, LocalDate startDate,
                       LocalDate endDate, LocalDate cutoffDate, Boolean isActive) {
         UUID tenantId = Rules.tenant();
-        Rules.requireManager(roles);
+        Rules.requireManager(user);
         String normalizedName = Rules.requiredText(name);
         requireValidPeriod(startDate, endDate);
         cutoffDate = defaultCutoff(cutoffDate, startDate);
@@ -64,25 +64,25 @@ class SeasonService {
         UUID id = UUID.randomUUID();
         try {
             seasons.insert(id, tenantId, new SeasonRepository.Data(normalizedName, startDate, endDate, cutoffDate,
-                    isActive == null || isActive), actorId);
+                    isActive == null || isActive), user.id());
         } catch (DuplicateKeyException e) {
             throw Rules.conflict("Já existe uma época com este nome");
         }
-        seasons.audit(tenantId, actorId, "SEASON_CREATED", id);
+        seasons.audit(tenantId, user.id(), "SEASON_CREATED", id);
         return view(seasons.findById(tenantId, id).orElseThrow(SeasonService::notFound));
     }
 
     @Transactional
-    SeasonView update(UUID actorId, Set<String> roles, UUID seasonId, String name,
+    SeasonView update(CurrentUser user, UUID seasonId, String name,
                       LocalDate startDate, LocalDate endDate, Boolean isActive) {
-        return update(actorId, roles, seasonId, name, startDate, endDate, null, isActive);
+        return update(user, seasonId, name, startDate, endDate, null, isActive);
     }
 
     @Transactional
-    SeasonView update(UUID actorId, Set<String> roles, UUID seasonId, String name,
+    SeasonView update(CurrentUser user, UUID seasonId, String name,
                       LocalDate startDate, LocalDate endDate, LocalDate cutoffDate, Boolean isActive) {
         UUID tenantId = Rules.tenant();
-        Rules.requireManager(roles);
+        Rules.requireManager(user);
         SeasonRepository.SeasonRow current =
                 seasons.findById(tenantId, seasonId).orElseThrow(SeasonService::notFound);
         String normalizedName = Rules.requiredText(name);
@@ -102,18 +102,18 @@ class SeasonService {
         // Mudar a data de referência recalcula a idade de todos os atletas da época: a validação corre
         // depois da escrita, dentro da transação, e desfaz a alteração.
         if (referenceChanged) eligibility.requireSeasonStillValid(tenantId, seasonId);
-        seasons.audit(tenantId, actorId, "SEASON_UPDATED", seasonId);
+        seasons.audit(tenantId, user.id(), "SEASON_UPDATED", seasonId);
         return view(seasons.findById(tenantId, seasonId).orElseThrow(SeasonService::notFound));
     }
 
     @Transactional
-    void delete(UUID actorId, Set<String> roles, UUID seasonId) {
+    void delete(CurrentUser user, UUID seasonId) {
         UUID tenantId = Rules.tenant();
-        Rules.requireManager(roles);
+        Rules.requireManager(user);
         // Remoção não destrutiva: marca a época como não ativa e anonimiza, preservando as equipas
         // associadas para histórico.
         if (!seasons.anonymize(tenantId, seasonId)) throw notFound();
-        seasons.audit(tenantId, actorId, "SEASON_ANONYMIZED", seasonId);
+        seasons.audit(tenantId, user.id(), "SEASON_ANONYMIZED", seasonId);
     }
 
     // --- auxiliares ---

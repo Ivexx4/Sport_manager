@@ -4,14 +4,14 @@ import java.time.Instant;
 import java.time.LocalDate;
 import java.util.List;
 import java.util.Optional;
-import java.util.Set;
 import java.util.UUID;
 
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.stereotype.Repository;
 
+import pt.voleibol.gestao.shared.CurrentUser;
 import pt.voleibol.gestao.shared.Db;
-import pt.voleibol.gestao.shared.Rules;
+import pt.voleibol.gestao.shared.Role;
 
 /**
  * Acesso a dados dos atletas. Todas as leituras passam pela política de visibilidade do ator
@@ -67,37 +67,37 @@ class AthleteRepository {
         this.jdbc = jdbc;
     }
 
-    Optional<AthleteRow> findVisible(UUID tenantId, UUID athleteId, UUID actorId, Set<String> roles) {
-        return find(tenantId, athleteId, actorId, roles, false);
+    Optional<AthleteRow> findVisible(UUID tenantId, UUID athleteId, CurrentUser user) {
+        return find(tenantId, athleteId, user, false);
     }
 
-    Optional<AthleteRow> findWritable(UUID tenantId, UUID athleteId, UUID actorId, Set<String> roles) {
-        return find(tenantId, athleteId, actorId, roles, true);
+    Optional<AthleteRow> findWritable(UUID tenantId, UUID athleteId, CurrentUser user) {
+        return find(tenantId, athleteId, user, true);
     }
 
-    private Optional<AthleteRow> find(UUID tenantId, UUID athleteId, UUID actorId, Set<String> roles,
+    private Optional<AthleteRow> find(UUID tenantId, UUID athleteId, CurrentUser user,
                                       boolean writable) {
         return scoped(jdbc.sql(SELECT + " WHERE a.tenant_id = :tenant AND a.id = :id"
-                + " AND a.anonymized_at IS NULL AND " + SCOPE), tenantId, athleteId, actorId, roles, writable)
+                + " AND a.anonymized_at IS NULL AND " + SCOPE), tenantId, athleteId, user, writable)
                 .query(AthleteRepository::map)
                 .optional();
     }
 
-    List<AthleteRow> list(UUID tenantId, UUID actorId, Set<String> roles, String query, String status,
+    List<AthleteRow> list(UUID tenantId, CurrentUser user, String query, AthleteStatus status,
                           UUID teamId, int limit, long offset) {
         return filtered(SELECT, " ORDER BY a.full_name, a.id LIMIT :limit OFFSET :offset",
-                tenantId, actorId, roles, query, status, teamId)
+                tenantId, user, query, status, teamId)
                 .param("limit", limit).param("offset", offset).query(AthleteRepository::map).list();
     }
 
-    long count(UUID tenantId, UUID actorId, Set<String> roles, String query, String status, UUID teamId) {
-        return filtered("SELECT count(*) FROM athlete a", "", tenantId, actorId, roles, query, status, teamId)
+    long count(UUID tenantId, CurrentUser user, String query, AthleteStatus status, UUID teamId) {
+        return filtered("SELECT count(*) FROM athlete a", "", tenantId, user, query, status, teamId)
                 .query(Long.class).single();
     }
 
     /** Seleção de atletas visíveis, com os filtros opcionais da listagem já aplicados. */
-    private JdbcClient.StatementSpec filtered(String select, String suffix, UUID tenantId, UUID actorId,
-                                              Set<String> roles, String query, String status, UUID teamId) {
+    private JdbcClient.StatementSpec filtered(String select, String suffix, UUID tenantId,
+                                              CurrentUser user, String query, AthleteStatus status, UUID teamId) {
         StringBuilder sql = new StringBuilder(select)
                 .append(" WHERE a.tenant_id = :tenant AND a.anonymized_at IS NULL AND ").append(SCOPE);
         if (query != null && !query.isBlank()) sql.append(" AND a.full_name ILIKE '%' || :q || '%'");
@@ -111,21 +111,20 @@ class AthleteRepository {
                     """);
         }
         sql.append(suffix);
-        JdbcClient.StatementSpec spec = scoped(jdbc.sql(sql.toString()), tenantId, null, actorId, roles, false);
+        JdbcClient.StatementSpec spec = scoped(jdbc.sql(sql.toString()), tenantId, null, user, false);
         if (query != null && !query.isBlank()) spec = spec.param("q", query.trim());
-        if (status != null) spec = spec.param("status", status);
+        if (status != null) spec = spec.param("status", status.name());
         return teamId == null ? spec : spec.param("teamId", teamId);
     }
 
     private static JdbcClient.StatementSpec scoped(JdbcClient.StatementSpec spec, UUID tenantId,
-                                                   UUID athleteId, UUID actorId, Set<String> roles,
+                                                   UUID athleteId, CurrentUser user,
                                                    boolean writable) {
-        boolean manager = Rules.isManager(roles);
-        boolean all = writable ? manager : manager || roles.contains("FINANCEIRO");
+        boolean all = writable ? user.isManager() : user.isManager() || user.has(Role.FINANCEIRO);
         JdbcClient.StatementSpec result = spec.param("tenant", tenantId)
-                .param("all", all).param("trainer", roles.contains("TREINADOR"))
-                .param("self", roles.contains("ATLETA")).param("guardian", roles.contains("ENCARREGADO"))
-                .param("actor", actorId);
+                .param("all", all).param("trainer", user.has(Role.TREINADOR))
+                .param("self", user.has(Role.ATLETA)).param("guardian", user.has(Role.ENCARREGADO))
+                .param("actor", user.id());
         return athleteId == null ? result : result.param("id", athleteId);
     }
 

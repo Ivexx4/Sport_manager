@@ -16,6 +16,8 @@ import org.springframework.dao.DuplicateKeyException;
 import org.springframework.http.HttpStatus;
 import org.springframework.web.server.ResponseStatusException;
 
+import pt.voleibol.gestao.shared.CurrentUser;
+import pt.voleibol.gestao.shared.Role;
 import pt.voleibol.gestao.tenancy.TenantContext;
 
 class SeasonServiceUnitTest {
@@ -34,11 +36,11 @@ class SeasonServiceUnitTest {
     @Test
     void validaAcessoTenantEPeriodo() {
         SeasonService service = new SeasonService(mock(SeasonRepository.class), mock(SeasonEligibility.class));
-        assertStatus(() -> service.list(ACTOR, Set.of()), HttpStatus.FORBIDDEN);
+        assertStatus(() -> service.list(user()), HttpStatus.FORBIDDEN);
         TenantContext.set(TENANT);
-        assertStatus(() -> service.create(ACTOR, Set.of("MEMBER"), "x", null, null, null), HttpStatus.FORBIDDEN);
-        assertStatus(() -> service.create(ACTOR, Set.of("ADMIN"), " ", null, null, null), HttpStatus.BAD_REQUEST);
-        assertStatus(() -> service.create(ACTOR, Set.of("ADMIN"), "x",
+        assertStatus(() -> service.create(user(Role.ATLETA), "x", null, null, null), HttpStatus.FORBIDDEN);
+        assertStatus(() -> service.create(user(Role.ADMIN), " ", null, null, null), HttpStatus.BAD_REQUEST);
+        assertStatus(() -> service.create(user(Role.ADMIN), "x",
                 LocalDate.of(2026, 1, 1), LocalDate.of(2025, 1, 1), null), HttpStatus.BAD_REQUEST);
     }
 
@@ -50,13 +52,13 @@ class SeasonServiceUnitTest {
         when(repository.findById(eq(TENANT), any())).thenReturn(Optional.of(ROW));
         SeasonService service = new SeasonService(repository, mock(SeasonEligibility.class));
 
-        assertThat(service.create(ACTOR, Set.of("ADMIN"), " Nova ", null, null, null).name()).isEqualTo("2025/26");
+        assertThat(service.create(user(Role.ADMIN), " Nova ", null, null, null).name()).isEqualTo("2025/26");
         verify(repository).insert(any(), eq(TENANT), argThat(d -> d.isActive() && d.name().equals("Nova")), eq(ACTOR));
 
         when(repository.nameExists(TENANT, "Duplicada", null)).thenReturn(false);
         doThrow(new DuplicateKeyException("duplicate")).when(repository)
                 .insert(any(), eq(TENANT), any(), eq(ACTOR));
-        assertStatus(() -> service.create(ACTOR, Set.of("ADMIN"), "Duplicada", null, null, false),
+        assertStatus(() -> service.create(user(Role.ADMIN), "Duplicada", null, null, false),
                 HttpStatus.CONFLICT);
     }
 
@@ -70,19 +72,19 @@ class SeasonServiceUnitTest {
         when(repository.nameExists(TENANT, "Atualizada", ID)).thenReturn(false);
         when(repository.update(eq(TENANT), eq(ID), any())).thenReturn(true);
         when(repository.findById(TENANT, ID)).thenReturn(Optional.of(ROW));
-        service.update(ACTOR, Set.of("DIRECAO"), ID, "Atualizada", null, null, null);
+        service.update(user(Role.DIRECAO), ID, "Atualizada", null, null, null);
         verify(repository).update(eq(TENANT), eq(ID), argThat(d -> d.isActive()));
 
         when(repository.nameExists(TENANT, "Existe", ID)).thenReturn(true);
-        assertStatus(() -> service.update(ACTOR, Set.of("ADMIN"), ID, "Existe", null, null, true),
+        assertStatus(() -> service.update(user(Role.ADMIN), ID, "Existe", null, null, true),
                 HttpStatus.CONFLICT);
         when(repository.nameExists(TENANT, "Gone", ID)).thenReturn(false);
         when(repository.update(eq(TENANT), eq(ID), any())).thenReturn(false);
-        assertStatus(() -> service.update(ACTOR, Set.of("ADMIN"), ID, "Gone", null, null, true),
+        assertStatus(() -> service.update(user(Role.ADMIN), ID, "Gone", null, null, true),
                 HttpStatus.NOT_FOUND);
         doThrow(new DuplicateKeyException("duplicate")).when(repository)
                 .update(eq(TENANT), eq(ID), any());
-        assertStatus(() -> service.update(ACTOR, Set.of("ADMIN"), ID, "Outra", null, null, true),
+        assertStatus(() -> service.update(user(Role.ADMIN), ID, "Outra", null, null, true),
                 HttpStatus.CONFLICT);
     }
 
@@ -94,13 +96,17 @@ class SeasonServiceUnitTest {
         when(repository.findById(TENANT, ID)).thenReturn(Optional.empty());
         SeasonService service = new SeasonService(repository, mock(SeasonEligibility.class));
 
-        assertThat(service.list(ACTOR, Set.of("MEMBER"))).hasSize(1);
-        assertStatus(() -> service.get(ACTOR, Set.of("MEMBER"), ID), HttpStatus.NOT_FOUND);
+        assertThat(service.list(user(Role.ATLETA))).hasSize(1);
+        assertStatus(() -> service.get(user(Role.ATLETA), ID), HttpStatus.NOT_FOUND);
         when(repository.anonymize(TENANT, ID)).thenReturn(false);
-        assertStatus(() -> service.delete(ACTOR, Set.of("ADMIN"), ID), HttpStatus.NOT_FOUND);
+        assertStatus(() -> service.delete(user(Role.ADMIN), ID), HttpStatus.NOT_FOUND);
         when(repository.anonymize(TENANT, ID)).thenReturn(true);
-        service.delete(ACTOR, Set.of("ADMIN"), ID);
+        service.delete(user(Role.ADMIN), ID);
         verify(repository).audit(TENANT, ACTOR, "SEASON_ANONYMIZED", ID);
+    }
+
+    private static CurrentUser user(Role... roles) {
+        return new CurrentUser(ACTOR, Set.of(roles));
     }
 
     private static void assertStatus(org.junit.jupiter.api.function.Executable action, HttpStatus status) {

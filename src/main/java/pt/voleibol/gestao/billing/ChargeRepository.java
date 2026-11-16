@@ -4,12 +4,12 @@ import java.time.Instant;
 import java.time.LocalDate;
 import java.util.List;
 import java.util.Optional;
-import java.util.Set;
 import java.util.UUID;
 
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.stereotype.Repository;
 
+import pt.voleibol.gestao.shared.CurrentUser;
 import pt.voleibol.gestao.shared.Db;
 
 @Repository
@@ -27,8 +27,8 @@ public class ChargeRepository {
         this.jdbc = jdbc;
     }
 
-    List<Row> list(UUID tenantId, UUID actorId, Set<String> roles, UUID athleteId, String status) {
-        boolean writer = roles.contains("ADMIN") || roles.contains("DIRECAO") || roles.contains("FINANCEIRO");
+    List<Row> list(UUID tenantId, CurrentUser user, UUID athleteId, String status) {
+        boolean writer = user.canManageBilling();
         StringBuilder sql = new StringBuilder("""
                 SELECT id, athlete_id, guardian_id, fee_plan_id, amount_cents, due_date, status,
                        billing_period, created_at, updated_at
@@ -49,7 +49,7 @@ public class ChargeRepository {
         if (status != null) sql.append(" AND status = :s");
         sql.append(" ORDER BY due_date, id");
         JdbcClient.StatementSpec spec = jdbc.sql(sql.toString()).param("t", tenantId);
-        if (!writer) spec = spec.param("actor", actorId);
+        if (!writer) spec = spec.param("actor", user.id());
         if (athleteId != null) spec = spec.param("a", athleteId);
         if (status != null) spec = spec.param("s", status);
         return spec.query(ChargeRepository::map).list();

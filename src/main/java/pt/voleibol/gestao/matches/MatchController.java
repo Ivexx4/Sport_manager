@@ -24,7 +24,7 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
-import pt.voleibol.gestao.shared.Auth;
+import pt.voleibol.gestao.shared.CurrentUser;
 
 @RestController
 @RequestMapping("/api/v1")
@@ -55,18 +55,18 @@ class MatchController {
     @GetMapping("/matches")
     List<MatchService.MatchView> listMatches(@AuthenticationPrincipal Jwt jwt,
                                              @RequestParam(required = false) UUID teamId) {
-        return service.listMatches(Auth.actor(jwt), Auth.roles(jwt), teamId);
+        return service.listMatches(CurrentUser.of(jwt), teamId);
     }
 
     @GetMapping("/matches/{id}")
     MatchService.MatchView getMatch(@AuthenticationPrincipal Jwt jwt, @PathVariable UUID id) {
-        return service.getMatch(Auth.actor(jwt), Auth.roles(jwt), id);
+        return service.getMatch(CurrentUser.of(jwt), id);
     }
 
     @PostMapping("/matches")
     ResponseEntity<MatchService.MatchView> createMatch(@AuthenticationPrincipal Jwt jwt,
                                                        @Valid @RequestBody MatchRequest request) {
-        MatchService.MatchView created = service.createMatch(Auth.actor(jwt), Auth.roles(jwt), request.teamId(),
+        MatchService.MatchView created = service.createMatch(CurrentUser.of(jwt), request.teamId(),
                 request.competition(), request.opponent(), request.location(), request.courtId(),
                 request.matchDate(), request.isHome(), request.status());
         return ResponseEntity.status(HttpStatus.CREATED).body(created);
@@ -75,14 +75,14 @@ class MatchController {
     @PutMapping("/matches/{id}")
     MatchService.MatchView updateMatch(@AuthenticationPrincipal Jwt jwt, @PathVariable UUID id,
                                        @Valid @RequestBody MatchRequest request) {
-        return service.updateMatch(Auth.actor(jwt), Auth.roles(jwt), id, request.teamId(), request.competition(),
+        return service.updateMatch(CurrentUser.of(jwt), id, request.teamId(), request.competition(),
                 request.opponent(), request.location(), request.courtId(), request.matchDate(),
                 request.isHome(), request.status());
     }
 
     @DeleteMapping("/matches/{id}")
     ResponseEntity<Void> deleteMatch(@AuthenticationPrincipal Jwt jwt, @PathVariable UUID id) {
-        service.deleteMatch(Auth.actor(jwt), Auth.roles(jwt), id);
+        service.deleteMatch(CurrentUser.of(jwt), id);
         return ResponseEntity.noContent().build();
     }
 
@@ -90,13 +90,13 @@ class MatchController {
 
     @GetMapping("/matches/{id}/set-scores")
     List<MatchService.SetScoreView> listSetScores(@AuthenticationPrincipal Jwt jwt, @PathVariable UUID id) {
-        return service.listSetScores(Auth.actor(jwt), Auth.roles(jwt), id);
+        return service.listSetScores(CurrentUser.of(jwt), id);
     }
 
     @PostMapping("/matches/{id}/set-scores")
     ResponseEntity<Void> setSetScore(@AuthenticationPrincipal Jwt jwt, @PathVariable UUID id,
                                      @Valid @RequestBody SetScoreRequest request) {
-        service.setSetScore(Auth.actor(jwt), Auth.roles(jwt), id, request.setNumber(), request.ourPoints(),
+        service.setSetScore(CurrentUser.of(jwt), id, request.setNumber(), request.ourPoints(),
                 request.opponentPoints());
         return ResponseEntity.noContent().build();
     }
@@ -105,7 +105,7 @@ class MatchController {
     ResponseEntity<Void> setSetScoreByPath(@AuthenticationPrincipal Jwt jwt, @PathVariable UUID id,
                                            @PathVariable int setNumber,
                                            @Valid @RequestBody SetScoreRequest request) {
-        service.setSetScore(Auth.actor(jwt), Auth.roles(jwt), id,
+        service.setSetScore(CurrentUser.of(jwt), id,
                 request == null || request.setNumber() == null ? setNumber : request.setNumber(),
                 request == null || request.ourPoints() == null ? 0 : request.ourPoints(),
                 request == null || request.opponentPoints() == null ? 0 : request.opponentPoints());
@@ -115,7 +115,7 @@ class MatchController {
     @DeleteMapping("/matches/{id}/set-scores/{setNumber}")
     ResponseEntity<Void> deleteSetScore(@AuthenticationPrincipal Jwt jwt, @PathVariable UUID id,
                                         @PathVariable int setNumber) {
-        service.deleteSetScore(Auth.actor(jwt), Auth.roles(jwt), id, setNumber);
+        service.deleteSetScore(CurrentUser.of(jwt), id, setNumber);
         return ResponseEntity.noContent().build();
     }
 
@@ -123,20 +123,20 @@ class MatchController {
 
     @GetMapping("/matches/{id}/call-ups")
     List<MatchService.CallUpView> listCallUps(@AuthenticationPrincipal Jwt jwt, @PathVariable UUID id) {
-        return service.listCallUps(Auth.actor(jwt), Auth.roles(jwt), id);
+        return service.listCallUps(CurrentUser.of(jwt), id);
     }
 
     @PostMapping("/matches/{id}/call-ups")
     ResponseEntity<Void> addCallUp(@AuthenticationPrincipal Jwt jwt, @PathVariable UUID id,
                                    @Valid @RequestBody CallUpRequest request) {
-        service.addCallUp(Auth.actor(jwt), Auth.roles(jwt), id, request.athleteId());
+        service.addCallUp(CurrentUser.of(jwt), id, request.athleteId());
         return ResponseEntity.noContent().build();
     }
 
     @DeleteMapping("/matches/{id}/call-ups/{athleteId}")
     ResponseEntity<Void> removeCallUp(@AuthenticationPrincipal Jwt jwt, @PathVariable UUID id,
                                       @PathVariable UUID athleteId) {
-        service.removeCallUp(Auth.actor(jwt), Auth.roles(jwt), id, athleteId);
+        service.removeCallUp(CurrentUser.of(jwt), id, athleteId);
         return ResponseEntity.noContent().build();
     }
 
@@ -162,7 +162,7 @@ class MatchController {
     }
 
     private ResponseEntity<Void> respond(Jwt jwt, UUID matchId, UUID athleteId, RespondRequest request) {
-        service.respondCallUp(Auth.actor(jwt), Auth.roles(jwt), matchId, athleteId,
+        service.respondCallUp(CurrentUser.of(jwt), matchId, athleteId,
                 request == null ? null : request.response());
         return ResponseEntity.noContent().build();
     }

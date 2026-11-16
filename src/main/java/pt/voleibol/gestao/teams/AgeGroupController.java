@@ -10,7 +10,7 @@ import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
-import pt.voleibol.gestao.shared.Auth;
+import pt.voleibol.gestao.shared.CurrentUser;
 
 /**
  * Catálogo federal FPV somente de leitura para os clubes.
@@ -27,11 +27,11 @@ class AgeGroupController {
 
     @GetMapping
     List<AgeGroupService.AgeGroupView> list(@AuthenticationPrincipal Jwt jwt) {
-        return ageGroupService.list(Auth.actor(jwt), Auth.roles(jwt));
+        return ageGroupService.list(CurrentUser.of(jwt));
     }
 
     @GetMapping("/{ageGroupId}")
     AgeGroupService.AgeGroupView get(@AuthenticationPrincipal Jwt jwt, @PathVariable UUID ageGroupId) {
-        return ageGroupService.get(Auth.actor(jwt), Auth.roles(jwt), ageGroupId);
+        return ageGroupService.get(CurrentUser.of(jwt), ageGroupId);
     }
 }

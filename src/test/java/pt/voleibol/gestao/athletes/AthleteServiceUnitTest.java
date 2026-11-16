@@ -11,6 +11,8 @@ import org.junit.jupiter.api.Test;
 import org.springframework.dao.DuplicateKeyException;
 
 
+import pt.voleibol.gestao.shared.CurrentUser;
+import pt.voleibol.gestao.shared.Role;
 import pt.voleibol.gestao.shared.Rules;
 import pt.voleibol.gestao.tenancy.TenantContext;
 
@@ -59,7 +61,7 @@ class AthleteServiceUnitTest {
                 Segundo,2011-02-02,m,,,,LIC-2,INACTIVE
                 """;
 
-        int imported = service.importCsv(ACTOR, Set.of("ADMIN"), new StringReader(csv));
+        int imported = service.importCsv(user(Role.ADMIN), new StringReader(csv));
 
         assertThat(imported).isEqualTo(2);
     }
@@ -71,7 +73,7 @@ class AthleteServiceUnitTest {
         TenantContext.set(TENANT);
         doNothing().when(repository).insert(any(), eq(TENANT), any(AthleteRepository.Data.class), eq(ACTOR));
 
-        int imported = service.importCsv(ACTOR, Set.of("DIRECAO"),
+        int imported = service.importCsv(user(Role.DIRECAO),
                 new BufferedReader(new StringReader("Nome,2010-01-01,F")));
 
         assertThat(imported).isEqualTo(1);
@@ -91,7 +93,11 @@ class AthleteServiceUnitTest {
         assertThat(data.status()).isEqualTo("ACTIVE");
         assertThat(AthleteService.data("Ana", data.birthDate(), "M", null, "", " ", null,
                 "inactive", ACTOR).status()).isEqualTo("INACTIVE");
-        assertThatThrownBy(() -> Rules.status("pending", Set.of("ACTIVE", "INACTIVE")))
+        assertThatThrownBy(() -> Rules.parse(AthleteStatus.class, "pending", "Estado"))
                 .isInstanceOf(RuntimeException.class);
+    }
+
+    private static CurrentUser user(Role... roles) {
+        return new CurrentUser(ACTOR, Set.of(roles));
     }
 }

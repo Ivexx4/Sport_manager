@@ -22,7 +22,7 @@ import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
-import pt.voleibol.gestao.shared.Auth;
+import pt.voleibol.gestao.shared.CurrentUser;
 import pt.voleibol.gestao.shared.Rules;
 
 @RestController
@@ -59,7 +59,7 @@ class AccountController {
     /** Só ADMIN e DIRECAO (regra também na cadeia de segurança); DIRECAO não atribui ADMIN nem DIRECAO. */
     @PostMapping("/users/invitations")
     ResponseEntity<Void> invite(@AuthenticationPrincipal Jwt jwt, @Valid @RequestBody InviteRequest request) {
-        accountService.invite(Auth.actor(jwt), Auth.roles(jwt), request.email(), request.name(),
+        accountService.invite(CurrentUser.of(jwt), request.email(), request.name(),
                 request.roles());
         return ResponseEntity.status(HttpStatus.ACCEPTED).build();
     }
@@ -86,7 +86,7 @@ class AccountController {
     @PostMapping("/auth/password/change")
     ResponseEntity<Void> changePassword(@AuthenticationPrincipal Jwt jwt,
                                         @Valid @RequestBody ChangePasswordRequest request) {
-        if (!accountService.changePassword(Auth.actor(jwt), request.currentPassword(), request.newPassword()))
+        if (!accountService.changePassword(CurrentUser.of(jwt).id(), request.currentPassword(), request.newPassword()))
             throw Rules.badRequest("Password atual incorreta");
         return ResponseEntity.noContent().build();
     }
@@ -98,14 +98,14 @@ class AccountController {
 
     @PostMapping("/users/{userId}/disable")
     ResponseEntity<Void> disableMember(@AuthenticationPrincipal Jwt jwt, @PathVariable UUID userId) {
-        accountService.disableMember(Auth.actor(jwt), Auth.roles(jwt), userId);
+        accountService.disableMember(CurrentUser.of(jwt), userId);
         return ResponseEntity.noContent().build();
     }
 
     @DeleteMapping("/users/{userId}/roles/{role}")
     ResponseEntity<Void> removeRole(@AuthenticationPrincipal Jwt jwt, @PathVariable UUID userId,
                                     @PathVariable String role) {
-        accountService.removeRole(Auth.actor(jwt), Auth.roles(jwt), userId, role);
+        accountService.removeRole(CurrentUser.of(jwt), userId, role);
         return ResponseEntity.noContent().build();
     }
 }

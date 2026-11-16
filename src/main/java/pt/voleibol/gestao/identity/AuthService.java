@@ -16,6 +16,7 @@ import org.springframework.security.oauth2.jwt.JwtEncoderParameters;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import pt.voleibol.gestao.shared.Role;
 import pt.voleibol.gestao.shared.Rules;
 
 /**
@@ -70,8 +71,8 @@ class AuthService {
         boolean fits = PasswordPolicy.fitsBcrypt(password);
         boolean passwordOk = passwordEncoder.matches(fits ? password : "", hash) && fits;
 
-        Set<String> roles = passwordOk && user.isPresent()
-                ? repository.findActiveRoles(tenantId, user.get().id())
+        Set<Role> roles = passwordOk && user.isPresent()
+                ? Role.fromAll(repository.findActiveRoles(tenantId, user.get().id()))
                 : Set.of();
 
         if (roles.isEmpty()) {
@@ -102,7 +103,7 @@ class AuthService {
 
         UUID userId = claims.get().userId();
         // Os papéis são relidos: um acesso retirado entretanto já não dá sessão.
-        Set<String> roles = repository.findActiveRoles(tenantId, userId);
+        Set<Role> roles = Role.fromAll(repository.findActiveRoles(tenantId, userId));
         if (roles.isEmpty() || !mfaService.verify(tenantId, userId, code)) return Optional.empty();
 
         repository.audit(tenantId, userId, "LOGIN_SUCCESS");
@@ -117,7 +118,7 @@ class AuthService {
         if (claims.isEmpty() || claims.get().flow() != MfaService.Flow.ENROLL) return Optional.empty();
 
         UUID userId = claims.get().userId();
-        Set<String> roles = repository.findActiveRoles(tenantId, userId);
+        Set<Role> roles = Role.fromAll(repository.findActiveRoles(tenantId, userId));
         if (roles.isEmpty()) return Optional.empty();
 
         Optional<MfaService.Activation> activation = mfaService.confirmEnrollment(tenantId, userId, code);
@@ -153,7 +154,7 @@ class AuthService {
         if (token.expiresAt().isBefore(Instant.now())) return Optional.empty();
 
         // Os papéis são relidos: se o acesso foi retirado ao utilizador, o refresh deixa de funcionar.
-        Set<String> roles = repository.findActiveRoles(tenantId, token.userId());
+        Set<Role> roles = Role.fromAll(repository.findActiveRoles(tenantId, token.userId()));
         if (roles.isEmpty()) return Optional.empty();
         return Optional.of(issueTokens(tenantId, token.userId(), roles));
     }
@@ -166,7 +167,7 @@ class AuthService {
         });
     }
 
-    private Tokens issueTokens(UUID tenantId, UUID userId, Set<String> roles) {
+    private Tokens issueTokens(UUID tenantId, UUID userId, Set<Role> roles) {
         Instant now = Instant.now();
         Instant expiresAt = now.plus(properties.accessTokenTtl());
 
@@ -176,7 +177,7 @@ class AuthService {
                 .issuedAt(now)
                 .expiresAt(expiresAt)
                 .claim(TenantClaimValidator.CLAIM, tenantId.toString())
-                .claim("roles", new TreeSet<>(roles).stream().toList())
+                .claim("roles", new TreeSet<>(Role.codes(roles)).stream().toList())
                 .build();
         String accessToken = jwtEncoder.encode(JwtEncoderParameters.from(
                 JwsHeader.with(MacAlgorithm.HS256).build(), claims)).getTokenValue();

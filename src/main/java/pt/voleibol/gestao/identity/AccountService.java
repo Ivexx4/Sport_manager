@@ -3,12 +3,13 @@ package pt.voleibol.gestao.identity;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.Arrays;
+import java.util.EnumSet;
+import java.util.List;
 import java.util.Locale;
 import java.util.Optional;
 import java.util.Set;
 import java.util.TreeSet;
 import java.util.UUID;
-import java.util.stream.Collectors;
 
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.security.crypto.password.PasswordEncoder;
@@ -16,6 +17,8 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.server.ResponseStatusException;
 
+import pt.voleibol.gestao.shared.CurrentUser;
+import pt.voleibol.gestao.shared.Role;
 import pt.voleibol.gestao.shared.Rules;
 
 import pt.voleibol.gestao.notifications.EmailSender;
@@ -27,9 +30,6 @@ import pt.voleibol.gestao.notifications.EmailSender;
  */
 @Service
 class AccountService {
-
-    private static final Set<String> ROLES =
-            Set.of("ADMIN", "DIRECAO", "FINANCEIRO", "TREINADOR", "ATLETA", "ENCARREGADO");
 
     private static final Duration INVITATION_TTL = Duration.ofDays(7);
     private static final Duration RESET_TTL = Duration.ofHours(1);
@@ -53,23 +53,25 @@ class AccountService {
     // --- convites ---
 
     @Transactional
-    void invite(UUID inviterId, Set<String> inviterRoles, String email, String name, Set<String> requestedRoles) {
+    void invite(CurrentUser inviter, String email, String name, Set<String> requestedRoles) {
         UUID tenantId = Rules.tenant();
 
-        Rules.requireManager(inviterRoles);
-        Set<String> roles = requestedRoles.stream()
-                .map(r -> r.trim().toUpperCase(Locale.ROOT))
-                .collect(Collectors.toCollection(TreeSet::new));
-        if (roles.isEmpty() || !ROLES.containsAll(roles)) throw Rules.badRequest("Papel inválido");
-        if (!inviterRoles.contains("ADMIN") && roles.stream().anyMatch(Rules.MANAGERS::contains))
+        Rules.requireManager(inviter);
+        Set<Role> roles = EnumSet.noneOf(Role.class);
+        for (String requested : requestedRoles) {
+            roles.add(Role.from(requested).orElseThrow(() -> Rules.badRequest("Papel inválido")));
+        }
+        if (roles.isEmpty()) throw Rules.badRequest("Papel inválido");
+        if (!inviter.has(Role.ADMIN) && roles.stream().anyMatch(Role.MANAGERS::contains))
             throw Rules.forbidden("Só um administrador atribui este papel");
 
+        List<String> codes = List.copyOf(new TreeSet<>(Role.codes(roles)));
         String mail = normalizeEmail(email);
         accounts.revokePendingInvitations(tenantId, mail);   // um convite pendente por email
         String rawToken = OpaqueTokens.newToken();
-        accounts.insertInvitation(tenantId, mail, name.trim(), String.join(",", roles),
-                OpaqueTokens.hash(rawToken), inviterId, Instant.now().plus(INVITATION_TTL));
-        auth.audit(tenantId, inviterId, "USER_INVITED");
+        accounts.insertInvitation(tenantId, mail, name.trim(), String.join(",", codes),
+                OpaqueTokens.hash(rawToken), inviter.id(), Instant.now().plus(INVITATION_TTL));
+        auth.audit(tenantId, inviter.id(), "USER_INVITED");
 
         AccountRepository.TenantInfo tenant = accounts.findTenant(tenantId).orElseThrow();
         String link = link(tenant.slug(), "/accept-invitation", rawToken);
@@ -81,7 +83,7 @@ class AccountService {
 
                 O link é válido durante 7 dias e só pode ser usado uma vez.
                 Se não esperavas este convite, ignora esta mensagem.
-                """.formatted(name.trim(), tenant.name(), String.join(", ", roles), link);
+                """.formatted(name.trim(), tenant.name(), String.join(", ", codes), link);
         emailSender.send(mail, "Convite para o clube " + tenant.name(), body);
     }
 
@@ -205,39 +207,41 @@ class AccountService {
     }
 
     @Transactional
-    void disableMember(UUID actorId, Set<String> actorRoles, UUID targetUserId) {
+    void disableMember(CurrentUser actor, UUID targetUserId) {
         UUID tenantId = Rules.tenant();
-        Rules.requireManager(actorRoles);
-        if (actorId.equals(targetUserId)) throw Rules.badRequest("Não podes desativar a tua própria conta");
-        Set<String> targetRoles = accounts.findRoles(tenantId, targetUserId);
+        Rules.requireManager(actor);
+        if (actor.id().equals(targetUserId)) throw Rules.badRequest("Não podes desativar a tua própria conta");
+        Set<Role> targetRoles = Role.fromAll(accounts.findRoles(tenantId, targetUserId));
         if (targetRoles.isEmpty()) throw Rules.notFound();
-        if (!actorRoles.contains("ADMIN") && targetRoles.stream().anyMatch(Rules.MANAGERS::contains))
+        if (!actor.has(Role.ADMIN) && targetRoles.stream().anyMatch(Role.MANAGERS::contains))
             throw Rules.forbidden("Só um administrador gere membros com este papel");
-        if (accounts.hasActiveRole(tenantId, targetUserId, "ADMIN") && accounts.countActiveAdmins(tenantId) <= 1)
+        if (accounts.hasActiveRole(tenantId, targetUserId, Role.ADMIN.name())
+                && accounts.countActiveAdmins(tenantId) <= 1)
             throw Rules.conflict("O clube tem de manter pelo menos um administrador ativo");
         accounts.disableAllMemberships(tenantId, targetUserId);
         auth.revokeAllForUser(tenantId, targetUserId);
-        auth.audit(tenantId, actorId, "MEMBER_DISABLED");
+        auth.audit(tenantId, actor.id(), "MEMBER_DISABLED");
     }
 
     @Transactional
-    void removeRole(UUID actorId, Set<String> actorRoles, UUID targetUserId, String role) {
+    void removeRole(CurrentUser actor, UUID targetUserId, String role) {
         UUID tenantId = Rules.tenant();
-        Rules.requireManager(actorRoles);
-        String normalized = role == null ? "" : role.trim().toUpperCase(Locale.ROOT);
-        if (!ROLES.contains(normalized)) throw Rules.badRequest("Papel inválido");
-        if (actorId.equals(targetUserId)) throw Rules.badRequest("Não podes retirar o teu próprio papel");
-        if (!actorRoles.contains("ADMIN") && Rules.MANAGERS.contains(normalized)) throw Rules.forbidden("Só um administrador retira este papel");
-        Set<String> targetRoles = accounts.findRoles(tenantId, targetUserId);
+        Rules.requireManager(actor);
+        Role target = Role.from(role).orElseThrow(() -> Rules.badRequest("Papel inválido"));
+        if (actor.id().equals(targetUserId)) throw Rules.badRequest("Não podes retirar o teu próprio papel");
+        if (!actor.has(Role.ADMIN) && Role.MANAGERS.contains(target))
+            throw Rules.forbidden("Só um administrador retira este papel");
+        Set<Role> targetRoles = Role.fromAll(accounts.findRoles(tenantId, targetUserId));
         if (targetRoles.isEmpty()) throw Rules.notFound();
-        if (!actorRoles.contains("ADMIN") && targetRoles.contains("ADMIN")) throw Rules.forbidden("Só um administrador gere membros com este papel");
-        if ("ADMIN".equals(normalized) && accounts.hasActiveRole(tenantId, targetUserId, "ADMIN")
+        if (!actor.has(Role.ADMIN) && targetRoles.contains(Role.ADMIN))
+            throw Rules.forbidden("Só um administrador gere membros com este papel");
+        if (target == Role.ADMIN && accounts.hasActiveRole(tenantId, targetUserId, Role.ADMIN.name())
                 && accounts.countActiveAdmins(tenantId) <= 1) {
             throw Rules.conflict("O clube tem de manter pelo menos um administrador ativo");
         }
-        if (!accounts.removeRole(tenantId, targetUserId, normalized)) throw Rules.notFound();
+        if (!accounts.removeRole(tenantId, targetUserId, target.name())) throw Rules.notFound();
         if (auth.findActiveRoles(tenantId, targetUserId).isEmpty()) auth.revokeAllForUser(tenantId, targetUserId);
-        auth.audit(tenantId, actorId, "MEMBER_ROLE_REMOVED");
+        auth.audit(tenantId, actor.id(), "MEMBER_ROLE_REMOVED");
     }
 
     // --- auxiliares ---

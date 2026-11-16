@@ -1,12 +1,12 @@
 package pt.voleibol.gestao.athletes;
 
-import java.util.Set;
 import java.util.UUID;
 
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import pt.voleibol.gestao.shared.CurrentUser;
 import pt.voleibol.gestao.shared.Rules;
 
 @Service
@@ -25,9 +25,9 @@ class AthleteStatsService {
     }
 
     @Transactional(readOnly = true)
-    Stats get(UUID actorId, Set<String> roles, UUID athleteId) {
+    Stats get(CurrentUser user, UUID athleteId) {
         UUID t = Rules.tenant();
-        if (athletes.findVisible(t, athleteId, actorId, roles).isEmpty()) throw Rules.notFound("Atleta não encontrado");
+        if (athletes.findVisible(t, athleteId, user).isEmpty()) throw Rules.notFound("Atleta não encontrado");
         long calledUp = jdbc.sql("""
                 SELECT count(*) FROM call_up c JOIN match m ON m.tenant_id=c.tenant_id AND m.id=c.match_id
                 WHERE c.tenant_id=:t AND c.athlete_id=:a

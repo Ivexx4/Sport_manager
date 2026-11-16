@@ -2,13 +2,14 @@ package pt.voleibol.gestao.athletes;
 
 import java.time.LocalDate;
 import java.util.List;
-import java.util.Set;
 import java.util.UUID;
 
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.server.ResponseStatusException;
 
+import pt.voleibol.gestao.shared.CurrentUser;
+import pt.voleibol.gestao.shared.Role;
 import pt.voleibol.gestao.shared.Rules;
 
 @Service
@@ -27,9 +28,9 @@ class DocumentService {
     }
 
     @Transactional(readOnly = true)
-    List<DocumentView> list(UUID actorId, Set<String> roles, UUID athleteId) {
+    List<DocumentView> list(CurrentUser user, UUID athleteId) {
         UUID tenantId = Rules.tenant();
-        requireVisibleAthlete(tenantId, athleteId, actorId, roles);
+        requireVisibleAthlete(tenantId, athleteId, user);
         return documents.list(tenantId, athleteId).stream()
                 .map(d -> new DocumentView(d.id(), d.athleteId(), d.type(), d.fileName(), d.fileUrl(),
                         d.validUntil(), d.createdAt(), d.updatedAt()))
@@ -37,51 +38,48 @@ class DocumentService {
     }
 
     @Transactional
-    DocumentView create(UUID actorId, Set<String> roles, UUID athleteId, String type, String fileName,
+    DocumentView create(CurrentUser user, UUID athleteId, String type, String fileName,
                        String fileUrl, LocalDate validUntil) {
         UUID tenantId = Rules.tenant();
-        requireWritableAthlete(tenantId, athleteId, actorId, roles);
+        requireWritableAthlete(tenantId, athleteId, user);
         if (type == null || type.isBlank()) throw Rules.badRequest("Tipo obrigatório");
         UUID id = UUID.randomUUID();
-        documents.insert(id, tenantId, athleteId, type.trim(), fileName, fileUrl, validUntil, actorId);
-        documents.audit(tenantId, actorId, "ATHLETE_DOCUMENT_CREATED", id);
+        documents.insert(id, tenantId, athleteId, type.trim(), fileName, fileUrl, validUntil, user.id());
+        documents.audit(tenantId, user.id(), "ATHLETE_DOCUMENT_CREATED", id);
         return view(documents.findById(tenantId, id).orElseThrow(DocumentService::notFound));
     }
 
     @Transactional
-    DocumentView update(UUID actorId, Set<String> roles, UUID documentId, String type, String fileName,
+    DocumentView update(CurrentUser user, UUID documentId, String type, String fileName,
                        String fileUrl, LocalDate validUntil) {
         UUID tenantId = Rules.tenant();
         DocumentRepository.DocumentRow current = documents.findById(tenantId, documentId)
                 .orElseThrow(DocumentService::notFound);
-        requireWritableAthlete(tenantId, current.athleteId(), actorId, roles);
+        requireWritableAthlete(tenantId, current.athleteId(), user);
         if (type == null || type.isBlank()) throw Rules.badRequest("Tipo obrigatório");
         if (!documents.update(tenantId, documentId, type.trim(), fileName, fileUrl, validUntil)) throw notFound();
-        documents.audit(tenantId, actorId, "ATHLETE_DOCUMENT_UPDATED", documentId);
+        documents.audit(tenantId, user.id(), "ATHLETE_DOCUMENT_UPDATED", documentId);
         return view(documents.findById(tenantId, documentId).orElseThrow(DocumentService::notFound));
     }
 
     @Transactional
-    void delete(UUID actorId, Set<String> roles, UUID documentId) {
+    void delete(CurrentUser user, UUID documentId) {
         UUID tenantId = Rules.tenant();
         DocumentRepository.DocumentRow current = documents.findById(tenantId, documentId)
                 .orElseThrow(DocumentService::notFound);
-        requireWritableAthlete(tenantId, current.athleteId(), actorId, roles);
+        requireWritableAthlete(tenantId, current.athleteId(), user);
         if (!documents.anonymize(tenantId, documentId)) throw notFound();
-        documents.audit(tenantId, actorId, "ATHLETE_DOCUMENT_ANONYMIZED", documentId);
+        documents.audit(tenantId, user.id(), "ATHLETE_DOCUMENT_ANONYMIZED", documentId);
     }
 
-    private void requireVisibleAthlete(UUID tenantId, UUID athleteId, UUID actorId, Set<String> roles) {
-        if (athletes.findVisible(tenantId, athleteId, actorId, roles).isEmpty()) throw Rules.notFound("Atleta não encontrado");
+    private void requireVisibleAthlete(UUID tenantId, UUID athleteId, CurrentUser user) {
+        if (athletes.findVisible(tenantId, athleteId, user).isEmpty()) throw Rules.notFound("Atleta não encontrado");
     }
 
-    private void requireWritableAthlete(UUID tenantId, UUID athleteId, UUID actorId, Set<String> roles) {
+    private void requireWritableAthlete(UUID tenantId, UUID athleteId, CurrentUser user) {
         // FINANCEIRO só lê: não deve conseguir escrever mesmo que tenha visibilidade do atleta.
-        if (roles.contains("FINANCEIRO") && roles.stream().noneMatch(
-                role -> Set.of("ADMIN", "DIRECAO", "TREINADOR", "ATLETA", "ENCARREGADO").contains(role))) {
-            throw Rules.forbidden();
-        }
-        if (athletes.findWritable(tenantId, athleteId, actorId, roles).isEmpty()) throw Rules.notFound("Atleta não encontrado");
+        if (user.has(Role.FINANCEIRO) && user.roles().size() == 1) throw Rules.forbidden();
+        if (athletes.findWritable(tenantId, athleteId, user).isEmpty()) throw Rules.notFound("Atleta não encontrado");
     }
 
     private static ResponseStatusException notFound() {

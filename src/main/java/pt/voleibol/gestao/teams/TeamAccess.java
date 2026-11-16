@@ -1,12 +1,13 @@
 package pt.voleibol.gestao.teams;
 
-import java.util.Set;
 import java.util.UUID;
 
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.stereotype.Component;
 
+import pt.voleibol.gestao.shared.CurrentUser;
 import pt.voleibol.gestao.shared.Db;
+import pt.voleibol.gestao.shared.Role;
 import pt.voleibol.gestao.shared.Rules;
 
 /**
@@ -32,7 +33,7 @@ public class TeamAccess {
     }
 
     /** O ator é staff da equipa. */
-    boolean visibleToStaff(UUID tenantId, UUID teamId, UUID actorId) {
+    boolean visibleToStaff(UUID tenantId, UUID teamId, UUID userId) {
         return Db.exists(jdbc.sql("""
                         SELECT EXISTS (
                             SELECT 1 FROM team t
@@ -41,11 +42,11 @@ public class TeamAccess {
                                           WHERE s.tenant_id = t.tenant_id AND s.team_id = t.id
                                             AND s.user_id = :a))
                         """)
-                .param("t", tenantId).param("id", teamId).param("a", actorId));
+                .param("t", tenantId).param("id", teamId).param("a", userId));
     }
 
     /** O ator é o atleta da equipa ou o encarregado de um atleta da equipa. */
-    boolean hasAthleteLinked(UUID tenantId, UUID teamId, UUID actorId) {
+    boolean hasAthleteLinked(UUID tenantId, UUID teamId, UUID userId) {
         return Db.exists(jdbc.sql("""
                         SELECT EXISTS (
                             SELECT 1 FROM team_athlete ta
@@ -55,7 +56,7 @@ public class TeamAccess {
                                   SELECT 1 FROM athlete_guardian g
                                   WHERE g.tenant_id = a.tenant_id AND g.athlete_id = a.id AND g.user_id = :a)))
                         """)
-                .param("t", tenantId).param("team", teamId).param("a", actorId));
+                .param("t", tenantId).param("team", teamId).param("a", userId));
     }
 
     /** O atleta pertence ao plantel da equipa. */
@@ -68,10 +69,12 @@ public class TeamAccess {
     }
 
     /** Gestores veem todas; o treinador as suas; atleta/encarregado as que têm o atleta ligado. */
-    public boolean visible(UUID tenantId, UUID teamId, UUID actorId, Set<String> roles) {
-        if (Rules.isManager(roles)) return exists(tenantId, teamId);
-        if (roles.contains("TREINADOR")) return visibleToStaff(tenantId, teamId, actorId);
-        if (roles.contains("ATLETA") || roles.contains("ENCARREGADO")) return hasAthleteLinked(tenantId, teamId, actorId);
+    public boolean visible(UUID tenantId, UUID teamId, CurrentUser user) {
+        if (user.isManager()) return exists(tenantId, teamId);
+        if (user.has(Role.TREINADOR)) return visibleToStaff(tenantId, teamId, user.id());
+        if (user.has(Role.ATLETA) || user.has(Role.ENCARREGADO)) {
+            return hasAthleteLinked(tenantId, teamId, user.id());
+        }
         return false;
     }
 
@@ -79,9 +82,9 @@ public class TeamAccess {
      * Falha com 403 quando o papel não tem acesso à gestão desportiva e com 404 quando a equipa existe
      * mas está fora do alcance do ator.
      */
-    public void requireVisible(UUID tenantId, UUID teamId, UUID actorId, Set<String> roles) {
-        if (visible(tenantId, teamId, actorId, roles)) return;
-        if (Rules.isSport(roles)) throw Rules.notFound("Equipa não encontrada");
+    public void requireVisible(UUID tenantId, UUID teamId, CurrentUser user) {
+        if (visible(tenantId, teamId, user)) return;
+        if (user.isSport()) throw Rules.notFound("Equipa não encontrada");
         throw Rules.forbidden();
     }
 }

@@ -20,7 +20,7 @@ import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
-import pt.voleibol.gestao.shared.Auth;
+import pt.voleibol.gestao.shared.CurrentUser;
 import pt.voleibol.gestao.shared.Rules;
 
 /**
@@ -121,27 +121,27 @@ class MfaController {
 
     @GetMapping
     StatusResponse status(@AuthenticationPrincipal Jwt jwt) {
-        MfaService.Status status = mfaService.status(Auth.actor(jwt));
+        MfaService.Status status = mfaService.status(CurrentUser.of(jwt).id());
         return new StatusResponse(status.enabled(), status.pending(), status.recoveryCodesLeft());
     }
 
     /** Início da inscrição opcional, para quem já tem sessão (por exemplo, um TREINADOR). */
     @PostMapping("/setup")
     SetupResponse setup(@AuthenticationPrincipal Jwt jwt) {
-        return SetupResponse.from(mfaService.startEnrollment(Rules.tenant(), Auth.actor(jwt)));
+        return SetupResponse.from(mfaService.startEnrollment(Rules.tenant(), CurrentUser.of(jwt).id()));
     }
 
     @PostMapping("/activate")
     ActivationResponse activate(@AuthenticationPrincipal Jwt jwt, @Valid @RequestBody ActivateRequest request) {
         MfaService.Activation activation = mfaService
-                .confirmEnrollment(Rules.tenant(), Auth.actor(jwt), request.code())
+                .confirmEnrollment(Rules.tenant(), CurrentUser.of(jwt).id(), request.code())
                 .orElseThrow(() -> Rules.badRequest("Código inválido ou inscrição não iniciada"));
         return new ActivationResponse(activation.recoveryCodes());
     }
 
     @PostMapping("/disable")
     ResponseEntity<Void> disable(@AuthenticationPrincipal Jwt jwt, @Valid @RequestBody DisableRequest request) {
-        if (!mfaService.disable(Rules.tenant(), Auth.actor(jwt), request.password(), request.code())) {
+        if (!mfaService.disable(Rules.tenant(), CurrentUser.of(jwt).id(), request.password(), request.code())) {
             throw Rules.forbidden("Password ou código inválido");
         }
         return ResponseEntity.noContent().build();

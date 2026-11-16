@@ -25,7 +25,7 @@ import jakarta.validation.constraints.NotNull;
 import jakarta.validation.constraints.Pattern;
 import jakarta.validation.constraints.Size;
 
-import pt.voleibol.gestao.shared.Auth;
+import pt.voleibol.gestao.shared.CurrentUser;
 
 /**
  * Épocas do clube e autorizações de subida de escalão: CRUD das épocas e gestão das promoções.
@@ -61,18 +61,18 @@ class SeasonController {
 
     @GetMapping
     List<SeasonService.SeasonView> list(@AuthenticationPrincipal Jwt jwt) {
-        return seasonService.list(Auth.actor(jwt), Auth.roles(jwt));
+        return seasonService.list(CurrentUser.of(jwt));
     }
 
     @GetMapping("/{seasonId}")
     SeasonService.SeasonView get(@AuthenticationPrincipal Jwt jwt, @PathVariable UUID seasonId) {
-        return seasonService.get(Auth.actor(jwt), Auth.roles(jwt), seasonId);
+        return seasonService.get(CurrentUser.of(jwt), seasonId);
     }
 
     @PostMapping
     ResponseEntity<SeasonService.SeasonView> create(@AuthenticationPrincipal Jwt jwt,
                                                     @Valid @RequestBody SeasonRequest request) {
-        SeasonService.SeasonView created = seasonService.create(Auth.actor(jwt), Auth.roles(jwt),
+        SeasonService.SeasonView created = seasonService.create(CurrentUser.of(jwt),
                 request.name(), request.startDate(), request.endDate(), request.cutoffDate(),
                 request.isActive());
         return ResponseEntity.status(HttpStatus.CREATED).body(created);
@@ -81,13 +81,13 @@ class SeasonController {
     @PutMapping("/{seasonId}")
     SeasonService.SeasonView update(@AuthenticationPrincipal Jwt jwt, @PathVariable UUID seasonId,
                                     @Valid @RequestBody SeasonRequest request) {
-        return seasonService.update(Auth.actor(jwt), Auth.roles(jwt), seasonId, request.name(),
+        return seasonService.update(CurrentUser.of(jwt), seasonId, request.name(),
                 request.startDate(), request.endDate(), request.cutoffDate(), request.isActive());
     }
 
     @DeleteMapping("/{seasonId}")
     ResponseEntity<Void> delete(@AuthenticationPrincipal Jwt jwt, @PathVariable UUID seasonId) {
-        seasonService.delete(Auth.actor(jwt), Auth.roles(jwt), seasonId);
+        seasonService.delete(CurrentUser.of(jwt), seasonId);
         return ResponseEntity.noContent().build();
     }
 
@@ -97,14 +97,14 @@ class SeasonController {
     List<PromotionService.PromotionView> listPromotions(@AuthenticationPrincipal Jwt jwt,
                                                         @PathVariable UUID seasonId,
                                                         @RequestParam(required = false) UUID athleteId) {
-        return promotionService.list(Auth.actor(jwt), Auth.roles(jwt), seasonId, athleteId);
+        return promotionService.list(CurrentUser.of(jwt), seasonId, athleteId);
     }
 
     @PostMapping("/{seasonId}/promotions")
     ResponseEntity<PromotionService.PromotionView> grantPromotion(@AuthenticationPrincipal Jwt jwt,
                                                                   @PathVariable UUID seasonId,
                                                                   @Valid @RequestBody PromotionRequest request) {
-        PromotionService.PromotionView created = promotionService.grant(Auth.actor(jwt), Auth.roles(jwt),
+        PromotionService.PromotionView created = promotionService.grant(CurrentUser.of(jwt),
                 seasonId, request.athleteId(), request.ageGroupId(), request.reason());
         return ResponseEntity.status(HttpStatus.CREATED).body(created);
     }
@@ -113,7 +113,7 @@ class SeasonController {
     ResponseEntity<Void> setPromotionStatus(@AuthenticationPrincipal Jwt jwt, @PathVariable UUID seasonId,
                                             @PathVariable UUID promotionId,
                                             @Valid @RequestBody PromotionStatusRequest request) {
-        promotionService.setStatus(Auth.actor(jwt), Auth.roles(jwt), seasonId, promotionId, request.status());
+        promotionService.setStatus(CurrentUser.of(jwt), seasonId, promotionId, request.status());
         return ResponseEntity.noContent().build();
     }
 }

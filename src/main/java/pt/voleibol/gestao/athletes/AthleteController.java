@@ -29,7 +29,7 @@ import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.multipart.MultipartFile;
 
-import pt.voleibol.gestao.shared.Auth;
+import pt.voleibol.gestao.shared.CurrentUser;
 
 /**
  * Atletas e encarregados de educação. A autorização fina é feita no serviço, porque depende da
@@ -92,23 +92,23 @@ class AthleteController {
                              @RequestParam(required = false) UUID teamId,
                              @RequestParam(defaultValue = "0") int page,
                              @RequestParam(defaultValue = "20") int size) {
-        return athleteService.list(Auth.actor(jwt), Auth.roles(jwt), q, status, teamId, page, size);
+        return athleteService.list(CurrentUser.of(jwt), q, status, teamId, page, size);
     }
 
     @GetMapping("/{athleteId}")
     AthleteService.AthleteView get(@AuthenticationPrincipal Jwt jwt, @PathVariable UUID athleteId) {
-        return athleteService.get(Auth.actor(jwt), Auth.roles(jwt), athleteId);
+        return athleteService.get(CurrentUser.of(jwt), athleteId);
     }
 
     @GetMapping("/{athleteId}/stats")
     AthleteStatsService.Stats stats(@AuthenticationPrincipal Jwt jwt, @PathVariable UUID athleteId) {
-        return statsService.get(Auth.actor(jwt), Auth.roles(jwt), athleteId);
+        return statsService.get(CurrentUser.of(jwt), athleteId);
     }
 
     @PostMapping
     ResponseEntity<AthleteService.AthleteView> create(@AuthenticationPrincipal Jwt jwt,
                                                       @Valid @RequestBody CreateAthleteRequest request) {
-        AthleteService.AthleteView created = athleteService.create(Auth.actor(jwt), Auth.roles(jwt),
+        AthleteService.AthleteView created = athleteService.create(CurrentUser.of(jwt),
                 AthleteService.data(request.fullName(), request.birthDate(), request.gender(), request.nif(),
                         request.email(), request.phone(), request.licenseNumber(), request.status(),
                         request.userId()));
@@ -118,14 +118,14 @@ class AthleteController {
     @PutMapping("/{athleteId}")
     AthleteService.AthleteView update(@AuthenticationPrincipal Jwt jwt, @PathVariable UUID athleteId,
                                       @Valid @RequestBody UpdateAthleteRequest request) {
-        return athleteService.update(Auth.actor(jwt), Auth.roles(jwt), athleteId,
+        return athleteService.update(CurrentUser.of(jwt), athleteId,
                 AthleteService.data(request.fullName(), request.birthDate(), request.gender(), request.nif(),
                         request.email(), request.phone(), request.licenseNumber(), null, null));
     }
 
     @DeleteMapping("/{athleteId}")
     ResponseEntity<Void> delete(@AuthenticationPrincipal Jwt jwt, @PathVariable UUID athleteId) {
-        athleteService.delete(Auth.actor(jwt), Auth.roles(jwt), athleteId);
+        athleteService.delete(CurrentUser.of(jwt), athleteId);
         return ResponseEntity.noContent().build();
     }
 
@@ -134,25 +134,25 @@ class AthleteController {
     @PostMapping("/{athleteId}/account")
     AthleteService.AthleteView linkAccount(@AuthenticationPrincipal Jwt jwt, @PathVariable UUID athleteId,
                                            @Valid @RequestBody LinkAccountRequest request) {
-        return athleteService.linkAccount(Auth.actor(jwt), Auth.roles(jwt), athleteId, request.userId());
+        return athleteService.linkAccount(CurrentUser.of(jwt), athleteId, request.userId());
     }
 
     @DeleteMapping("/{athleteId}/account")
     AthleteService.AthleteView unlinkAccount(@AuthenticationPrincipal Jwt jwt, @PathVariable UUID athleteId) {
-        return athleteService.unlinkAccount(Auth.actor(jwt), Auth.roles(jwt), athleteId);
+        return athleteService.unlinkAccount(CurrentUser.of(jwt), athleteId);
     }
 
     @PatchMapping("/{athleteId}/status")
     AthleteService.AthleteView changeStatus(@AuthenticationPrincipal Jwt jwt, @PathVariable UUID athleteId,
                                             @Valid @RequestBody StatusRequest request) {
-        return athleteService.changeStatus(Auth.actor(jwt), Auth.roles(jwt), athleteId, request.status());
+        return athleteService.changeStatus(CurrentUser.of(jwt), athleteId, request.status());
     }
 
     @PostMapping("/{athleteId}/withdrawal")
     AthleteService.AthleteView registerWithdrawal(@AuthenticationPrincipal Jwt jwt,
                                                   @PathVariable UUID athleteId,
                                                   @Valid @RequestBody WithdrawalRequest request) {
-        return athleteService.registerWithdrawal(Auth.actor(jwt), Auth.roles(jwt), athleteId,
+        return athleteService.registerWithdrawal(CurrentUser.of(jwt), athleteId,
                 request.withdrawalDate());
     }
 
@@ -161,21 +161,21 @@ class AthleteController {
     @GetMapping("/{athleteId}/guardians")
     List<AthleteService.GuardianView> listGuardians(@AuthenticationPrincipal Jwt jwt,
                                                     @PathVariable UUID athleteId) {
-        return athleteService.listGuardians(Auth.actor(jwt), Auth.roles(jwt), athleteId);
+        return athleteService.listGuardians(CurrentUser.of(jwt), athleteId);
     }
 
     @PostMapping("/{athleteId}/guardians")
     List<AthleteService.GuardianView> addGuardian(@AuthenticationPrincipal Jwt jwt,
                                                   @PathVariable UUID athleteId,
                                                   @Valid @RequestBody GuardianRequest request) {
-        return athleteService.addGuardian(Auth.actor(jwt), Auth.roles(jwt), athleteId, request.userId(),
+        return athleteService.addGuardian(CurrentUser.of(jwt), athleteId, request.userId(),
                 request.relationship());
     }
 
     @DeleteMapping("/{athleteId}/guardians/{userId}")
     ResponseEntity<Void> removeGuardian(@AuthenticationPrincipal Jwt jwt, @PathVariable UUID athleteId,
                                         @PathVariable UUID userId) {
-        athleteService.removeGuardian(Auth.actor(jwt), Auth.roles(jwt), athleteId, userId);
+        athleteService.removeGuardian(CurrentUser.of(jwt), athleteId, userId);
         return ResponseEntity.noContent().build();
     }
 
@@ -183,7 +183,7 @@ class AthleteController {
     @PostMapping(value = "/import", consumes = "multipart/form-data")
     ResponseEntity<Map<String, Object>> importCsv(@AuthenticationPrincipal Jwt jwt,
                                                   @RequestParam("file") MultipartFile file) throws java.io.IOException {
-        int count = athleteService.importCsv(Auth.actor(jwt), Auth.roles(jwt),
+        int count = athleteService.importCsv(CurrentUser.of(jwt),
                 new java.io.InputStreamReader(file.getInputStream(), java.nio.charset.StandardCharsets.UTF_8));
         return ResponseEntity.ok(Map.of("imported", count));
     }

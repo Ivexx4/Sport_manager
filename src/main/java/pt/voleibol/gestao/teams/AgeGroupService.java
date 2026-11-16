@@ -2,13 +2,13 @@ package pt.voleibol.gestao.teams;
 
 import java.time.Instant;
 import java.util.List;
-import java.util.Set;
 import java.util.UUID;
 
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.server.ResponseStatusException;
 
+import pt.voleibol.gestao.shared.CurrentUser;
 import pt.voleibol.gestao.shared.Rules;
 
 /**
@@ -28,14 +28,14 @@ class AgeGroupService {
     }
 
     @Transactional(readOnly = true)
-    List<AgeGroupView> list(UUID actorId, Set<String> roles) {
-        Rules.requireMember(roles);
+    List<AgeGroupView> list(CurrentUser user) {
+        Rules.requireMember(user);
         return ageGroups.list(Rules.tenant()).stream().map(AgeGroupService::view).toList();
     }
 
     @Transactional(readOnly = true)
-    AgeGroupView get(UUID actorId, Set<String> roles, UUID ageGroupId) {
-        Rules.requireMember(roles);
+    AgeGroupView get(CurrentUser user, UUID ageGroupId) {
+        Rules.requireMember(user);
         return view(ageGroups.findById(Rules.tenant(), ageGroupId).orElseThrow(AgeGroupService::notFound));
     }
 

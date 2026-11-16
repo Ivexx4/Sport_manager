@@ -25,6 +25,7 @@ import org.springframework.security.oauth2.jwt.NimbusJwtDecoder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import pt.voleibol.gestao.shared.Role;
 import pt.voleibol.gestao.shared.Rules;
 
 /**
@@ -102,11 +103,11 @@ class MfaService {
     /**
      * Decide o que falta a quem acabou de acertar na password: nada, um código TOTP ou uma inscrição.
      */
-    Optional<Challenge> gate(UUID tenantId, UUID userId, Set<String> roles) {
+    Optional<Challenge> gate(UUID tenantId, UUID userId, Set<Role> roles) {
         Optional<MfaRepository.State> found = repository.findState(userId);
         if (found.isEmpty()) return Optional.empty();
         if (found.get().enabled()) return Optional.of(challenge(tenantId, userId, Flow.VERIFY));
-        if (properties.requireForAdmins() && roles.contains("ADMIN")) {
+        if (properties.requireForAdmins() && roles.contains(Role.ADMIN)) {
             return Optional.of(challenge(tenantId, userId, Flow.ENROLL));
         }
         return Optional.empty();

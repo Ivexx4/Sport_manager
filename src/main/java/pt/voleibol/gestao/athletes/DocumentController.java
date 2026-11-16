@@ -20,7 +20,7 @@ import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
-import pt.voleibol.gestao.shared.Auth;
+import pt.voleibol.gestao.shared.CurrentUser;
 
 @RestController
 @RequestMapping("/api/v1")
@@ -37,14 +37,14 @@ class DocumentController {
 
     @GetMapping("/athletes/{athleteId}/documents")
     List<DocumentService.DocumentView> list(@AuthenticationPrincipal Jwt jwt, @PathVariable UUID athleteId) {
-        return service.list(Auth.actor(jwt), Auth.roles(jwt), athleteId);
+        return service.list(CurrentUser.of(jwt), athleteId);
     }
 
     @PostMapping("/athletes/{athleteId}/documents")
     ResponseEntity<DocumentService.DocumentView> create(@AuthenticationPrincipal Jwt jwt,
                                                         @PathVariable UUID athleteId,
                                                         @Valid @RequestBody DocumentRequest request) {
-        DocumentService.DocumentView created = service.create(Auth.actor(jwt), Auth.roles(jwt), athleteId,
+        DocumentService.DocumentView created = service.create(CurrentUser.of(jwt), athleteId,
                 request.type(), request.fileName(), request.fileUrl(), request.validUntil());
         return ResponseEntity.status(HttpStatus.CREATED).body(created);
     }
@@ -52,13 +52,13 @@ class DocumentController {
     @PutMapping("/documents/{documentId}")
     DocumentService.DocumentView update(@AuthenticationPrincipal Jwt jwt, @PathVariable UUID documentId,
                                         @Valid @RequestBody DocumentRequest request) {
-        return service.update(Auth.actor(jwt), Auth.roles(jwt), documentId, request.type(),
+        return service.update(CurrentUser.of(jwt), documentId, request.type(),
                 request.fileName(), request.fileUrl(), request.validUntil());
     }
 
     @DeleteMapping("/documents/{documentId}")
     ResponseEntity<Void> delete(@AuthenticationPrincipal Jwt jwt, @PathVariable UUID documentId) {
-        service.delete(Auth.actor(jwt), Auth.roles(jwt), documentId);
+        service.delete(CurrentUser.of(jwt), documentId);
         return ResponseEntity.noContent().build();
     }
 }

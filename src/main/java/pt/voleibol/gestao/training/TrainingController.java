@@ -23,7 +23,7 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
-import pt.voleibol.gestao.shared.Auth;
+import pt.voleibol.gestao.shared.CurrentUser;
 
 @RestController
 @RequestMapping("/api/v1")
@@ -51,18 +51,18 @@ class TrainingController {
 
     @GetMapping("/venues")
     List<TrainingService.VenueView> listVenues(@AuthenticationPrincipal Jwt jwt) {
-        return service.listVenues(Auth.actor(jwt), Auth.roles(jwt));
+        return service.listVenues(CurrentUser.of(jwt));
     }
 
     @GetMapping("/venues/{id}")
     TrainingService.VenueView getVenue(@AuthenticationPrincipal Jwt jwt, @PathVariable UUID id) {
-        return service.getVenue(Auth.actor(jwt), Auth.roles(jwt), id);
+        return service.getVenue(CurrentUser.of(jwt), id);
     }
 
     @PostMapping("/venues")
     ResponseEntity<TrainingService.VenueView> createVenue(@AuthenticationPrincipal Jwt jwt,
                                                           @Valid @RequestBody VenueRequest request) {
-        TrainingService.VenueView created = service.createVenue(Auth.actor(jwt), Auth.roles(jwt),
+        TrainingService.VenueView created = service.createVenue(CurrentUser.of(jwt),
                 request.name(), request.address());
         return ResponseEntity.status(HttpStatus.CREATED).body(created);
     }
@@ -70,12 +70,12 @@ class TrainingController {
     @PutMapping("/venues/{id}")
     TrainingService.VenueView updateVenue(@AuthenticationPrincipal Jwt jwt, @PathVariable UUID id,
                                           @Valid @RequestBody VenueRequest request) {
-        return service.updateVenue(Auth.actor(jwt), Auth.roles(jwt), id, request.name(), request.address());
+        return service.updateVenue(CurrentUser.of(jwt), id, request.name(), request.address());
     }
 
     @DeleteMapping("/venues/{id}")
     ResponseEntity<Void> deleteVenue(@AuthenticationPrincipal Jwt jwt, @PathVariable UUID id) {
-        service.deleteVenue(Auth.actor(jwt), Auth.roles(jwt), id);
+        service.deleteVenue(CurrentUser.of(jwt), id);
         return ResponseEntity.noContent().build();
     }
 
@@ -84,18 +84,18 @@ class TrainingController {
     @GetMapping("/training-sessions")
     List<TrainingService.SessionView> listSessions(@AuthenticationPrincipal Jwt jwt,
                                                    @RequestParam(required = false) UUID teamId) {
-        return service.listSessions(Auth.actor(jwt), Auth.roles(jwt), teamId);
+        return service.listSessions(CurrentUser.of(jwt), teamId);
     }
 
     @GetMapping("/training-sessions/{id}")
     TrainingService.SessionView getSession(@AuthenticationPrincipal Jwt jwt, @PathVariable UUID id) {
-        return service.getSession(Auth.actor(jwt), Auth.roles(jwt), id);
+        return service.getSession(CurrentUser.of(jwt), id);
     }
 
     @PostMapping("/training-sessions")
     ResponseEntity<TrainingService.SessionView> createSession(@AuthenticationPrincipal Jwt jwt,
                                                               @Valid @RequestBody SessionRequest request) {
-        TrainingService.SessionView created = service.createSession(Auth.actor(jwt), Auth.roles(jwt),
+        TrainingService.SessionView created = service.createSession(CurrentUser.of(jwt),
                 request.teamId(), request.courtId(), request.startTime(), request.endTime(),
                 request.recurrence(), request.notes(), request.status());
         return ResponseEntity.status(HttpStatus.CREATED).body(created);
@@ -104,13 +104,13 @@ class TrainingController {
     @PutMapping("/training-sessions/{id}")
     TrainingService.SessionView updateSession(@AuthenticationPrincipal Jwt jwt, @PathVariable UUID id,
                                               @Valid @RequestBody SessionRequest request) {
-        return service.updateSession(Auth.actor(jwt), Auth.roles(jwt), id, request.teamId(), request.courtId(),
+        return service.updateSession(CurrentUser.of(jwt), id, request.teamId(), request.courtId(),
                 request.startTime(), request.endTime(), request.recurrence(), request.notes(), request.status());
     }
 
     @DeleteMapping("/training-sessions/{id}")
     ResponseEntity<Void> deleteSession(@AuthenticationPrincipal Jwt jwt, @PathVariable UUID id) {
-        service.deleteSession(Auth.actor(jwt), Auth.roles(jwt), id);
+        service.deleteSession(CurrentUser.of(jwt), id);
         return ResponseEntity.noContent().build();
     }
 
@@ -119,13 +119,13 @@ class TrainingController {
     @GetMapping("/training-sessions/{id}/attendance")
     List<TrainingService.AttendanceView> listAttendance(@AuthenticationPrincipal Jwt jwt,
                                                         @PathVariable UUID id) {
-        return service.listAttendance(Auth.actor(jwt), Auth.roles(jwt), id);
+        return service.listAttendance(CurrentUser.of(jwt), id);
     }
 
     @PostMapping("/training-sessions/{id}/attendance")
     ResponseEntity<Void> setAttendance(@AuthenticationPrincipal Jwt jwt, @PathVariable UUID id,
                                        @Valid @RequestBody AttendanceRequest request) {
-        service.setAttendance(Auth.actor(jwt), Auth.roles(jwt), id, request.athleteId(), request.status(),
+        service.setAttendance(CurrentUser.of(jwt), id, request.athleteId(), request.status(),
                 request.justification());
         return ResponseEntity.noContent().build();
     }
@@ -134,7 +134,7 @@ class TrainingController {
     ResponseEntity<Void> setAttendanceByPath(@AuthenticationPrincipal Jwt jwt, @PathVariable UUID id,
                                              @PathVariable UUID athleteId,
                                              @RequestBody(required = false) AttendanceRequest request) {
-        service.setAttendance(Auth.actor(jwt), Auth.roles(jwt), id, athleteId,
+        service.setAttendance(CurrentUser.of(jwt), id, athleteId,
                 request == null ? null : request.status(),
                 request == null ? null : request.justification());
         return ResponseEntity.noContent().build();
@@ -143,7 +143,7 @@ class TrainingController {
     @DeleteMapping("/training-sessions/{id}/attendance/{athleteId}")
     ResponseEntity<Void> removeAttendance(@AuthenticationPrincipal Jwt jwt, @PathVariable UUID id,
                                           @PathVariable UUID athleteId) {
-        service.removeAttendance(Auth.actor(jwt), Auth.roles(jwt), id, athleteId);
+        service.removeAttendance(CurrentUser.of(jwt), id, athleteId);
         return ResponseEntity.noContent().build();
     }
 }

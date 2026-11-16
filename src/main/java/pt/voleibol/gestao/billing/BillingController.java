@@ -22,7 +22,7 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
-import pt.voleibol.gestao.shared.Auth;
+import pt.voleibol.gestao.shared.CurrentUser;
 
 @RestController
 @RequestMapping("/api/v1")
@@ -63,33 +63,33 @@ class BillingController {
     // fee plans
     @GetMapping("/fee-plans")
     List<BillingService.FeePlanView> listFeePlans(@AuthenticationPrincipal Jwt jwt) {
-        return service.listFeePlans(Auth.roles(jwt));
+        return service.listFeePlans(CurrentUser.of(jwt));
     }
 
     @PostMapping("/fee-plans")
     ResponseEntity<BillingService.FeePlanView> createFeePlan(@AuthenticationPrincipal Jwt jwt,
                                                              @Valid @RequestBody FeePlanRequest r) {
-        BillingService.FeePlanView created = service.createFeePlan(Auth.actor(jwt), Auth.roles(jwt), r.name(),
+        BillingService.FeePlanView created = service.createFeePlan(CurrentUser.of(jwt), r.name(),
                 r.seasonId(), r.ageGroupId(), r.amountCents(), r.periodicity());
         return ResponseEntity.status(HttpStatus.CREATED).body(created);
     }
 
     @DeleteMapping("/fee-plans/{id}")
     ResponseEntity<Void> deleteFeePlan(@AuthenticationPrincipal Jwt jwt, @PathVariable UUID id) {
-        service.deleteFeePlan(Auth.actor(jwt), Auth.roles(jwt), id);
+        service.deleteFeePlan(CurrentUser.of(jwt), id);
         return ResponseEntity.noContent().build();
     }
 
     @GetMapping("/athletes/{athleteId}/promotions")
     List<BillingService.PromotionView> listPromotions(@AuthenticationPrincipal Jwt jwt,
                                                       @PathVariable UUID athleteId) {
-        return service.listPromotions(Auth.roles(jwt), athleteId);
+        return service.listPromotions(CurrentUser.of(jwt), athleteId);
     }
 
     @PostMapping("/athlete-promotions")
     ResponseEntity<BillingService.PromotionView> createPromotion(@AuthenticationPrincipal Jwt jwt,
                                                                  @Valid @RequestBody PromotionRequest r) {
-        BillingService.PromotionView created = service.createPromotion(Auth.actor(jwt), Auth.roles(jwt),
+        BillingService.PromotionView created = service.createPromotion(CurrentUser.of(jwt),
                 r.athleteId(), r.feePlanId(), r.amountCents(), r.validFrom(), r.validTo(), r.reason(),
                 r.applicationScope(), r.billingPeriod());
         return ResponseEntity.status(HttpStatus.CREATED).body(created);
@@ -98,7 +98,7 @@ class BillingController {
     @PatchMapping("/athlete-promotions/{id}/active")
     ResponseEntity<Void> setPromotionActive(@AuthenticationPrincipal Jwt jwt, @PathVariable UUID id,
                                             @RequestBody StatusRequest r) {
-        service.setPromotionActive(Auth.actor(jwt), Auth.roles(jwt), id,
+        service.setPromotionActive(CurrentUser.of(jwt), id,
                 r != null && "ACTIVE".equalsIgnoreCase(r.status()));
         return ResponseEntity.noContent().build();
     }
@@ -108,13 +108,13 @@ class BillingController {
     List<BillingService.ChargeView> listCharges(@AuthenticationPrincipal Jwt jwt,
                                                 @RequestParam(required = false) UUID athleteId,
                                                 @RequestParam(required = false) String status) {
-        return service.listCharges(Auth.actor(jwt), Auth.roles(jwt), athleteId, status);
+        return service.listCharges(CurrentUser.of(jwt), athleteId, status);
     }
 
     @PostMapping("/charges")
     ResponseEntity<BillingService.ChargeView> createCharge(@AuthenticationPrincipal Jwt jwt,
                                                            @Valid @RequestBody ChargeRequest r) {
-        BillingService.ChargeView created = service.createCharge(Auth.actor(jwt), Auth.roles(jwt), r.athleteId(),
+        BillingService.ChargeView created = service.createCharge(CurrentUser.of(jwt), r.athleteId(),
                 r.guardianId(), r.feePlanId(), r.amountCents(), r.dueDate(), r.status());
         return ResponseEntity.status(HttpStatus.CREATED).body(created);
     }
@@ -122,33 +122,33 @@ class BillingController {
     @PostMapping("/charges/generate")
     BillingService.GenerateView generateCharges(@AuthenticationPrincipal Jwt jwt,
                                                 @RequestBody(required = false) GenerateChargesRequest r) {
-        return service.generateCharges(Auth.actor(jwt), Auth.roles(jwt), r == null ? null : r.period(),
+        return service.generateCharges(CurrentUser.of(jwt), r == null ? null : r.period(),
                 r == null ? null : r.feePlanId(), r != null && Boolean.TRUE.equals(r.dryRun()));
     }
 
     @PatchMapping("/charges/{id}/status")
     ResponseEntity<Void> updateChargeStatus(@AuthenticationPrincipal Jwt jwt, @PathVariable UUID id,
                                             @RequestBody(required = false) StatusRequest r) {
-        service.updateChargeStatus(Auth.actor(jwt), Auth.roles(jwt), id, r == null ? null : r.status());
+        service.updateChargeStatus(CurrentUser.of(jwt), id, r == null ? null : r.status());
         return ResponseEntity.noContent().build();
     }
 
     @DeleteMapping("/charges/{id}")
     ResponseEntity<Void> deleteCharge(@AuthenticationPrincipal Jwt jwt, @PathVariable UUID id) {
-        service.deleteCharge(Auth.actor(jwt), Auth.roles(jwt), id);
+        service.deleteCharge(CurrentUser.of(jwt), id);
         return ResponseEntity.noContent().build();
     }
 
     // payments
     @GetMapping("/charges/{id}/payments")
     List<BillingService.PaymentView> listPayments(@AuthenticationPrincipal Jwt jwt, @PathVariable UUID id) {
-        return service.listPayments(Auth.roles(jwt), id);
+        return service.listPayments(CurrentUser.of(jwt), id);
     }
 
     @PostMapping("/payments")
     ResponseEntity<BillingService.PaymentView> createPayment(@AuthenticationPrincipal Jwt jwt,
                                                              @Valid @RequestBody PaymentRequest r) {
-        BillingService.PaymentView created = service.createPayment(Auth.actor(jwt), Auth.roles(jwt),
+        BillingService.PaymentView created = service.createPayment(CurrentUser.of(jwt),
                 r.chargeId(), r.method(), r.amountCents(), r.reference());
         return ResponseEntity.status(HttpStatus.CREATED).body(created);
     }
@@ -156,20 +156,20 @@ class BillingController {
     // ledger
     @GetMapping("/ledger-entries")
     List<BillingService.LedgerView> listLedger(@AuthenticationPrincipal Jwt jwt) {
-        return service.listLedger(Auth.roles(jwt));
+        return service.listLedger(CurrentUser.of(jwt));
     }
 
     @PostMapping("/ledger-entries")
     ResponseEntity<BillingService.LedgerView> createLedger(@AuthenticationPrincipal Jwt jwt,
                                                            @Valid @RequestBody LedgerRequest r) {
-        BillingService.LedgerView created = service.createLedger(Auth.actor(jwt), Auth.roles(jwt), r.type(),
+        BillingService.LedgerView created = service.createLedger(CurrentUser.of(jwt), r.type(),
                 r.category(), r.amountCents(), r.entryDate(), r.description());
         return ResponseEntity.status(HttpStatus.CREATED).body(created);
     }
 
     @DeleteMapping("/ledger-entries/{id}")
     ResponseEntity<Void> deleteLedger(@AuthenticationPrincipal Jwt jwt, @PathVariable UUID id) {
-        service.deleteLedger(Auth.actor(jwt), Auth.roles(jwt), id);
+        service.deleteLedger(CurrentUser.of(jwt), id);
         return ResponseEntity.noContent().build();
     }
 }

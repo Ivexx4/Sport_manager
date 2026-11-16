@@ -3,9 +3,7 @@ package pt.voleibol.gestao.teams;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.util.List;
-import java.util.Locale;
 import java.util.Objects;
-import java.util.Set;
 import java.util.UUID;
 
 import org.springframework.dao.DuplicateKeyException;
@@ -13,6 +11,8 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.server.ResponseStatusException;
 
+import pt.voleibol.gestao.shared.CurrentUser;
+import pt.voleibol.gestao.shared.Role;
 import pt.voleibol.gestao.shared.Rules;
 
 /**
@@ -23,9 +23,6 @@ import pt.voleibol.gestao.shared.Rules;
  */
 @Service
 class TeamService {
-
-    private static final Set<String> STAFF_ROLES = Set.of("TREINADOR", "TREINADOR_ADJUNTO");
-    private static final Set<String> STATUSES = Set.of("ACTIVE", "INACTIVE");
 
     record TeamView(UUID id, String name, String status, UUID seasonId, UUID ageGroupId,
                     Instant createdAt, Instant updatedAt) {
@@ -53,42 +50,43 @@ class TeamService {
     }
 
     @Transactional(readOnly = true)
-    List<TeamView> list(UUID actorId, Set<String> roles) {
+    List<TeamView> list(CurrentUser user) {
         UUID tenantId = Rules.tenant();
-        if (!Rules.isManager(roles) && !roles.contains("TREINADOR")) throw Rules.forbidden();
-        return teams.list(tenantId, actorId, Rules.isManager(roles)).stream()
+        if (!user.isManager() && !user.has(Role.TREINADOR)) throw Rules.forbidden();
+        return teams.list(tenantId, user.id(), user.isManager()).stream()
                 .map(TeamService::view).toList();
     }
 
     @Transactional(readOnly = true)
-    TeamView get(UUID actorId, Set<String> roles, UUID teamId) {
-        return view(requireVisible(Rules.tenant(), teamId, actorId, roles));
+    TeamView get(CurrentUser user, UUID teamId) {
+        return view(requireVisible(Rules.tenant(), teamId, user));
     }
 
     @Transactional
-    TeamView create(UUID actorId, Set<String> roles, String name, String status, UUID seasonId,
+    TeamView create(CurrentUser user, String name, String status, UUID seasonId,
                     UUID ageGroupId) {
         UUID tenantId = Rules.tenant();
-        Rules.requireManager(roles);
+        Rules.requireManager(user);
         String normalizedName = Rules.requiredText(name);
         requireReferences(tenantId, seasonId, ageGroupId);
         if (teams.nameExists(tenantId, normalizedName, null)) throw Rules.conflict("Já existe uma equipa com este nome");
         UUID id = UUID.randomUUID();
         try {
-            teams.insert(id, tenantId, normalizedName, Rules.status(status == null ? "ACTIVE" : status, STATUSES),
-                    seasonId, ageGroupId, actorId);
+            teams.insert(id, tenantId, normalizedName,
+                    Rules.parse(TeamStatus.class, status, "Estado", TeamStatus.DEFAULT).name(),
+                    seasonId, ageGroupId, user.id());
         } catch (DuplicateKeyException e) {
             throw Rules.conflict("Já existe uma equipa com este nome");
         }
-        teams.audit(tenantId, actorId, "TEAM_CREATED", id);
+        teams.audit(tenantId, user.id(), "TEAM_CREATED", id);
         return view(teams.findById(tenantId, id).orElseThrow(TeamService::notFound));
     }
 
     @Transactional
-    TeamView update(UUID actorId, Set<String> roles, UUID teamId, String name, String status,
+    TeamView update(CurrentUser user, UUID teamId, String name, String status,
                     UUID seasonId, UUID ageGroupId) {
         UUID tenantId = Rules.tenant();
-        Rules.requireManager(roles);
+        Rules.requireManager(user);
         TeamRepository.TeamRow current = teams.findById(tenantId, teamId).orElseThrow(TeamService::notFound);
         String normalizedName = Rules.requiredText(name);
         requireReferences(tenantId, seasonId, ageGroupId);
@@ -97,7 +95,8 @@ class TeamService {
                 || !Objects.equals(current.ageGroupId(), ageGroupId);
         try {
             if (!teams.update(tenantId, teamId, normalizedName,
-                    status == null || status.isBlank() ? current.status() : Rules.status(status, STATUSES),
+                    status == null || status.isBlank() ? current.status()
+                            : Rules.parse(TeamStatus.class, status, "Estado").name(),
                     seasonId, ageGroupId)) {
                 throw notFound();
             }
@@ -107,73 +106,73 @@ class TeamService {
         // Mudar a época ou o escalão pode invalidar o plantel: a validação corre depois da escrita,
         // dentro da transação, e desfaz a alteração.
         if (contextChanged) eligibility.requireTeamStillValid(tenantId, teamId);
-        teams.audit(tenantId, actorId, "TEAM_UPDATED", teamId);
+        teams.audit(tenantId, user.id(), "TEAM_UPDATED", teamId);
         return view(teams.findById(tenantId, teamId).orElseThrow(TeamService::notFound));
     }
 
     @Transactional
-    void delete(UUID actorId, Set<String> roles, UUID teamId) {
+    void delete(CurrentUser user, UUID teamId) {
         UUID tenantId = Rules.tenant();
-        Rules.requireManager(roles);
+        Rules.requireManager(user);
         // Remoção não destrutiva: desativa e anonimiza, preservando staff e plantel para histórico.
         if (!teams.anonymize(tenantId, teamId)) throw notFound();
-        teams.audit(tenantId, actorId, "TEAM_ANONYMIZED", teamId);
+        teams.audit(tenantId, user.id(), "TEAM_ANONYMIZED", teamId);
     }
 
     // --- staff ---
 
     @Transactional(readOnly = true)
-    List<StaffView> listStaff(UUID actorId, Set<String> roles, UUID teamId) {
+    List<StaffView> listStaff(CurrentUser user, UUID teamId) {
         UUID tenantId = Rules.tenant();
-        requireVisible(tenantId, teamId, actorId, roles);
+        requireVisible(tenantId, teamId, user);
         return teams.listStaff(tenantId, teamId).stream()
                 .map(s -> new StaffView(s.userId(), s.name(), s.email(), s.role()))
                 .toList();
     }
 
     @Transactional
-    List<StaffView> addStaff(UUID actorId, Set<String> roles, UUID teamId, UUID userId, String role) {
+    List<StaffView> addStaff(CurrentUser user, UUID teamId, UUID userId, String role) {
         UUID tenantId = Rules.tenant();
-        Rules.requireManager(roles);
-        requireVisible(tenantId, teamId, actorId, roles);
+        Rules.requireManager(user);
+        requireVisible(tenantId, teamId, user);
         if (!teams.activeMembershipExists(tenantId, userId)) throw Rules.notFound("Utilizador sem papel ativo no clube");
         String normalizedRole = validStaffRole(role);
         if (teams.staffExists(tenantId, teamId, userId)) throw Rules.conflict("Este utilizador já é staff da equipa");
         try {
-            teams.insertStaff(tenantId, teamId, userId, normalizedRole, actorId);
+            teams.insertStaff(tenantId, teamId, userId, normalizedRole, user.id());
         } catch (DuplicateKeyException e) {
             throw Rules.conflict("Este utilizador já é staff da equipa");
         }
-        teams.audit(tenantId, actorId, "TEAM_STAFF_ADDED", teamId);
-        return listStaff(actorId, roles, teamId);
+        teams.audit(tenantId, user.id(), "TEAM_STAFF_ADDED", teamId);
+        return listStaff(user, teamId);
     }
 
     @Transactional
-    void removeStaff(UUID actorId, Set<String> roles, UUID teamId, UUID userId) {
+    void removeStaff(CurrentUser user, UUID teamId, UUID userId) {
         UUID tenantId = Rules.tenant();
-        Rules.requireManager(roles);
-        requireVisible(tenantId, teamId, actorId, roles);
+        Rules.requireManager(user);
+        requireVisible(tenantId, teamId, user);
         if (!teams.deleteStaff(tenantId, teamId, userId)) throw Rules.notFound("Utilizador não é staff da equipa");
-        teams.audit(tenantId, actorId, "TEAM_STAFF_REMOVED", teamId);
+        teams.audit(tenantId, user.id(), "TEAM_STAFF_REMOVED", teamId);
     }
 
     // --- plantel ---
 
     @Transactional(readOnly = true)
-    List<RosterView> listAthletes(UUID actorId, Set<String> roles, UUID teamId) {
+    List<RosterView> listAthletes(CurrentUser user, UUID teamId) {
         UUID tenantId = Rules.tenant();
-        requireVisible(tenantId, teamId, actorId, roles);
+        requireVisible(tenantId, teamId, user);
         return teams.listAthletes(tenantId, teamId).stream()
                 .map(a -> new RosterView(a.athleteId(), a.fullName(), a.status()))
                 .toList();
     }
 
     @Transactional
-    List<RosterView> addAthleteToTeam(UUID actorId, Set<String> roles, UUID teamId, UUID athleteId,
+    List<RosterView> addAthleteToTeam(CurrentUser user, UUID teamId, UUID athleteId,
                                       UUID registrationAgeGroupId) {
         UUID tenantId = Rules.tenant();
-        Rules.requireManager(roles);
-        requireVisible(tenantId, teamId, actorId, roles);
+        Rules.requireManager(user);
+        requireVisible(tenantId, teamId, user);
         if (!teams.athleteExists(tenantId, athleteId)) throw Rules.notFound("Atleta não encontrado");
         if (teams.rosterExists(tenantId, teamId, athleteId)) throw Rules.conflict("Este atleta já pertence à equipa");
         TeamRepository.TeamRow team = teams.findById(tenantId, teamId).orElseThrow(TeamService::notFound);
@@ -188,15 +187,15 @@ class TeamService {
         AgeGroupRepository.AgeGroupRow registrationGroup =
                 resolveRegistrationGroup(tenantId, season, athleteId, birthDate, registrationAgeGroupId);
         validarRegrasFpV(tenantId, season, ageGroup, athleteId, birthDate);
-        teams.saveRegistration(tenantId, season.id(), athleteId, registrationGroup.id(), actorId);
+        teams.saveRegistration(tenantId, season.id(), athleteId, registrationGroup.id(), user.id());
         try {
-            teams.insertAthlete(tenantId, teamId, athleteId, actorId);
+            teams.insertAthlete(tenantId, teamId, athleteId, user.id());
         } catch (DuplicateKeyException e) {
             throw Rules.conflict("Este atleta já pertence à equipa");
         }
 
-        teams.audit(tenantId, actorId, "TEAM_ATHLETE_ADDED", teamId);
-        return listAthletes(actorId, roles, teamId);
+        teams.audit(tenantId, user.id(), "TEAM_ATHLETE_ADDED", teamId);
+        return listAthletes(user, teamId);
     }
 
     private AgeGroupRepository.AgeGroupRow resolveRegistrationGroup(
@@ -220,12 +219,12 @@ class TeamService {
     }
 
     @Transactional
-    void removeAthlete(UUID actorId, Set<String> roles, UUID teamId, UUID athleteId) {
+    void removeAthlete(CurrentUser user, UUID teamId, UUID athleteId) {
         UUID tenantId = Rules.tenant();
-        Rules.requireManager(roles);
-        requireVisible(tenantId, teamId, actorId, roles);
+        Rules.requireManager(user);
+        requireVisible(tenantId, teamId, user);
         if (!teams.deleteAthlete(tenantId, teamId, athleteId)) throw Rules.notFound("Atleta não pertence à equipa");
-        teams.audit(tenantId, actorId, "TEAM_ATHLETE_REMOVED", teamId);
+        teams.audit(tenantId, user.id(), "TEAM_ATHLETE_REMOVED", teamId);
     }
 
     // --- auxiliares ---
@@ -242,9 +241,9 @@ class TeamService {
                 promotions.activeExists(tenantId, season.id(), ageGroup.id(), athleteId), "plantel da equipa");
     }
 
-    private TeamRepository.TeamRow requireVisible(UUID tenantId, UUID teamId, UUID actorId, Set<String> roles) {
-        if (Rules.isManager(roles)) return teams.findById(tenantId, teamId).orElseThrow(TeamService::notFound);
-        if (roles.contains("TREINADOR")) return teams.findVisible(tenantId, teamId, actorId, false).orElseThrow(TeamService::notFound);
+    private TeamRepository.TeamRow requireVisible(UUID tenantId, UUID teamId, CurrentUser user) {
+        if (user.isManager()) return teams.findById(tenantId, teamId).orElseThrow(TeamService::notFound);
+        if (user.has(Role.TREINADOR)) return teams.findVisible(tenantId, teamId, user.id(), false).orElseThrow(TeamService::notFound);
         throw Rules.forbidden();
     }
 
@@ -255,10 +254,7 @@ class TeamService {
     }
 
     private static String validStaffRole(String role) {
-        if (role == null || role.isBlank()) return "TREINADOR";
-        String normalized = role.trim().toUpperCase(Locale.ROOT);
-        if (!STAFF_ROLES.contains(normalized)) throw Rules.badRequest("Papel de staff inválido");
-        return normalized;
+        return Rules.parse(StaffRole.class, role, "Papel de staff", StaffRole.DEFAULT).name();
     }
 
     private static ResponseStatusException notFound() {

@@ -16,15 +16,15 @@ import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.server.ResponseStatusException;
 
 import pt.voleibol.gestao.notifications.EmailSender;
+import pt.voleibol.gestao.shared.CurrentUser;
 import pt.voleibol.gestao.shared.Db;
+import pt.voleibol.gestao.shared.Role;
 import pt.voleibol.gestao.shared.Rules;
 import pt.voleibol.gestao.teams.TeamAccess;
 
 @Service
 class MatchService {
 
-    private static final Set<String> MATCH_STATUSES = Set.of("SCHEDULED", "PLAYED", "CANCELLED", "POSTPONED");
-    private static final Set<String> CALLUP_RESPONSES = Set.of("CONFIRMED", "DECLINED");
     private static final ZoneId LISBOA = ZoneId.of("Europe/Lisbon");
     private static final DateTimeFormatter MATCH_DATE_FORMAT = DateTimeFormatter.ofPattern("dd/MM/yyyy HH:mm");
 
@@ -53,150 +53,152 @@ class MatchService {
     // --- matches ---
 
     @Transactional(readOnly = true)
-    List<MatchView> listMatches(UUID actorId, Set<String> roles, UUID teamId) {
+    List<MatchView> listMatches(CurrentUser user, UUID teamId) {
         UUID tenantId = Rules.tenant();
-        if (!Rules.isSport(roles)) throw Rules.forbidden();
-        if (teamId != null) teamAccess.requireVisible(tenantId, teamId, actorId, roles);
+        if (!user.isSport()) throw Rules.forbidden();
+        if (teamId != null) teamAccess.requireVisible(tenantId, teamId, user);
         return matches.list(tenantId, teamId).stream()
-                .filter(m -> teamAccess.visible(tenantId, m.teamId(), actorId, roles))
+                .filter(m -> teamAccess.visible(tenantId, m.teamId(), user))
                 .map(MatchService::matchView).toList();
     }
 
     @Transactional(readOnly = true)
-    MatchView getMatch(UUID actorId, Set<String> roles, UUID id) {
+    MatchView getMatch(CurrentUser user, UUID id) {
         UUID tenantId = Rules.tenant();
         MatchRepository.MatchRow row = matches.findById(tenantId, id).orElseThrow(MatchService::matchNotFound);
-        teamAccess.requireVisible(tenantId, row.teamId(), actorId, roles);
+        teamAccess.requireVisible(tenantId, row.teamId(), user);
         return matchView(row);
     }
 
     @Transactional
-    MatchView createMatch(UUID actorId, Set<String> roles, UUID teamId, String competition, String opponent,
+    MatchView createMatch(CurrentUser user, UUID teamId, String competition, String opponent,
                           String location, UUID courtId, Instant matchDate, Boolean isHome, String status) {
         UUID tenantId = Rules.tenant();
-        teamAccess.requireVisible(tenantId, teamId, actorId, roles);
-        Rules.requireWritable(roles);
+        teamAccess.requireVisible(tenantId, teamId, user);
+        Rules.requireWritable(user);
         if (opponent == null || opponent.isBlank()) throw Rules.badRequest("Adversário obrigatório");
         if (matchDate == null) throw Rules.badRequest("Data do jogo obrigatória");
         if (courtId != null && !matches.venueExists(tenantId, courtId)) throw Rules.notFound("Local não encontrado");
         UUID id = UUID.randomUUID();
         matches.insert(id, tenantId, teamId, competition, opponent.trim(), location, courtId, matchDate,
-                isHome == null ? true : isHome, Rules.status(status == null ? "SCHEDULED" : status, MATCH_STATUSES), actorId);
-        matches.audit(tenantId, actorId, "MATCH_CREATED", id);
+                isHome == null ? true : isHome,
+                Rules.parse(MatchStatus.class, status, "Estado", MatchStatus.DEFAULT).name(), user.id());
+        matches.audit(tenantId, user.id(), "MATCH_CREATED", id);
         return matchView(matches.findById(tenantId, id).orElseThrow(MatchService::matchNotFound));
     }
 
     @Transactional
-    MatchView updateMatch(UUID actorId, Set<String> roles, UUID id, UUID teamId, String competition, String opponent,
+    MatchView updateMatch(CurrentUser user, UUID id, UUID teamId, String competition, String opponent,
                           String location, UUID courtId, Instant matchDate, Boolean isHome, String status) {
         UUID tenantId = Rules.tenant();
         MatchRepository.MatchRow current = matches.findById(tenantId, id).orElseThrow(MatchService::matchNotFound);
         UUID newTeam = teamId == null ? current.teamId() : teamId;
-        teamAccess.requireVisible(tenantId, current.teamId(), actorId, roles);
-        teamAccess.requireVisible(tenantId, newTeam, actorId, roles);
-        Rules.requireWritable(roles);
+        teamAccess.requireVisible(tenantId, current.teamId(), user);
+        teamAccess.requireVisible(tenantId, newTeam, user);
+        Rules.requireWritable(user);
         if (opponent == null || opponent.isBlank()) throw Rules.badRequest("Adversário obrigatório");
         if (matchDate == null) matchDate = current.matchDate();
         if (courtId != null && !matches.venueExists(tenantId, courtId)) throw Rules.notFound("Local não encontrado");
         if (!matches.update(tenantId, id, newTeam, competition, opponent.trim(), location, courtId, matchDate,
                 isHome == null ? current.isHome() : isHome,
-                status == null || status.isBlank() ? current.status() : Rules.status(status, MATCH_STATUSES))) {
+                status == null || status.isBlank() ? current.status()
+                        : Rules.parse(MatchStatus.class, status, "Estado").name())) {
             throw matchNotFound();
         }
-        matches.audit(tenantId, actorId, "MATCH_UPDATED", id);
+        matches.audit(tenantId, user.id(), "MATCH_UPDATED", id);
         return matchView(matches.findById(tenantId, id).orElseThrow(MatchService::matchNotFound));
     }
 
     @Transactional
-    void deleteMatch(UUID actorId, Set<String> roles, UUID id) {
+    void deleteMatch(CurrentUser user, UUID id) {
         UUID tenantId = Rules.tenant();
         MatchRepository.MatchRow row = matches.findById(tenantId, id).orElseThrow(MatchService::matchNotFound);
-        teamAccess.requireVisible(tenantId, row.teamId(), actorId, roles);
-        Rules.requireWritable(roles);
+        teamAccess.requireVisible(tenantId, row.teamId(), user);
+        Rules.requireWritable(user);
         if (!matches.anonymize(tenantId, id)) throw matchNotFound();
-        matches.audit(tenantId, actorId, "MATCH_ANONYMIZED", id);
+        matches.audit(tenantId, user.id(), "MATCH_ANONYMIZED", id);
     }
 
     // --- set scores ---
 
     @Transactional(readOnly = true)
-    List<SetScoreView> listSetScores(UUID actorId, Set<String> roles, UUID matchId) {
+    List<SetScoreView> listSetScores(CurrentUser user, UUID matchId) {
         UUID tenantId = Rules.tenant();
         MatchRepository.MatchRow row = matches.findById(tenantId, matchId).orElseThrow(MatchService::matchNotFound);
-        teamAccess.requireVisible(tenantId, row.teamId(), actorId, roles);
+        teamAccess.requireVisible(tenantId, row.teamId(), user);
         return matches.listSetScores(tenantId, matchId).stream()
                 .map(s -> new SetScoreView(s.setNumber(), s.ourPoints(), s.opponentPoints())).toList();
     }
 
     @Transactional
-    void setSetScore(UUID actorId, Set<String> roles, UUID matchId, int setNumber, int ourPoints, int opponentPoints) {
+    void setSetScore(CurrentUser user, UUID matchId, int setNumber, int ourPoints, int opponentPoints) {
         UUID tenantId = Rules.tenant();
         MatchRepository.MatchRow row = matches.findById(tenantId, matchId).orElseThrow(MatchService::matchNotFound);
-        teamAccess.requireVisible(tenantId, row.teamId(), actorId, roles);
-        Rules.requireWritable(roles);
+        teamAccess.requireVisible(tenantId, row.teamId(), user);
+        Rules.requireWritable(user);
         if (setNumber <= 0) throw Rules.badRequest("Número de set inválido");
-        matches.upsertSetScore(tenantId, matchId, setNumber, ourPoints, opponentPoints, actorId);
-        matches.audit(tenantId, actorId, "MATCH_SET_SCORE_SET", matchId);
+        matches.upsertSetScore(tenantId, matchId, setNumber, ourPoints, opponentPoints, user.id());
+        matches.audit(tenantId, user.id(), "MATCH_SET_SCORE_SET", matchId);
     }
 
     @Transactional
-    void deleteSetScore(UUID actorId, Set<String> roles, UUID matchId, int setNumber) {
+    void deleteSetScore(CurrentUser user, UUID matchId, int setNumber) {
         UUID tenantId = Rules.tenant();
         MatchRepository.MatchRow row = matches.findById(tenantId, matchId).orElseThrow(MatchService::matchNotFound);
-        teamAccess.requireVisible(tenantId, row.teamId(), actorId, roles);
-        Rules.requireWritable(roles);
+        teamAccess.requireVisible(tenantId, row.teamId(), user);
+        Rules.requireWritable(user);
         if (!matches.deleteSetScore(tenantId, matchId, setNumber)) throw Rules.notFound("Set não encontrado");
-        matches.audit(tenantId, actorId, "MATCH_SET_SCORE_REMOVED", matchId);
+        matches.audit(tenantId, user.id(), "MATCH_SET_SCORE_REMOVED", matchId);
     }
 
     // --- call ups ---
 
     @Transactional(readOnly = true)
-    List<CallUpView> listCallUps(UUID actorId, Set<String> roles, UUID matchId) {
+    List<CallUpView> listCallUps(CurrentUser user, UUID matchId) {
         UUID tenantId = Rules.tenant();
         MatchRepository.MatchRow row = matches.findById(tenantId, matchId).orElseThrow(MatchService::matchNotFound);
-        teamAccess.requireVisible(tenantId, row.teamId(), actorId, roles);
+        teamAccess.requireVisible(tenantId, row.teamId(), user);
         return matches.listCallUps(tenantId, matchId).stream()
                 .map(c -> new CallUpView(c.athleteId(), c.fullName(), c.status(), c.response(), c.respondedAt()))
                 .toList();
     }
 
     @Transactional
-    void addCallUp(UUID actorId, Set<String> roles, UUID matchId, UUID athleteId) {
+    void addCallUp(CurrentUser user, UUID matchId, UUID athleteId) {
         UUID tenantId = Rules.tenant();
         MatchRepository.MatchRow row = matches.findById(tenantId, matchId).orElseThrow(MatchService::matchNotFound);
-        teamAccess.requireVisible(tenantId, row.teamId(), actorId, roles);
-        Rules.requireWritable(roles);
+        teamAccess.requireVisible(tenantId, row.teamId(), user);
+        Rules.requireWritable(user);
         if (!teamAccess.athleteOnTeam(tenantId, row.teamId(), athleteId)) throw Rules.badRequest("Atleta não pertence à equipa");
         if (matches.callUpExists(tenantId, matchId, athleteId)) throw Rules.conflict("Atleta já convocado");
-        matches.insertCallUp(tenantId, matchId, athleteId, actorId);
-        matches.audit(tenantId, actorId, "MATCH_CALLUP_ADDED", matchId);
+        matches.insertCallUp(tenantId, matchId, athleteId, user.id());
+        matches.audit(tenantId, user.id(), "MATCH_CALLUP_ADDED", matchId);
         notifyCallUp(tenantId, row, athleteId);
     }
 
     @Transactional
-    void removeCallUp(UUID actorId, Set<String> roles, UUID matchId, UUID athleteId) {
+    void removeCallUp(CurrentUser user, UUID matchId, UUID athleteId) {
         UUID tenantId = Rules.tenant();
         MatchRepository.MatchRow row = matches.findById(tenantId, matchId).orElseThrow(MatchService::matchNotFound);
-        teamAccess.requireVisible(tenantId, row.teamId(), actorId, roles);
-        Rules.requireWritable(roles);
+        teamAccess.requireVisible(tenantId, row.teamId(), user);
+        Rules.requireWritable(user);
         if (!matches.deleteCallUp(tenantId, matchId, athleteId)) throw Rules.notFound("Convocatória não encontrada");
-        matches.audit(tenantId, actorId, "MATCH_CALLUP_REMOVED", matchId);
+        matches.audit(tenantId, user.id(), "MATCH_CALLUP_REMOVED", matchId);
     }
 
     @Transactional
-    void respondCallUp(UUID actorId, Set<String> roles, UUID matchId, UUID athleteId, String response) {
+    void respondCallUp(CurrentUser user, UUID matchId, UUID athleteId, String response) {
         UUID tenantId = Rules.tenant();
         MatchRepository.MatchRow row = matches.findById(tenantId, matchId).orElseThrow(MatchService::matchNotFound);
         // Gestores/treinadores da equipa ou o próprio atleta (ligado ao utilizador) podem responder.
-        if (!Rules.isManager(roles) && !roles.contains("TREINADOR")
-                && !isAthleteSelf(tenantId, athleteId, actorId)) throw Rules.forbidden();
-        teamAccess.requireVisible(tenantId, row.teamId(), actorId, roles);
+        if (!user.isManager() && !user.has(Role.TREINADOR)
+                && !isAthleteSelf(tenantId, athleteId, user.id())) throw Rules.forbidden();
+        teamAccess.requireVisible(tenantId, row.teamId(), user);
         if (!matches.callUpExists(tenantId, matchId, athleteId)) throw Rules.notFound("Convocatória não encontrada");
         String resp = response == null ? null : response.trim().toUpperCase(java.util.Locale.ROOT);
-        if (resp != null && !CALLUP_RESPONSES.contains(resp)) throw Rules.badRequest("Resposta inválida");
+        if (resp != null && Rules.find(CallUpResponse.class, resp).isEmpty()) throw Rules.badRequest("Resposta inválida");
         matches.updateCallUpResponse(tenantId, matchId, athleteId, resp, resp == null ? null : Instant.now());
-        matches.audit(tenantId, actorId, "MATCH_CALLUP_RESPONDED", matchId);
+        matches.audit(tenantId, user.id(), "MATCH_CALLUP_RESPONDED", matchId);
     }
 
     // --- helpers ---

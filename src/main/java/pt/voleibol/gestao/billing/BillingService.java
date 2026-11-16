@@ -4,24 +4,19 @@ import java.time.LocalDate;
 import java.time.YearMonth;
 import java.time.ZoneId;
 import java.time.format.DateTimeParseException;
-import java.util.List;
 import java.util.ArrayList;
-import java.util.Set;
+import java.util.List;
 import java.util.UUID;
 
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import pt.voleibol.gestao.shared.CurrentUser;
+import pt.voleibol.gestao.shared.Role;
 import pt.voleibol.gestao.shared.Rules;
 
 @Service
 class BillingService {
-
-    private static final Set<String> WRITERS = Set.of("ADMIN", "DIRECAO", "FINANCEIRO");
-    private static final Set<String> PERIODICITIES = Set.of("ONE_TIME", "MONTHLY", "QUARTERLY", "YEARLY");
-    private static final Set<String> CHARGE_STATUSES = Set.of("PENDING", "PAID", "OVERDUE", "CANCELLED");
-    private static final Set<String> PAYMENT_METHODS = Set.of("CASH", "MULTIBANCO", "MBWAY", "TRANSFER", "OTHER");
-    private static final Set<String> LEDGER_TYPES = Set.of("INCOME", "EXPENSE");
 
     record FeePlanView(UUID id, String name, UUID seasonId, UUID ageGroupId, long amountCents, String periodicity) {
     }
@@ -63,61 +58,56 @@ class BillingService {
         if (amountCents < 0) throw Rules.badRequest("Valor inválido");
     }
 
-    private static void requireValue(String value, Set<String> allowed, String field) {
-        if (value == null || !allowed.contains(value)) throw Rules.badRequest(field + " inválido");
-    }
-
     // --- fee plans ---
     @Transactional(readOnly = true)
-    List<FeePlanView> listFeePlans(Set<String> roles) {
-        Rules.requireAny(roles, WRITERS);
+    List<FeePlanView> listFeePlans(CurrentUser user) {
+        Rules.requireAny(user, Role.BILLING);
         return feePlans.list(Rules.tenant()).stream().map(f -> new FeePlanView(f.id(), f.name(), f.seasonId(), f.ageGroupId(), f.amountCents(), f.periodicity())).toList();
     }
 
     @Transactional
-    FeePlanView createFeePlan(UUID actorId, Set<String> roles, String name, UUID seasonId, UUID ageGroupId, long amountCents, String periodicity) {
-        Rules.requireAny(roles, WRITERS);
+    FeePlanView createFeePlan(CurrentUser user, String name, UUID seasonId, UUID ageGroupId, long amountCents, String periodicity) {
+        Rules.requireAny(user, Role.BILLING);
         UUID t = Rules.tenant();
         String normalizedName = Rules.requiredText(name);
         requireAmount(amountCents);
-        String period = periodicity == null ? "MONTHLY" : periodicity;
-        requireValue(period, PERIODICITIES, "Periodicidade");
+        String period = Rules.parse(FeePeriodicity.class, periodicity, "Periodicidade", FeePeriodicity.DEFAULT).name();
         if (feePlans.nameExists(t, normalizedName, null)) throw Rules.conflict("Já existe um plano com este nome");
         UUID id = UUID.randomUUID();
-        feePlans.insert(id, t, normalizedName, seasonId, ageGroupId, amountCents, period, actorId);
-        feePlans.audit(t, actorId, "FEE_PLAN_CREATED", id);
+        feePlans.insert(id, t, normalizedName, seasonId, ageGroupId, amountCents, period, user.id());
+        feePlans.audit(t, user.id(), "FEE_PLAN_CREATED", id);
         return new FeePlanView(id, normalizedName, seasonId, ageGroupId, amountCents, period);
     }
 
     @Transactional
-    void deleteFeePlan(UUID actorId, Set<String> roles, UUID id) {
-        Rules.requireAny(roles, WRITERS);
+    void deleteFeePlan(CurrentUser user, UUID id) {
+        Rules.requireAny(user, Role.BILLING);
         UUID t = Rules.tenant();
         if (!feePlans.anonymize(t, id)) throw Rules.notFound("Plano não encontrado");
-        feePlans.audit(t, actorId, "FEE_PLAN_ANONYMIZED", id);
+        feePlans.audit(t, user.id(), "FEE_PLAN_ANONYMIZED", id);
     }
 
     @Transactional(readOnly = true)
-    List<PromotionView> listPromotions(Set<String> roles, UUID athleteId) {
-        Rules.requireAny(roles, WRITERS);
+    List<PromotionView> listPromotions(CurrentUser user, UUID athleteId) {
+        Rules.requireAny(user, Role.BILLING);
         return feePlans.listPromotions(Rules.tenant(), athleteId).stream()
                 .map(p -> new PromotionView(p.id(), p.athleteId(), p.feePlanId(), p.amountCents(),
                         p.validFrom(), p.validTo(), p.reason(), p.active(), p.applicationScope(), p.billingPeriod())).toList();
     }
 
     @Transactional
-    PromotionView createPromotion(UUID actorId, Set<String> roles, UUID athleteId, UUID feePlanId,
+    PromotionView createPromotion(CurrentUser user, UUID athleteId, UUID feePlanId,
                                   long amountCents, LocalDate validFrom, LocalDate validTo, String reason,
                                   String applicationScope, String billingPeriod) {
-        Rules.requireAny(roles, WRITERS);
+        Rules.requireAny(user, Role.BILLING);
         UUID t = Rules.tenant();
         requireAmount(amountCents);
         if (validFrom == null || (validTo != null && validTo.isBefore(validFrom))) throw Rules.badRequest("Período da promoção inválido");
-        String scope = applicationScope == null ? "ALL" : applicationScope;
-        requireValue(scope, Set.of("ALL", "SINGLE"), "Âmbito da promoção");
-        if ("SINGLE".equals(scope) && (billingPeriod == null || billingPeriod.isBlank()))
+        String scope = Rules.parse(PromotionScope.class, applicationScope, "Âmbito da promoção",
+                PromotionScope.DEFAULT).name();
+        if (PromotionScope.SINGLE.name().equals(scope) && (billingPeriod == null || billingPeriod.isBlank()))
             throw Rules.badRequest("Período obrigatório para promoção de pagamento único");
-        if ("SINGLE".equals(scope)) {
+        if (PromotionScope.SINGLE.name().equals(scope)) {
             try {
                 YearMonth.parse(billingPeriod);
             } catch (DateTimeParseException ex) {
@@ -128,60 +118,60 @@ class BillingService {
         if (feePlanId != null && feePlans.findById(t, feePlanId).isEmpty()) throw Rules.notFound("Plano não encontrado");
         UUID id = UUID.randomUUID();
         feePlans.insertPromotion(id, t, athleteId, feePlanId, amountCents, validFrom, validTo, reason,
-                scope, "SINGLE".equals(scope) ? billingPeriod : null, actorId);
+                scope, PromotionScope.SINGLE.name().equals(scope) ? billingPeriod : null, user.id());
         return new PromotionView(id, athleteId, feePlanId, amountCents, validFrom, validTo, reason, true,
-                scope, "SINGLE".equals(scope) ? billingPeriod : null);
+                scope, PromotionScope.SINGLE.name().equals(scope) ? billingPeriod : null);
     }
 
     @Transactional
-    void setPromotionActive(UUID actorId, Set<String> roles, UUID id, boolean active) {
-        Rules.requireAny(roles, WRITERS);
+    void setPromotionActive(CurrentUser user, UUID id, boolean active) {
+        Rules.requireAny(user, Role.BILLING);
         if (!feePlans.setPromotionActive(Rules.tenant(), id, active)) throw Rules.notFound("Promoção não encontrada");
     }
 
     // --- charges ---
     @Transactional(readOnly = true)
-    List<ChargeView> listCharges(UUID actorId, Set<String> roles, UUID athleteId, String status) {
-        boolean writer = roles.stream().anyMatch(WRITERS::contains);
-        if (!writer && !roles.contains("ATLETA") && !roles.contains("ENCARREGADO")) throw Rules.forbidden();
-        return charges.list(Rules.tenant(), actorId, roles, athleteId, status).stream()
+    List<ChargeView> listCharges(CurrentUser user, UUID athleteId, String status) {
+        boolean writer = user.canManageBilling();
+        if (!writer && !user.has(Role.ATLETA) && !user.has(Role.ENCARREGADO)) throw Rules.forbidden();
+        return charges.list(Rules.tenant(), user, athleteId, status).stream()
                 .map(c -> new ChargeView(c.id(), c.athleteId(), c.guardianId(), c.feePlanId(), c.amountCents(), c.dueDate(), c.status(), c.billingPeriod()))
                 .toList();
     }
 
     @Transactional
-    ChargeView createCharge(UUID actorId, Set<String> roles, UUID athleteId, UUID guardianId, UUID feePlanId, long amountCents, LocalDate dueDate, String status) {
-        Rules.requireAny(roles, WRITERS);
+    ChargeView createCharge(CurrentUser user, UUID athleteId, UUID guardianId, UUID feePlanId, long amountCents, LocalDate dueDate, String status) {
+        Rules.requireAny(user, Role.BILLING);
         UUID t = Rules.tenant();
         requireAmount(amountCents);
         if (dueDate == null) throw Rules.badRequest("Data de vencimento obrigatória");
-        String chargeStatus = status == null ? "PENDING" : status;
-        requireValue(chargeStatus, CHARGE_STATUSES, "Estado");
+        String chargeStatus = Rules.parse(ChargeStatus.class, status, "Estado", ChargeStatus.DEFAULT).name();
         if (!charges.athleteExists(t, athleteId)) throw Rules.notFound("Atleta não encontrado");
         if (guardianId != null && !charges.guardianExists(t, guardianId)) throw Rules.notFound("Encarregado não encontrado");
         String billingPeriod = null;
         if (feePlanId != null) {
             FeePlanRepository.Row plan = feePlans.findById(t, feePlanId)
                     .orElseThrow(() -> Rules.notFound("Plano não encontrado"));
-            if ("ONE_TIME".equals(plan.periodicity())) billingPeriod = "ONE_TIME";
+            if (FeePeriodicity.ONE_TIME.name().equals(plan.periodicity()))
+                billingPeriod = FeePeriodicity.ONE_TIME.name();
         }
         UUID id = UUID.randomUUID();
         try {
-            charges.insert(id, t, athleteId, guardianId, feePlanId, amountCents, dueDate, chargeStatus, billingPeriod, actorId);
+            charges.insert(id, t, athleteId, guardianId, feePlanId, amountCents, dueDate, chargeStatus, billingPeriod, user.id());
         } catch (org.springframework.dao.DuplicateKeyException e) {
-            if ("ONE_TIME".equals(billingPeriod)) throw Rules.conflict("Esta taxa já foi registada para o atleta");
+            if (FeePeriodicity.ONE_TIME.name().equals(billingPeriod)) throw Rules.conflict("Esta taxa já foi registada para o atleta");
             throw e;
         }
-        charges.audit(t, actorId, "CHARGE_CREATED", id);
+        charges.audit(t, user.id(), "CHARGE_CREATED", id);
         return new ChargeView(id, athleteId, guardianId, feePlanId, amountCents, dueDate, chargeStatus, billingPeriod);
     }
 
     // --- geração automática a partir dos planos ---
 
     @Transactional
-    GenerateView generateCharges(UUID actorId, Set<String> roles, String period, UUID feePlanId, boolean dryRun) {
-        Rules.requireAny(roles, WRITERS);
-        return generate(Rules.tenant(), actorId, parsePeriod(period), feePlanId, dryRun);
+    GenerateView generateCharges(CurrentUser user, String period, UUID feePlanId, boolean dryRun) {
+        Rules.requireAny(user, Role.BILLING);
+        return generate(Rules.tenant(), user.id(), parsePeriod(period), feePlanId, dryRun);
     }
 
     /**
@@ -205,6 +195,9 @@ class BillingService {
         for (FeePlanRepository.Row plan : plans) {
             LocalDate periodDate = period.atDay(1);
             if (!plan.active()) continue;
+            FeePeriodicity periodicity = Rules.find(FeePeriodicity.class, plan.periodicity())
+                    .orElse(FeePeriodicity.DEFAULT);
+            if (!periodicity.recurring()) continue; // ONE_TIME não gera cobranças automáticas
             if (plan.seasonId() == null
                     && ((plan.effectiveFrom() != null && periodDate.isBefore(plan.effectiveFrom()))
                     || (plan.effectiveTo() != null && periodDate.isAfter(plan.effectiveTo())))) {
@@ -216,9 +209,9 @@ class BillingService {
                         || (plan.effectiveTo() != null && chargePeriodDate.isAfter(plan.effectiveTo()))) {
                     continue;
                 }
-                String billingPeriod = billingPeriod(plan.periodicity(), chargePeriod);
+                String billingPeriod = billingPeriod(periodicity, chargePeriod);
                 if (billingPeriod == null) continue;
-                LocalDate dueDate = dueDate(plan.periodicity(), chargePeriod);
+                LocalDate dueDate = dueDate(periodicity, chargePeriod);
                 for (ChargeRepository.Target target : charges.findTargets(tenantId, plan.seasonId(), plan.ageGroupId())) {
                     UUID guardianId = isMinor(target.birthDate(), today) ? target.guardianId() : null;
                     if (dryRun) {
@@ -268,21 +261,21 @@ class BillingService {
     /**
      * Período canónico para o plano, ou {@code null} se este plano não é cobrado nesse mês.
      */
-    private static String billingPeriod(String periodicity, YearMonth period) {
+    private static String billingPeriod(FeePeriodicity periodicity, YearMonth period) {
         return switch (periodicity) {
-            case "MONTHLY" -> period.toString();
-            case "QUARTERLY" -> period.getMonthValue() % 3 == 1
+            case MONTHLY -> period.toString();
+            case QUARTERLY -> period.getMonthValue() % 3 == 1
                     ? period.getYear() + "-Q" + ((period.getMonthValue() - 1) / 3 + 1) : null;
-            case "YEARLY" -> period.getMonthValue() == 1 ? String.valueOf(period.getYear()) : null;
-            default -> null; // ONE_TIME não gera cobranças automáticas
+            case YEARLY -> period.getMonthValue() == 1 ? String.valueOf(period.getYear()) : null;
+            case ONE_TIME -> null; // cobrado uma vez, fora da geração automática
         };
     }
 
-    private static LocalDate dueDate(String periodicity, YearMonth period) {
+    private static LocalDate dueDate(FeePeriodicity periodicity, YearMonth period) {
         return switch (periodicity) {
-            case "QUARTERLY" -> YearMonth.of(period.getYear(),
+            case QUARTERLY -> YearMonth.of(period.getYear(),
                     ((period.getMonthValue() - 1) / 3) * 3 + 1).atDay(10);
-            case "YEARLY" -> YearMonth.of(period.getYear(), 1).atDay(10);
+            case YEARLY -> YearMonth.of(period.getYear(), 1).atDay(10);
             default -> period.atDay(10);
         };
     }
@@ -292,72 +285,71 @@ class BillingService {
     }
 
     @Transactional
-    void updateChargeStatus(UUID actorId, Set<String> roles, UUID id, String status) {
-        Rules.requireAny(roles, WRITERS);
+    void updateChargeStatus(CurrentUser user, UUID id, String status) {
+        Rules.requireAny(user, Role.BILLING);
         UUID t = Rules.tenant();
-        requireValue(status, CHARGE_STATUSES, "Estado");
-        if (!charges.updateStatus(t, id, status)) throw Rules.notFound("Cobrança não encontrada");
-        charges.audit(t, actorId, "CHARGE_STATUS_UPDATED", id);
+        String normalizedStatus = Rules.parse(ChargeStatus.class, status, "Estado").name();
+        if (!charges.updateStatus(t, id, normalizedStatus)) throw Rules.notFound("Cobrança não encontrada");
+        charges.audit(t, user.id(), "CHARGE_STATUS_UPDATED", id);
     }
 
     @Transactional
-    void deleteCharge(UUID actorId, Set<String> roles, UUID id) {
-        Rules.requireAny(roles, WRITERS);
+    void deleteCharge(CurrentUser user, UUID id) {
+        Rules.requireAny(user, Role.BILLING);
         UUID t = Rules.tenant();
         if (!charges.anonymize(t, id)) throw Rules.notFound("Cobrança não encontrada");
-        charges.audit(t, actorId, "CHARGE_ANONYMIZED", id);
+        charges.audit(t, user.id(), "CHARGE_ANONYMIZED", id);
     }
 
     // --- payments ---
     @Transactional(readOnly = true)
-    List<PaymentView> listPayments(Set<String> roles, UUID chargeId) {
-        Rules.requireAny(roles, WRITERS);
+    List<PaymentView> listPayments(CurrentUser user, UUID chargeId) {
+        Rules.requireAny(user, Role.BILLING);
         UUID t = Rules.tenant();
         if (charges.findById(t, chargeId).isEmpty()) throw Rules.notFound("Cobrança não encontrada");
         return payments.list(t, chargeId).stream().map(p -> new PaymentView(p.id(), p.chargeId(), p.method(), p.amountCents(), p.reference(), p.paidAt())).toList();
     }
 
     @Transactional
-    PaymentView createPayment(UUID actorId, Set<String> roles, UUID chargeId, String method, long amountCents, String reference) {
-        Rules.requireAny(roles, WRITERS);
+    PaymentView createPayment(CurrentUser user, UUID chargeId, String method, long amountCents, String reference) {
+        Rules.requireAny(user, Role.BILLING);
         UUID t = Rules.tenant();
         requireAmount(amountCents);
-        String paymentMethod = method == null ? "CASH" : method;
-        requireValue(paymentMethod, PAYMENT_METHODS, "Método");
+        String paymentMethod = Rules.parse(PaymentMethod.class, method, "Método", PaymentMethod.DEFAULT).name();
         if (charges.findById(t, chargeId).isEmpty()) throw Rules.notFound("Cobrança não encontrada");
         UUID id = UUID.randomUUID();
-        payments.insert(id, t, chargeId, paymentMethod, amountCents, reference, actorId);
-        payments.audit(t, actorId, "PAYMENT_CREATED", id);
+        payments.insert(id, t, chargeId, paymentMethod, amountCents, reference, user.id());
+        payments.audit(t, user.id(), "PAYMENT_CREATED", id);
         // mark charge paid if fully paid? simple: leave status
         return new PaymentView(id, chargeId, paymentMethod, amountCents, reference, java.time.Instant.now());
     }
 
     // --- ledger ---
     @Transactional(readOnly = true)
-    List<LedgerView> listLedger(Set<String> roles) {
-        Rules.requireAny(roles, WRITERS);
+    List<LedgerView> listLedger(CurrentUser user) {
+        Rules.requireAny(user, Role.BILLING);
         return ledger.list(Rules.tenant()).stream().map(l -> new LedgerView(l.id(), l.type(), l.category(), l.amountCents(), l.entryDate(), l.description())).toList();
     }
 
     @Transactional
-    LedgerView createLedger(UUID actorId, Set<String> roles, String type, String category, long amountCents, LocalDate entryDate, String description) {
-        Rules.requireAny(roles, WRITERS);
+    LedgerView createLedger(CurrentUser user, String type, String category, long amountCents, LocalDate entryDate, String description) {
+        Rules.requireAny(user, Role.BILLING);
         UUID t = Rules.tenant();
         requireAmount(amountCents);
-        requireValue(type, LEDGER_TYPES, "Tipo");
+        String normalizedType = Rules.parse(LedgerType.class, type, "Tipo").name();
         if (category == null || category.isBlank()) throw Rules.badRequest("Categoria obrigatória");
         if (entryDate == null) throw Rules.badRequest("Data obrigatória");
         UUID id = UUID.randomUUID();
-        ledger.insert(id, t, type, category.trim(), amountCents, entryDate, description, actorId);
-        ledger.audit(t, actorId, "LEDGER_ENTRY_CREATED", id);
-        return new LedgerView(id, type, category.trim(), amountCents, entryDate, description);
+        ledger.insert(id, t, normalizedType, category.trim(), amountCents, entryDate, description, user.id());
+        ledger.audit(t, user.id(), "LEDGER_ENTRY_CREATED", id);
+        return new LedgerView(id, normalizedType, category.trim(), amountCents, entryDate, description);
     }
 
     @Transactional
-    void deleteLedger(UUID actorId, Set<String> roles, UUID id) {
-        Rules.requireAny(roles, WRITERS);
+    void deleteLedger(CurrentUser user, UUID id) {
+        Rules.requireAny(user, Role.BILLING);
         UUID t = Rules.tenant();
         if (!ledger.anonymize(t, id)) throw Rules.notFound("Lançamento não encontrado");
-        ledger.audit(t, actorId, "LEDGER_ENTRY_ANONYMIZED", id);
+        ledger.audit(t, user.id(), "LEDGER_ENTRY_ANONYMIZED", id);
     }
 }

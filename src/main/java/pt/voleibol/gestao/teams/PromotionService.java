@@ -2,13 +2,13 @@ package pt.voleibol.gestao.teams;
 
 import java.time.Instant;
 import java.util.List;
-import java.util.Set;
 import java.util.UUID;
 
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.server.ResponseStatusException;
 
+import pt.voleibol.gestao.shared.CurrentUser;
 import pt.voleibol.gestao.shared.Rules;
 
 /**
@@ -26,8 +26,6 @@ class PromotionService {
                          Instant createdAt, Instant updatedAt) {
     }
 
-    private static final Set<String> STATUSES = Set.of("ACTIVE", "REVOKED");
-
     private final PromotionRepository promotions;
     private final SeasonRepository seasons;
     private final TeamRepository teams;
@@ -39,17 +37,17 @@ class PromotionService {
     }
 
     @Transactional(readOnly = true)
-    List<PromotionView> list(UUID actorId, Set<String> roles, UUID seasonId, UUID athleteId) {
-        Rules.requireManager(roles);
+    List<PromotionView> list(CurrentUser user, UUID seasonId, UUID athleteId) {
+        Rules.requireManager(user);
         UUID tenantId = Rules.tenant();
         requireSeason(tenantId, seasonId);
         return promotions.list(tenantId, seasonId, athleteId).stream().map(PromotionService::view).toList();
     }
 
     @Transactional
-    PromotionView grant(UUID actorId, Set<String> roles, UUID seasonId, UUID athleteId, UUID ageGroupId,
+    PromotionView grant(CurrentUser user, UUID seasonId, UUID athleteId, UUID ageGroupId,
                         String reason) {
-        Rules.requireManager(roles);
+        Rules.requireManager(user);
         UUID tenantId = Rules.tenant();
         requireSeason(tenantId, seasonId);
         if (!teams.athleteExists(tenantId, athleteId)) throw Rules.notFound("Atleta não encontrado");
@@ -57,29 +55,29 @@ class PromotionService {
 
         PromotionRepository.PromotionRow existing =
                 promotions.find(tenantId, seasonId, ageGroupId, athleteId).orElse(null);
-        if (existing != null && "ACTIVE".equals(existing.status()))
+        if (existing != null && PromotionStatus.ACTIVE.name().equals(existing.status()))
             throw Rules.conflict("Já existe uma autorização ativa para este atleta neste escalão");
         if (existing != null) {
-            promotions.setStatus(tenantId, seasonId, existing.id(), "ACTIVE");
-            promotions.audit(tenantId, actorId, "SEASON_PROMOTION_GRANTED", existing.id());
+            promotions.setStatus(tenantId, seasonId, existing.id(), PromotionStatus.ACTIVE.name());
+            promotions.audit(tenantId, user.id(), "SEASON_PROMOTION_GRANTED", existing.id());
             return view(promotions.find(tenantId, seasonId, existing.id()).orElseThrow(PromotionService::notFound));
         }
 
         UUID id = UUID.randomUUID();
-        promotions.insert(id, tenantId, seasonId, athleteId, ageGroupId, trimToNull(reason), actorId);
-        promotions.audit(tenantId, actorId, "SEASON_PROMOTION_GRANTED", id);
+        promotions.insert(id, tenantId, seasonId, athleteId, ageGroupId, trimToNull(reason), user.id());
+        promotions.audit(tenantId, user.id(), "SEASON_PROMOTION_GRANTED", id);
         return view(promotions.find(tenantId, seasonId, id).orElseThrow(PromotionService::notFound));
     }
 
     @Transactional
-    void setStatus(UUID actorId, Set<String> roles, UUID seasonId, UUID promotionId, String status) {
-        Rules.requireManager(roles);
+    void setStatus(CurrentUser user, UUID seasonId, UUID promotionId, String status) {
+        Rules.requireManager(user);
         UUID tenantId = Rules.tenant();
         requireSeason(tenantId, seasonId);
-        String normalized = Rules.status(status == null ? "" : status, STATUSES);
+        String normalized = Rules.parse(PromotionStatus.class, status, "Estado").name();
         if (!promotions.setStatus(tenantId, seasonId, promotionId, normalized)) throw notFound();
-        promotions.audit(tenantId, actorId,
-                "REVOKED".equals(normalized) ? "SEASON_PROMOTION_REVOKED" : "SEASON_PROMOTION_GRANTED",
+        promotions.audit(tenantId, user.id(),
+                PromotionStatus.REVOKED.name().equals(normalized) ? "SEASON_PROMOTION_REVOKED" : "SEASON_PROMOTION_GRANTED",
                 promotionId);
     }
 
