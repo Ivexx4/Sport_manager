@@ -112,6 +112,13 @@ export interface TrainingSession {
   status?: string;
 }
 
+export interface AttendanceView {
+  athleteId: string;
+  fullName: string;
+  status: string;
+  justification?: string;
+}
+
 export interface Match {
   id: string;
   teamId: string;
@@ -122,6 +129,14 @@ export interface Match {
   matchDate: string;
   isHome: boolean;
   status?: string;
+}
+
+export interface CallUpView {
+  athleteId: string;
+  fullName: string;
+  status: string;
+  response?: string;
+  respondedAt?: string;
 }
 
 export interface FeePlan {
@@ -176,9 +191,36 @@ export interface Promotion {
   updatedAt: string;
 }
 
+export interface Membership {
+  tenantId: string;
+  slug: string;
+  name: string;
+  roles: Role[];
+}
+
+export interface Member {
+  userId: string;
+  email: string;
+  name: string;
+  status: string;
+  roles: { role: string; status: string }[];
+}
+
+/** Estado selecionado do clube (tenant) em que o utilizador está operacional. */
+export interface SelectedTenant {
+  tenantId: string;
+  slug: string;
+  name: string;
+  roles: Role[];
+}
+
 const API_BASE = import.meta.env.VITE_API_URL ?? "";
 const ACCESS_KEY = "gestao.accessToken";
 const REFRESH_KEY = "gestao.refreshToken";
+const TENANT_ID_KEY = "gestao.tenant.id";
+const TENANT_SLUG_KEY = "gestao.tenant.slug";
+const TENANT_NAME_KEY = "gestao.tenant.name";
+const TENANT_ROLES_KEY = "gestao.tenant.roles";
 
 export const authStore = {
   get access() {
@@ -191,9 +233,40 @@ export const authStore = {
     localStorage.setItem(ACCESS_KEY, tokens.accessToken);
     localStorage.setItem(REFRESH_KEY, tokens.refreshToken);
   },
+  /** Clube (tenant) atualmente selecionado pelo utilizador. */
+  get selectedTenant(): SelectedTenant | null {
+    const id = localStorage.getItem(TENANT_ID_KEY);
+    if (!id) return null;
+    const rolesRaw = localStorage.getItem(TENANT_ROLES_KEY);
+    let roles: Role[] = [];
+    try {
+      roles = JSON.parse(rolesRaw ?? "[]");
+    } catch {
+      /* ignore parse error */
+    }
+    return {
+      tenantId: id,
+      slug: localStorage.getItem(TENANT_SLUG_KEY) ?? "",
+      name: localStorage.getItem(TENANT_NAME_KEY) ?? "",
+      roles
+    };
+  },
+  selectTenant(tenant: SelectedTenant) {
+    localStorage.setItem(TENANT_ID_KEY, tenant.tenantId);
+    localStorage.setItem(TENANT_SLUG_KEY, tenant.slug);
+    localStorage.setItem(TENANT_NAME_KEY, tenant.name);
+    localStorage.setItem(TENANT_ROLES_KEY, JSON.stringify(tenant.roles));
+  },
+  clearTenant() {
+    localStorage.removeItem(TENANT_ID_KEY);
+    localStorage.removeItem(TENANT_SLUG_KEY);
+    localStorage.removeItem(TENANT_NAME_KEY);
+    localStorage.removeItem(TENANT_ROLES_KEY);
+  },
   clear() {
     localStorage.removeItem(ACCESS_KEY);
     localStorage.removeItem(REFRESH_KEY);
+    this.clearTenant();
   }
 };
 
@@ -309,6 +382,7 @@ export const api = {
     }),
   generateBootstrapKey: () => request<{ bootstrapKey: string }>("/api/v1/platform/bootstrap-key", { method: "POST" }),
   me: () => request<{ userId: string; tenantId: string; roles: Role[] }>("/api/v1/auth/me"),
+  memberships: () => request<Membership[]>("/api/v1/auth/memberships"),
   logout: () =>
     request<void>("/api/v1/auth/logout", {
       method: "POST",
@@ -355,13 +429,38 @@ export const api = {
   createTeam: (data: Record<string, unknown>) =>
     request<Team>("/api/v1/teams", { method: "POST", body: JSON.stringify(data) }),
   documents: (athleteId: string) => request<Document[]>(`/api/v1/athletes/${athleteId}/documents`),
+  createDocument: (athleteId: string, data: { type: string; fileName: string; fileUrl: string; validUntil?: string }) =>
+    request<Document>(`/api/v1/athletes/${athleteId}/documents`, { method: "POST", body: JSON.stringify(data) }),
+  updateDocument: (
+    documentId: string,
+    data: { type: string; fileName: string; fileUrl: string; validUntil?: string }
+  ) => request<Document>(`/api/v1/documents/${documentId}`, { method: "PUT", body: JSON.stringify(data) }),
+  deleteDocument: (documentId: string) => request<void>(`/api/v1/documents/${documentId}`, { method: "DELETE" }),
   trainingSessions: () => request<TrainingSession[]>("/api/v1/training-sessions"),
   createTrainingSession: (data: Record<string, unknown>) =>
     request<TrainingSession>("/api/v1/training-sessions", { method: "POST", body: JSON.stringify(data) }),
+  attendance: (sessionId: string) => request<AttendanceView[]>(`/api/v1/training-sessions/${sessionId}/attendance`),
+  setAttendance: (sessionId: string, athleteId: string, status: string, justification?: string) =>
+    request<void>(`/api/v1/training-sessions/${sessionId}/attendance/${athleteId}`, {
+      method: "PUT",
+      body: JSON.stringify({ status, justification })
+    }),
+  removeAttendance: (sessionId: string, athleteId: string) =>
+    request<void>(`/api/v1/training-sessions/${sessionId}/attendance/${athleteId}`, { method: "DELETE" }),
   venues: () => request<{ id: string; name: string; address?: string }[]>("/api/v1/venues"),
   matches: () => request<Match[]>("/api/v1/matches"),
   createMatch: (data: Record<string, unknown>) =>
     request<Match>("/api/v1/matches", { method: "POST", body: JSON.stringify(data) }),
+  callUps: (matchId: string) => request<CallUpView[]>(`/api/v1/matches/${matchId}/call-ups`),
+  addCallUp: (matchId: string, athleteId: string) =>
+    request<void>(`/api/v1/matches/${matchId}/call-ups`, { method: "POST", body: JSON.stringify({ athleteId }) }),
+  removeCallUp: (matchId: string, athleteId: string) =>
+    request<void>(`/api/v1/matches/${matchId}/call-ups/${athleteId}`, { method: "DELETE" }),
+  respondCallUp: (matchId: string, athleteId: string, response: string) =>
+    request<void>(`/api/v1/matches/${matchId}/call-ups/${athleteId}/respond`, {
+      method: "POST",
+      body: JSON.stringify({ response })
+    }),
   feePlans: () => request<FeePlan[]>("/api/v1/fee-plans"),
   createFeePlan: (data: Record<string, unknown>) =>
     request<FeePlan>("/api/v1/fee-plans", { method: "POST", body: JSON.stringify(data) }),
@@ -382,5 +481,11 @@ export const api = {
   ledgerEntries: () => request<LedgerEntry[]>("/api/v1/ledger-entries"),
   createLedgerEntry: (data: Record<string, unknown>) =>
     request<LedgerEntry>("/api/v1/ledger-entries", { method: "POST", body: JSON.stringify(data) }),
-  deleteLedgerEntry: (id: string) => request<void>(`/api/v1/ledger-entries/${id}`, { method: "DELETE" })
+  deleteLedgerEntry: (id: string) => request<void>(`/api/v1/ledger-entries/${id}`, { method: "DELETE" }),
+  members: () => request<Member[]>("/api/v1/users"),
+  inviteMember: (data: { email: string; name: string; roles: string[] }) =>
+    request<void>("/api/v1/users/invitations", { method: "POST", body: JSON.stringify(data) }),
+  disableMember: (userId: string) => request<void>(`/api/v1/users/${userId}/disable`, { method: "POST" }),
+  removeMemberRole: (userId: string, role: string) =>
+    request<void>(`/api/v1/users/${userId}/roles/${encodeURIComponent(role)}`, { method: "DELETE" })
 };

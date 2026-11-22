@@ -1,15 +1,16 @@
 import { useEffect, useState } from "react";
 import { ChevronRight, ShieldCheck } from "lucide-react";
-import { api, authStore, isMfaChallenge, type MfaChallenge, type MfaSetup } from "../../api";
+import { api, authStore, isMfaChallenge, type Membership, type MfaChallenge, type MfaSetup } from "../../api";
 
-/** Entrada na aplicação: login, criação de clube e o segundo passo (MFA). */
+/** Entrada na aplicação: login, criação de clube, seleção de clube e o segundo passo (MFA). */
 export function Login({ onLogin, message }: { onLogin: () => void; message?: string }) {
-  const [mode, setMode] = useState<"login" | "create">("login");
+  const [mode, setMode] = useState<"login" | "create" | "clubs">("login");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [bootstrapKey, setBootstrapKey] = useState("");
+  const [memberships, setMemberships] = useState<Membership[]>([]);
   // Segundo passo do login: ou falta o código do autenticador, ou falta inscrever o MFA.
   const [challenge, setChallenge] = useState<MfaChallenge | null>(null);
   const [setup, setSetup] = useState<MfaSetup | null>(null);
@@ -28,6 +29,30 @@ export function Login({ onLogin, message }: { onLogin: () => void; message?: str
     }
   }, [mode]);
 
+  async function handlePostLoginAuth() {
+    try {
+      const items = await api.memberships();
+      if (items.length === 1) {
+        // Se só tem um clube, seleciona automaticamente e entra
+        authStore.selectTenant({
+          tenantId: items[0].tenantId,
+          slug: items[0].slug,
+          name: items[0].name,
+          roles: items[0].roles
+        });
+        onLogin();
+      } else if (items.length > 1) {
+        setMemberships(items);
+        setMode("clubs");
+      } else {
+        setError("Não tens associação ativa a nenhum clube.");
+        authStore.clear();
+      }
+    } catch {
+      setError("Não foi possível carregar as tuas associações a clubes.");
+    }
+  }
+
   async function submit(event: React.FormEvent) {
     event.preventDefault();
     setLoading(true);
@@ -42,7 +67,7 @@ export function Login({ onLogin, message }: { onLogin: () => void; message?: str
           return;
         }
         authStore.save(result);
-        onLogin();
+        await handlePostLoginAuth();
       } else {
         const form = event.currentTarget as HTMLFormElement;
         const values = new FormData(form);
@@ -75,7 +100,7 @@ export function Login({ onLogin, message }: { onLogin: () => void; message?: str
     try {
       if (challenge.mfaRequired) {
         authStore.save(await api.mfaVerify(challenge.challengeToken, code));
-        onLogin();
+        await handlePostLoginAuth();
       } else {
         const result = await api.mfaEnrollmentConfirm(challenge.challengeToken, code);
         authStore.save(result);
@@ -102,29 +127,35 @@ export function Login({ onLogin, message }: { onLogin: () => void; message?: str
         title: "Guarda estes códigos",
         text: "Cada código serve uma vez e é a forma de entrar sem o telemóvel."
       }
-    : challenge
-      ? setup
-        ? {
-            eyebrow: "SEGURANÇA",
-            title: "Ativa a autenticação em dois passos",
-            text: "O perfil de administrador exige um segundo fator para entrar."
-          }
-        : {
-            eyebrow: "SEGURANÇA",
-            title: "Confirma que és tu",
-            text: "Introduz o código da tua aplicação autenticadora."
-          }
-      : mode === "login"
-        ? {
-            eyebrow: "BEM-VINDO DE VOLTA",
-            title: "Entrar na tua conta",
-            text: "Acede ao espaço de gestão do teu clube."
-          }
-        : {
-            eyebrow: "NOVO CLUBE",
-            title: "Criar um clube",
-            text: "O administrador da plataforma deve fornecer a chave de bootstrap."
-          };
+    : mode === "clubs"
+      ? {
+          eyebrow: "SELECIONAR CLUBE",
+          title: "Escolhe o clube",
+          text: "Tens acesso a múltiplos clubes. Seleciona em qual queres operar."
+        }
+      : challenge
+        ? setup
+          ? {
+              eyebrow: "SEGURANÇA",
+              title: "Ativa a autenticação em dois passos",
+              text: "O perfil de administrador exige um segundo fator para entrar."
+            }
+          : {
+              eyebrow: "SEGURANÇA",
+              title: "Confirma que és tu",
+              text: "Introduz o código da tua aplicação autenticadora."
+            }
+        : mode === "login"
+          ? {
+              eyebrow: "BEM-VINDO DE VOLTA",
+              title: "Entrar na tua conta",
+              text: "Acede ao espaço de gestão do teu clube."
+            }
+          : {
+              eyebrow: "NOVO CLUBE",
+              title: "Criar um clube",
+              text: "O administrador da plataforma deve fornecer a chave de bootstrap."
+            };
 
   return (
     <main className="login-page">
@@ -170,8 +201,52 @@ export function Login({ onLogin, message }: { onLogin: () => void; message?: str
                   <span key={recovery}>{recovery}</span>
                 ))}
               </div>
-              <button className="button button-primary button-wide" onClick={onLogin}>
+              <button
+                className="button button-primary button-wide"
+                onClick={async () => {
+                  await handlePostLoginAuth();
+                }}
+              >
                 Já guardei os códigos — entrar
+              </button>
+            </div>
+          ) : mode === "clubs" ? (
+            <div className="stack">
+              <div className="clubs-list" style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
+                {memberships.map(club => (
+                  <button
+                    key={club.tenantId}
+                    className="button button-secondary"
+                    style={{ justifyContent: "space-between", textAlign: "left", padding: "14px 16px" }}
+                    onClick={() => {
+                      authStore.selectTenant({
+                        tenantId: club.tenantId,
+                        slug: club.slug,
+                        name: club.name,
+                        roles: club.roles
+                      });
+                      onLogin();
+                    }}
+                  >
+                    <div>
+                      <strong>{club.name}</strong>
+                      <small style={{ display: "block", color: "var(--muted)" }}>{club.slug}.localhost</small>
+                    </div>
+                    <span className="tag tag-green">{club.roles.join(", ")}</span>
+                  </button>
+                ))}
+              </div>
+              {error && <p className="error-text">{error}</p>}
+              <button
+                type="button"
+                className="login-switch"
+                onClick={() => {
+                  authStore.clear();
+                  setMode("login");
+                  setMemberships([]);
+                }}
+              >
+                Voltar ao login
               </button>
             </div>
           ) : challenge ? (

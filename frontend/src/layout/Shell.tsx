@@ -15,7 +15,7 @@ import {
   Users,
   X
 } from "lucide-react";
-import { api, type Role } from "../api";
+import { api, authStore, type Role } from "../api";
 import type { View } from "../types";
 import { Athletes } from "../features/athletes/Athletes";
 import { Billing } from "../features/billing/Billing";
@@ -24,6 +24,8 @@ import { Overview } from "../features/overview/Overview";
 import { Seasons } from "../features/seasons/Seasons";
 import { Teams } from "../features/teams/Teams";
 import { Training } from "../features/training/Training";
+import { Documents } from "../features/documents/Documents";
+import { Settings } from "../features/settings/Settings";
 
 const TITLES: Record<View, string> = {
   overview: "Visão geral",
@@ -32,7 +34,9 @@ const TITLES: Record<View, string> = {
   seasons: "Épocas e escalões",
   training: "Treinos",
   matches: "Jogos e convocatórias",
-  billing: "Quotas e financeiro"
+  billing: "Quotas e financeiro",
+  documents: "Documentos",
+  settings: "Definições"
 };
 
 /** Estrutura da aplicação autenticada: menu lateral, barra superior e ecrã ativo. */
@@ -40,13 +44,21 @@ export function Shell({ onLogout }: { onLogout: () => void }) {
   const [view, setView] = useState<View>("overview");
   const [roles, setRoles] = useState<Role[]>([]);
   const [mobileOpen, setMobileOpen] = useState(false);
+  const tenant = authStore.selectedTenant;
 
   useEffect(() => {
     api
       .me()
-      .then(me => setRoles(me.roles))
+      .then(me => {
+        // Se o tenant selecionado tiver papéis guardados, usamos, senão o de /me
+        if (tenant && tenant.roles && tenant.roles.length > 0) {
+          setRoles(tenant.roles);
+        } else {
+          setRoles(me.roles);
+        }
+      })
       .catch(onLogout);
-  }, [onLogout]);
+  }, [onLogout, tenant]);
 
   const canManage = roles.some(role => role === "ADMIN" || role === "DIRECAO");
   const canManageBilling = roles.some(role => role === "ADMIN" || role === "DIRECAO" || role === "FINANCEIRO");
@@ -55,6 +67,14 @@ export function Shell({ onLogout }: { onLogout: () => void }) {
     setView(target);
     setMobileOpen(false);
   };
+
+  const clubName = tenant?.name ?? "Sport Club";
+  const clubInitials = clubName
+    .split(" ")
+    .map(p => p[0])
+    .slice(0, 2)
+    .join("")
+    .toUpperCase();
 
   return (
     <div className="app-shell">
@@ -70,11 +90,11 @@ export function Shell({ onLogout }: { onLogout: () => void }) {
             <X size={20} />
           </button>
         </div>
-        <div className="club-switcher">
-          <div className="club-avatar">SC</div>
+        <div className="club-switcher" onClick={onLogout} title="Mudar de clube">
+          <div className="club-avatar">{clubInitials}</div>
           <div>
-            <strong>Sport Club</strong>
-            <small>Clube principal</small>
+            <strong>{clubName}</strong>
+            <small>{tenant?.slug ? `${tenant.slug}.localhost` : "Clube principal"}</small>
           </div>
           <ChevronRight size={16} />
         </div>
@@ -123,14 +143,24 @@ export function Shell({ onLogout }: { onLogout: () => void }) {
             icon={<CreditCard size={18} />}
             label="Quotas e financeiro"
           />
-          <NavItem disabled icon={<FileText size={18} />} label="Documentos" />
-          <NavItem disabled icon={<Sparkles size={18} />} label="Definições" />
+          <NavItem
+            active={view === "documents"}
+            onClick={() => navigate("documents")}
+            icon={<FileText size={18} />}
+            label="Documentos"
+          />
+          <NavItem
+            active={view === "settings"}
+            onClick={() => navigate("settings")}
+            icon={<Sparkles size={18} />}
+            label="Definições"
+          />
         </nav>
         <div className="sidebar-bottom">
           <div className="user-mini">
             <div className="user-avatar">IR</div>
             <div>
-              <strong>Administrador</strong>
+              <strong>{canManage ? "Administrador" : "Membro"}</strong>
               <small>{roles.join(" · ") || "Membro"}</small>
             </div>
           </div>
@@ -148,7 +178,7 @@ export function Shell({ onLogout }: { onLogout: () => void }) {
             <Menu size={21} />
           </button>
           <div className="breadcrumb">
-            <span>Sport Club</span>
+            <span>{clubName}</span>
             <ChevronRight size={15} />
             <strong>{TITLES[view]}</strong>
           </div>
@@ -165,6 +195,8 @@ export function Shell({ onLogout }: { onLogout: () => void }) {
           {view === "training" && <Training canManage={canManage} />}
           {view === "matches" && <Matches canManage={canManage} />}
           {view === "billing" && <Billing canManage={canManageBilling} />}
+          {view === "documents" && <Documents />}
+          {view === "settings" && <Settings canManage={canManage} />}
         </div>
       </main>
     </div>

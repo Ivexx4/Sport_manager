@@ -3,6 +3,7 @@ package pt.voleibol.gestao.identity;
 import java.time.Instant;
 import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
+import java.util.List;
 import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
@@ -40,6 +41,38 @@ class AuthRepository {
                 .param("email", email)
                 .query((rs, i) -> new UserRow(Db.uuid(rs, "id"), rs.getString("password_hash")))
                 .optional();
+    }
+
+    record Membership(UUID tenantId, String slug, String name) {
+    }
+
+    /** Lê as memberships do utilizador via função SECURITY DEFINER que ignora RLS da tabela membership. */
+    List<Membership> findMembershipsByUser(UUID userId) {
+        return jdbc.sql("""
+                        SELECT tenant_id, slug, name
+                        FROM get_user_memberships(:user)
+                        ORDER BY name
+                        """)
+                .param("user", userId)
+                .query((rs, i) -> new Membership(
+                        Db.uuid(rs, "tenant_id"), rs.getString("slug"), rs.getString("name")))
+                .list();
+    }
+
+    record MembershipInfo(UUID tenantId, String slug, String name, String role) {
+    }
+
+    List<MembershipInfo> findMembershipsWithRoles(UUID userId) {
+        return jdbc.sql("""
+                        SELECT tenant_id, slug, name, role
+                        FROM get_user_memberships(:user)
+                        ORDER BY name
+                        """)
+                .param("user", userId)
+                .query((rs, i) -> new MembershipInfo(
+                        Db.uuid(rs, "tenant_id"), rs.getString("slug"), rs.getString("name"),
+                        rs.getString("role")))
+                .list();
     }
 
     Set<String> findActiveRoles(UUID tenantId, UUID userId) {

@@ -43,6 +43,10 @@ class AuthService {
     record Enrollment(Tokens tokens, List<String> recoveryCodes) {
     }
 
+    /** Clube onde o utilizador tem membresia ativa, com o papel correspondente. */
+    record MemberInfo(UUID tenantId, String slug, String name, Set<String> roles) {
+    }
+
     private final AuthRepository repository;
     private final MfaService mfaService;
     private final PasswordEncoder passwordEncoder;
@@ -168,6 +172,14 @@ class AuthService {
         repository.findRefreshToken(tenantId, OpaqueTokens.hash(rawRefreshToken)).ifPresent(token -> {
             if (repository.revokeIfActive(tenantId, token.id())) audit.record(tenantId, token.userId(), "LOGOUT");
         });
+    }
+
+    /** Todos os clubes onde o utilizador é membro ativo — chamado no primeiro passo do login. */
+    @Transactional(readOnly = true)
+    List<MemberInfo> listMemberships(UUID userId) {
+        return repository.findMembershipsWithRoles(userId).stream()
+                .map(m -> new MemberInfo(m.tenantId(), m.slug(), m.name(), Set.of(m.role())))
+                .toList();
     }
 
     private Tokens issueTokens(UUID tenantId, UUID userId, Set<Role> roles) {

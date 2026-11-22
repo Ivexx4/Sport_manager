@@ -18,6 +18,7 @@ import org.springframework.validation.annotation.Validated;
 @Validated
 @ConfigurationProperties("app.security.mfa")
 public record MfaProperties(
+        @DefaultValue("true") boolean enabled,
         @DefaultValue("true") boolean requireForAdmins,
         @DefaultValue("5m") @NotNull Duration challengeTtl,
         @DefaultValue("1") @Min(0) @Max(5) int timeStepSkew,

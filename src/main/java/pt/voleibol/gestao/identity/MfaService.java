@@ -108,6 +108,7 @@ class MfaService {
      * Decide o que falta a quem acabou de acertar na password: nada, um código TOTP ou uma inscrição.
      */
     Optional<Challenge> gate(UUID tenantId, UUID userId, Set<Role> roles) {
+        if (!properties.enabled()) return Optional.empty();
         Optional<MfaRepository.State> found = repository.findState(userId);
         if (found.isEmpty()) return Optional.empty();
         if (found.get().enabled()) return Optional.of(challenge(tenantId, userId, Flow.VERIFY));

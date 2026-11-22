@@ -1,16 +1,27 @@
 import { useEffect, useState } from "react";
-import { CalendarDays, Plus } from "lucide-react";
-import { api, type Team, type TrainingSession } from "../../api";
-import { Empty, Modal, ModalActions, PageHeader, useToast } from "../../components";
+import { CalendarDays, Plus, UserCheck } from "lucide-react";
+import { api, type AttendanceView, type Team, type TrainingSession } from "../../api";
+import { Empty, Loading, Modal, ModalActions, PageHeader, useToast } from "../../components";
 import { useSubmit } from "../../hooks/useSubmit";
 import { formatDateTime, formatTime } from "../../lib/format";
 
-/** Calendário de treinos do clube. */
+const ATTENDANCE_STATUS: { value: string; label: string; tag: string }[] = [
+  { value: "PRESENT", label: "Presente", tag: "tag-green" },
+  { value: "LATE", label: "Atrasado", tag: "tag-yellow" },
+  { value: "JUSTIFIED", label: "Justificada", tag: "tag-blue" },
+  { value: "ABSENT", label: "Ausente", tag: "tag-red" }
+];
+
+/** Calendário de treinos do clube, com marcação de presenças por sessão. */
 export function Training({ canManage }: { canManage: boolean }) {
   const toast = useToast();
   const [sessions, setSessions] = useState<TrainingSession[]>([]);
   const [teams, setTeams] = useState<Team[]>([]);
   const [modal, setModal] = useState(false);
+  const [selectedSession, setSelectedSession] = useState<TrainingSession | null>(null);
+  const [attendance, setAttendance] = useState<AttendanceView[]>([]);
+  const [attendanceLoading, setAttendanceLoading] = useState(false);
+  const [saving, setSaving] = useState<Record<string, boolean>>({});
 
   async function load() {
     try {
@@ -25,6 +36,59 @@ export function Training({ canManage }: { canManage: boolean }) {
   useEffect(() => {
     load();
   }, []);
+
+  async function loadAttendance(session: TrainingSession) {
+    setSelectedSession(session);
+    setAttendance([]);
+    setAttendanceLoading(true);
+    try {
+      const items = await api.attendance(session.id);
+      setAttendance(items);
+    } catch {
+      toast.error("Não foi possível carregar as presenças deste treino.");
+    } finally {
+      setAttendanceLoading(false);
+    }
+  }
+
+  async function setAttendanceStatus(athleteId: string, status: string) {
+    if (!selectedSession) return;
+    setSaving(prev => ({ ...prev, [athleteId]: true }));
+    try {
+      await api.setAttendance(selectedSession.id, athleteId, status);
+      loadAttendance(selectedSession);
+      toast.success("Presença atualizada.");
+    } catch {
+      toast.error("Não foi possível atualizar a presença.");
+    } finally {
+      setSaving(prev => {
+        const copy = { ...prev };
+        delete copy[athleteId];
+        return copy;
+      });
+    }
+  }
+
+  async function removeAttendance(athleteId: string) {
+    if (!selectedSession) return;
+    if (!window.confirm("Remover o registo de presença deste atleta?")) return;
+    setSaving(prev => ({ ...prev, [athleteId]: true }));
+    try {
+      await api.removeAttendance(selectedSession.id, athleteId);
+      loadAttendance(selectedSession);
+      toast.success("Registo de presença removido.");
+    } catch {
+      toast.error("Não foi possível remover o registo.");
+    } finally {
+      setSaving(prev => {
+        const copy = { ...prev };
+        delete copy[athleteId];
+        return copy;
+      });
+    }
+  }
+
+  const teamById = (id: string) => teams.find(team => team.id === id)?.name || "Equipa";
 
   return (
     <section>
@@ -48,23 +112,33 @@ export function Training({ canManage }: { canManage: boolean }) {
               <th>Equipa</th>
               <th>Local</th>
               <th>Estado</th>
+              <th />
             </tr>
           </thead>
           <tbody>
             {[...sessions]
               .sort((first, second) => first.startTime.localeCompare(second.startTime))
               .map(session => (
-                <tr key={session.id}>
+                <tr
+                  key={session.id}
+                  className={`clickable-row ${selectedSession?.id === session.id ? "selected-row" : ""}`}
+                  onClick={() => loadAttendance(session)}
+                >
                   <td>
                     <strong>{formatDateTime(session.startTime)}</strong>
                     <small className="table-subtext">
                       {formatTime(session.startTime)} – {formatTime(session.endTime)}
                     </small>
                   </td>
-                  <td>{teams.find(team => team.id === session.teamId)?.name || "Equipa"}</td>
+                  <td>{teamById(session.teamId)}</td>
                   <td>{session.courtId ? "Espaço reservado" : "Por definir"}</td>
                   <td>
                     <span className="tag tag-green">{session.status === "CANCELLED" ? "Cancelado" : "Agendado"}</span>
+                  </td>
+                  <td>
+                    <button className="icon-button ghost" title="Ver presenças">
+                      <UserCheck size={17} />
+                    </button>
                   </td>
                 </tr>
               ))}
@@ -78,6 +152,86 @@ export function Training({ canManage }: { canManage: boolean }) {
           />
         )}
       </div>
+
+      {selectedSession && (
+        <div className="panel attendance-panel">
+          <div className="attendance-header">
+            <h3>Presenças — {formatDateTime(selectedSession.startTime)}</h3>
+            <span className="toolbar-count">
+              {attendance.length} registo(s) · equipa {teamById(selectedSession.teamId)}
+            </span>
+          </div>
+          {attendanceLoading ? (
+            <Loading />
+          ) : attendance.length === 0 ? (
+            <Empty
+              icon={<UserCheck />}
+              title="Sem presenças registadas"
+              text="Marque a presença dos atletas desta sessão."
+            />
+          ) : (
+            <table>
+              <thead>
+                <tr>
+                  <th>Atleta</th>
+                  <th>Estado</th>
+                  <th>Justificação</th>
+                  <th />
+                </tr>
+              </thead>
+              <tbody>
+                {attendance.map(record => (
+                  <tr key={record.athleteId}>
+                    <td>
+                      <div className="person-cell">
+                        <span className="person-avatar">
+                          {record.fullName
+                            .split(" ")
+                            .map(part => part[0])
+                            .slice(0, 2)
+                            .join("")}
+                        </span>
+                        <strong>{record.fullName}</strong>
+                      </div>
+                    </td>
+                    <td>
+                      <select
+                        value={ATTENDANCE_STATUS.some(s => s.value === record.status) ? record.status : "PRESENT"}
+                        onChange={event => setAttendanceStatus(record.athleteId, event.target.value)}
+                        disabled={saving[record.athleteId]}
+                        className={`status-select ${ATTENDANCE_STATUS.find(s => s.value === record.status)?.tag}`}
+                      >
+                        {ATTENDANCE_STATUS.map(option => (
+                          <option key={option.value} value={option.value}>
+                            {option.label}
+                          </option>
+                        ))}
+                      </select>
+                    </td>
+                    <td>
+                      {record.justification ? (
+                        <span className="table-subtext">{record.justification}</span>
+                      ) : (
+                        <span className="table-subtext">—</span>
+                      )}
+                    </td>
+                    <td>
+                      <button
+                        className="button button-danger small"
+                        onClick={() => removeAttendance(record.athleteId)}
+                        disabled={saving[record.athleteId]}
+                      >
+                        {saving[record.athleteId] ? "A remover..." : "Remover"}
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+        </div>
+      )}
+
       {modal && (
         <TrainingModal
           teams={teams}

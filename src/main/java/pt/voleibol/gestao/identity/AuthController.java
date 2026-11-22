@@ -8,6 +8,7 @@ import jakarta.validation.constraints.Size;
 
 import java.util.List;
 import java.util.Optional;
+import java.util.UUID;
 
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
@@ -45,6 +46,12 @@ class AuthController {
     }
 
     record MeResponse(String userId, String tenantId, List<String> roles) {
+    }
+
+    record MemberInfo(UUID tenantId, String slug, String name, List<String> roles) {
+        static MemberInfo from(AuthService.MemberInfo m) {
+            return new MemberInfo(m.tenantId(), m.slug(), m.name(), List.copyOf(m.roles()));
+        }
     }
 
     private final AuthService authService;
@@ -95,5 +102,11 @@ class AuthController {
         List<String> roles = jwt.getClaimAsStringList("roles");
         return new MeResponse(jwt.getSubject(), jwt.getClaimAsString(TenantClaimValidator.CLAIM),
                 roles == null ? List.of() : roles);
+    }
+
+    @GetMapping("/memberships")
+    List<MemberInfo> memberships(@AuthenticationPrincipal Jwt jwt) {
+        UUID userId = UUID.fromString(jwt.getSubject());
+        return authService.listMemberships(userId).stream().map(MemberInfo::from).toList();
     }
 }

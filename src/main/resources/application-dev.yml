@@ -17,6 +17,11 @@ spring:
 
 app:
   security:
+    mfa:
+      enabled: false
+      require-for-admins: false
+    login-rate-limit:
+      enabled: false
     jwt:
       secret: ZGV2LW9ubHktc2VjcmV0LWRvLW5vdC11c2UtaW4tcHJvZHVjdGlvbi0wMTIzNDU2Nzg5
   mail:
