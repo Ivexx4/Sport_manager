@@ -1,5 +1,6 @@
 -- Dados de desenvolvimento: um clube e um administrador. NÃO usar em produção.
--- Correr depois de a aplicação ter arrancado uma vez (o Flyway cria as tabelas):
+-- Lançamento protegido em PowerShell: .\scripts\start-dev.ps1 -Seed
+-- Execução manual: confirmar primeiro um arranque atual (o Flyway cria as tabelas):
 --   docker compose exec -T db psql -U postgres -d volei < docker/dev-seed.sql
 -- O superuser não está sujeito a RLS, por isso pode inserir em qualquer tenant.
 

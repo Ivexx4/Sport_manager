@@ -1,5 +1,6 @@
 package pt.voleibol.gestao.shared;
 
+import java.util.Optional;
 import java.util.UUID;
 
 import org.junit.jupiter.api.AfterEach;
@@ -11,7 +12,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 class PingControllerTest {
 
-    private final PingController controller = new PingController();
+    private final PingController controller = new PingController(Optional.empty());
 
     @AfterEach
     void limpar() {

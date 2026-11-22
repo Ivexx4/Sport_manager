@@ -30,6 +30,10 @@ jobs:
       - name: Run tests
         run: mvn -B -ntp -Pcoverage-check verify
 
+      - name: Testar guardas do lançamento DEV
+        shell: pwsh
+        run: ./scripts/start-dev.test.ps1
+
       - name: Resumo da cobertura
         if: always()
         run: |

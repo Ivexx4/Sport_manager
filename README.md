@@ -36,6 +36,35 @@ export JWT_SECRET="$(openssl rand -base64 48)"
 ./mvnw spring-boot:run
 ```
 
+### Lançamento DEV protegido (PowerShell)
+
+Na raiz do repositório, com JDK 25 e Docker Desktop disponíveis:
+
+```powershell
+.\scripts\start-dev.ps1 -Seed
+```
+
+Este comando recusa uma porta `8080` já ocupada antes de alterar a infraestrutura, espera pelo
+PostgreSQL, constrói o backend e arranca uma instância nova com o perfil `dev`. O Flyway aplica
+as migrações; o seed só é executado depois de o ping confirmar a identidade dessa instância,
+a ligação da aplicação e o esquema atualizado. Uma falha de arranque, validação ou SQL interrompe
+o lançamento. O seed usa uma única transação e não altera passwords de contas existentes.
+
+Sem `-Seed`, apenas arranca e valida o backend. `Ctrl+C` termina exclusivamente o processo
+iniciado pelo script; não apaga volumes nem termina outros processos. Se houver uma instância
+antiga, para-a no terminal de origem antes de repetir o comando. Os logs ficam em
+`target/dev-8080.stdout.log` e `target/dev-8080.stderr.log`.
+
+Em outro terminal, executa `npm run dev` dentro de `frontend/`. No perfil `dev`, o ping devolve
+`503` se a BD for recriada ou deixar de corresponder às migrações, mesmo que o processo Java
+continue vivo. Fora de `dev`, o contrato do ping mantém-se inalterado.
+
+Testes das guardas PowerShell (sem serviços externos):
+
+```powershell
+.\scripts\start-dev.test.ps1
+```
+
 ### Lançamento completo (ambiente local)
 
 Na primeira execução, instalar **JDK 25**, **Maven 3.6.3 ou superior**, **Node.js 20 ou
