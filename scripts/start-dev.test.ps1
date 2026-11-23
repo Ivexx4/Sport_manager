@@ -86,3 +86,4 @@ Assert-True ($script:calls.Count -eq 5) 'Ordem inesperada no seed protegido.'
 Assert-True ($script:calls[0] -eq 'ping' -and $script:calls[1] -match ' cp ' -and $script:calls[2] -eq 'ping') 'Falta uma validação antes do seed.'
 Assert-True ($script:calls[3] -match 'ON_ERROR_STOP=1 --single-transaction' -and $script:calls[4] -eq 'ping') 'O seed não é transacional ou falta a validação final.'
 Write-Host '10 cenários de proteção DEV passaram.'
+exit 0
