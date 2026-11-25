@@ -2,9 +2,13 @@ spring:
   application:
     name: gestao-clubes-voleibol
 
-  # A aplicação liga-se com o papel volei_app (sujeito a RLS).
+  # Quando atrás de proxy/reverse proxy (Nginx), respeita X-Forwarded-* para esquema, host e IP.
+  jackson:
+    default-property-inclusion: non_null
+
+  # Correção: usar o nome do serviço Docker "db" em vez de localhost para comunicação entre containers.
   datasource:
-    url: jdbc:postgresql://localhost:5432/volei
+    url: jdbc:postgresql://db:5432/volei
     username: volei_app
     password: ${DB_APP_PASSWORD:dev}
 
@@ -50,7 +54,7 @@ app:
       recovery-code-count: ${APP_SECURITY_MFA_RECOVERY_CODE_COUNT:10}
   links:
     # Endereço da aplicação web de cada clube, usado nos links dos e-mails ({slug} = subdomínio do clube).
-    # A aplicação web tem de ter as rotas /accept-invitation e /reset-password, que recebem ?token=...
+    # Em rede local, pode ser atualizado via variável APP_WEB_URL_TEMPLATE.
     web-url-template: ${APP_WEB_URL_TEMPLATE:http://{slug}.localhost:5173}
   mail:
     # Outbox + tentativas: os e-mails são enfileirados e enviados de forma assíncrona.
@@ -77,3 +81,8 @@ app:
     # O tenant resolve-se pelo subdomínio: clube-x.<base-domain>
     # Em desenvolvimento, clube-x.localhost resolve para 127.0.0.1.
     base-domain: ${APP_BASE_DOMAIN:localhost}
+
+# A aplicação apenas escuta em 127.0.0.1 internamente; o acesso público passa pelo Nginx na porta 80.
+server:
+  address: 0.0.0.0
+  forward-headers-strategy: framework
