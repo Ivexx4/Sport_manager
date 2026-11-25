@@ -98,18 +98,18 @@ sudo_cmd() {
 # ── Instalação de JDK 25 (Eclipse Temurin) ───────────────────────────
 install_jdk() {
     local current_ver existing_java java_home candidate_java
-    if ! cmd_exists java; then
-        err "java não encontrado no PATH."
-        return 1
-    fi
-    current_ver="$(java -version 2>&1 | head -1)"
-    if [[ "$current_ver" =~ ^(openjdk|java)\ 25([.\s]|$) ]]; then
-        ok "JDK 25 encontrado: $current_ver"
-        export JAVA_HOME="$(dirname "$(dirname "$(readlink -f "$(command -v java)")")")"
-        return 0
+    if cmd_exists java; then
+        current_ver="$(java -version 2>&1 | head -1)"
+        if [[ "$current_ver" =~ ^(openjdk|java)\ 25([.\s]|$) ]]; then
+            ok "JDK 25 encontrado: $current_ver"
+            export JAVA_HOME="$(dirname "$(dirname "$(readlink -f "$(command -v java)")")")"
+            return 0
+        fi
+        section "${YELLOW}Java presente mas não é JDK 25 ($current_ver)${NC} — a instalar Eclipse Temurin 25..."
+    else
+        section "${YELLOW}JDK 25 ausente — a instalar Eclipse Temurin 25...${NC}"
     fi
 
-    section "${YELLOW}JDK 25 ausente ou incorreto ($current_ver)${NC} — instalando Eclipse Temurin 25..."
     may_sudo || return 1
 
     case "$PKG_MANAGER" in
