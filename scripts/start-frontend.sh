@@ -11,7 +11,9 @@
 #   ./scripts/start-frontend.sh --preview # serve o build de produção localmente
 #
 # Variáveis de ambiente opcionais:
-#   VITE_API_URL=http://localhost:8080  # URL da API (default: mesma origem)
+#   VITE_HOST=0.0.0.0                   # interface onde o Vite escuta (default: 0.0.0.0)
+#   VITE_PORT=5174                      # porta do Vite (default: 5174)
+#   VITE_API_TARGET=http://localhost:8080  # alvo do proxy /api (default: http://localhost:8080)
 
 set -euo pipefail
 
@@ -41,9 +43,11 @@ done
 case "$ACTION" in
     dev)
         echo "=== Frontend DEV (Vite) ==="
-        echo "Disponível em http://localhost:5173"
-        echo "Variáveis: VITE_API_URL=${VITE_API_URL:-não definida (mesma origem)}"
-        export VITE_API_URL="${VITE_API_URL:-}"
+        export VITE_HOST="${VITE_HOST:-0.0.0.0}"
+        export VITE_PORT="${VITE_PORT:-5174}"
+        export VITE_API_TARGET="${VITE_API_TARGET:-http://localhost:8080}"
+        echo "Disponível em http://${VITE_HOST}:${VITE_PORT}"
+        echo "Proxy /api -> ${VITE_API_TARGET}"
         npm run dev
         ;;
     build)
